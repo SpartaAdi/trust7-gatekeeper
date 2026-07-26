@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+@theme {
+  --color-minfy-orange: #e85d26;
+  --color-minfy-navy: #0a2540;
+  --color-minfy-slate: #1a3a5c;
+}

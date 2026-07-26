@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Trust7 Gatekeeper — serverless AI governance agent.
+  Lambda + API Gateway HTTP API + S3 + DynamoDB (on-demand).
+  No VPC, no NAT Gateway, no EC2, no RDS, nothing always-on.
+
+Parameters:
+  ProjectTag:
+    Type: String
+    Default: trust7gatekeeper
+    Description: Value applied to the `project` tag on every resource.
+  AnthropicApiKeySecretArn:
+    Type: String
+    Default: ''
+    Description: >
+      Optional ARN of a Secrets Manager secret holding the Anthropic API key.
+      Leave empty to supply ANTHROPIC_API_KEY another way; never commit the key.
+  CorsAllowOrigins:
+    Type: String
+    Default: http://localhost:5173
+    Description: Comma-separated list of origins allowed to call the API.
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures:
+      - arm64
+    Timeout: 60
+    MemorySize: 1024
+    Tags:
+      project: !Ref ProjectTag
+
+Resources:
+  UploadsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: project
+          Value: !Ref ProjectTag
+
+  ReviewsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-reviews'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: review_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: review_id
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: project
+          Value: !Ref ProjectTag
+
+  ReviewStatusTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-review-status'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: review_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: review_id
+          KeyType: HASH
+      # Per-stage progress records are transient; expire them to keep the
+      # table (and its cost) near zero between reviews.
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+      Tags:
+        - Key: project
+          Value: !Ref ProjectTag
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: '$default'
+      CorsConfiguration:
+        AllowOrigins: !Split [',', !Ref CorsAllowOrigins]
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - '*'
+      Tags:
+        project: !Ref ProjectTag
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: main.handler
+      Environment:
+        Variables:
+          UPLOADS_BUCKET: !Ref UploadsBucket
+          REVIEWS_TABLE: !Ref ReviewsTable
+          REVIEW_STATUS_TABLE: !Ref ReviewStatusTable
+          ANTHROPIC_API_KEY_SECRET_ARN: !Ref AnthropicApiKeySecretArn
+          CORS_ALLOW_ORIGINS: !Ref CorsAllowOrigins
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref UploadsBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReviewsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReviewStatusTable
+      Events:
+        ApiRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /{proxy+}
+            Method: ANY
+        ApiRootRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /
+            Method: ANY
+
+  ApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ApiFunction}'
+      RetentionInDays: 30
+      Tags:
+        - Key: project
+          Value: !Ref ProjectTag
+
+Outputs:
+  ApiUrl:
+    Description: Base URL of the HTTP API.
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+  UploadsBucketName:
+    Description: S3 bucket for uploaded documents and diagrams.
+    Value: !Ref UploadsBucket
+  ReviewsTableName:
+    Description: DynamoDB table holding completed reviews.
+    Value: !Ref ReviewsTable
+  ReviewStatusTableName:
+    Description: DynamoDB table holding per-stage progress for polling.
+    Value: !Ref ReviewStatusTable
