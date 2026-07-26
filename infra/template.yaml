@@ -107,6 +107,23 @@ Resources:
       Tags:
         project: !Ref ProjectTag
 
+  # rubric.json, shared by both functions and mounted at /opt/rubric.json.
+  # A layer keeps rubric/rubric.json the single source of truth: the function
+  # build directories cannot reach outside their own CodeUri.
+  RubricLayer:
+    Type: AWS::Serverless::LayerVersion
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      LayerName: !Sub '${AWS::StackName}-rubric'
+      Description: Trust7 Gatekeeper scoring rubric.
+      ContentUri: ../rubric/
+      CompatibleRuntimes:
+        - python3.13
+      CompatibleArchitectures:
+        - arm64
+      RetentionPolicy: Delete
+
   # Serves the HTTP API. Returns 202 on submission and hands the review to
   # WorkerFunction — an analysis run takes minutes, well past API Gateway's
   # 30-second request ceiling.
@@ -118,6 +135,8 @@ Resources:
       CodeUri: ../backend/
       Handler: main.handler
       Timeout: 29
+      Layers:
+        - !Ref RubricLayer
       Environment:
         Variables:
           UPLOADS_BUCKET: !Ref UploadsBucket
@@ -164,6 +183,8 @@ Resources:
       CodeUri: ../backend/
       Handler: worker.handler
       Timeout: 900
+      Layers:
+        - !Ref RubricLayer
       MemorySize: 2048
       Environment:
         Variables:

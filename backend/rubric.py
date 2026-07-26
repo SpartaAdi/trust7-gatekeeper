@@ -16,15 +16,18 @@ def _rubric_path() -> pathlib.Path:
     """Locate rubric.json in both layouts.
 
     Local dev runs from the repo, where the rubric lives at `rubric/rubric.json`.
-    The Lambda build (see backend/Makefile) copies it to the package root, since
-    the deployment artifact is flattened and has no parent directory.
+    On Lambda it arrives as a layer and is mounted at `/opt/rubric.json`.
     """
     override = os.environ.get("RUBRIC_PATH")
     if override:
         return pathlib.Path(override)
 
     here = pathlib.Path(__file__).resolve().parent
-    for candidate in (here / "rubric.json", here.parent / "rubric" / "rubric.json"):
+    for candidate in (
+        pathlib.Path("/opt/rubric.json"),
+        here / "rubric.json",
+        here.parent / "rubric" / "rubric.json",
+    ):
         if candidate.exists():
             return candidate
     raise FileNotFoundError("rubric.json not found; set RUBRIC_PATH")
