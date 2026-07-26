@@ -1,7 +1,48 @@
 @import "tailwindcss";
 
 @theme {
+  /* Minfy palette */
   --color-minfy-orange: #e85d26;
   --color-minfy-navy: #0a2540;
   --color-minfy-slate: #1a3a5c;
+
+  /* Surfaces and hairlines. Depth comes from separators, not stacked cards. */
+  --color-surface: #ffffff;
+  --color-surface-sunken: #f7f6f4;
+  --color-hairline: #e2e0dc;
+  --color-ink: #0a2540;
+  --color-ink-muted: #5c6b7a;
+
+  /* Status. Muted on purpose — a findings list full of neon is unreadable. */
+  --color-sev-high: #b3261e;
+  --color-sev-medium: #a35b00;
+  --color-sev-low: #6b7280;
+  --color-verdict-pass: #1e6b45;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-synthesis-weight: none;
+  text-rendering: optimizeLegibility;
+}
+
+/* Tabular figures keep score columns from jittering as values change. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

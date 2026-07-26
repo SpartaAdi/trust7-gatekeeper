@@ -5,3 +5,5 @@ anthropic==0.75.0
 boto3==1.40.72
 python-multipart==0.0.20
 pypdf==6.1.1
+python-docx==1.2.0
+

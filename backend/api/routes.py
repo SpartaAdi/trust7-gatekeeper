@@ -16,7 +16,8 @@ router = APIRouter()
 
 _ALLOWED_SUFFIXES = frozenset(
     {
-        ".pdf", ".txt", ".md", ".markdown", ".rst", ".csv", ".json", ".yaml", ".yml",
+        ".pdf", ".docx", ".txt", ".md", ".markdown", ".rst", ".csv", ".json",
+        ".yaml", ".yml",
         ".drawio", ".xml",
         ".png", ".jpg", ".jpeg", ".gif", ".webp",
     }
@@ -81,9 +82,26 @@ class ReviewAccepted(BaseModel):
     result_url: str
 
 
+@router.post(
+    "/reviews/{review_id}/reanalyze", response_model=ReviewAccepted, status_code=202
+)
+def reanalyze(review_id: str, request: ReviewRequest) -> ReviewAccepted:
+    """Re-review a revised design against an earlier review.
+
+    The prior review comes from the path, so the caller can't accidentally submit
+    a re-review that compares against nothing. Any `previous_review_id` in the
+    body is ignored.
+    """
+    return _start_review(request.model_copy(update={"previous_review_id": review_id}))
+
+
 @router.post("/reviews", response_model=ReviewAccepted, status_code=202)
 def create_review(request: ReviewRequest) -> ReviewAccepted:
     """Accept a design for review and start the pipeline asynchronously."""
+    return _start_review(request)
+
+
+def _start_review(request: ReviewRequest) -> ReviewAccepted:
     if not request.document_key and not request.diagram_key:
         raise HTTPException(
             status_code=400,

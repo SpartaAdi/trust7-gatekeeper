@@ -59,14 +59,25 @@ rubric/           rubric.json — the framework-general scoring rubric
 infra/            AWS SAM template and deployment notes
 ```
 
-The backend pipeline is implemented; the frontend is still an empty shell.
+Backend pipeline and frontend flow are both implemented.
+
+```
+frontend/src/
+  App.tsx              single-page flow: Upload -> Analyzing -> Results
+  api.ts               the only module that calls the API
+  types.ts             mirrors backend/schema.py — the wire shapes
+  maturity.ts          score -> Aware/Managed/Governed/Certified/Pioneering
+  components/          StepTracker, FilePicker
+  views/               UploadView, AnalyzingView, ResultsView
+```
 
 ## API
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `POST` | `/uploads` | Returns a presigned S3 URL; the browser `PUT`s the file directly, so uploads aren't capped by Lambda's 6 MB payload limit. |
-| `POST` | `/reviews` | Submits `document_key` / `diagram_key` (and optional `previous_review_id` for a re-review). Returns `202` with a `review_id`. |
+| `POST` | `/reviews` | Submits `document_key` / `diagram_key`. Returns `202` with a `review_id`. |
+| `POST` | `/reviews/{id}/reanalyze` | Same, but scored against review `{id}` and returned with a score delta. |
 | `GET` | `/reviews/{id}/status` | Per-stage progress, written by the pipeline as each stage runs. This is what the UI polls. |
 | `GET` | `/reviews/{id}` | The finished review as structured JSON — scores, findings, remediation, and the score delta if this was a re-review. |
 | `GET` | `/health` | Liveness probe. |
@@ -116,7 +127,12 @@ npm install
 npm run dev
 ```
 
-Serves on http://localhost:5173, which is the default allowed CORS origin.
+Serves on http://localhost:5173, which is the default allowed CORS origin. Copy
+`frontend/.env.example` to `frontend/.env` and set `VITE_API_BASE_URL` to point
+at a deployed stack; it defaults to the local backend.
+
+`npm run build` typechecks before bundling, so a shape mismatch between
+`src/types.ts` and the API fails the build rather than rendering `undefined`.
 
 ### Infrastructure
 
