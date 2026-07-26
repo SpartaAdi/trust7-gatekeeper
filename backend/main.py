@@ -38,8 +38,8 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "trust7-gatekeeper"}
 
 
-# Routers are registered here as they land, e.g.:
-# from api import reviews
-# app.include_router(reviews.router)
+from api.routes import router as api_router  # noqa: E402 — after app/middleware setup
+
+app.include_router(api_router)
 
 handler = Mangum(app)

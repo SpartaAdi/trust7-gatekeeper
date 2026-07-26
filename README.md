@@ -59,7 +59,39 @@ rubric/           rubric.json — the framework-general scoring rubric
 infra/            AWS SAM template and deployment notes
 ```
 
-Only structure and config exist so far; the business logic is not implemented.
+The backend pipeline is implemented; the frontend is still an empty shell.
+
+## API
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/uploads` | Returns a presigned S3 URL; the browser `PUT`s the file directly, so uploads aren't capped by Lambda's 6 MB payload limit. |
+| `POST` | `/reviews` | Submits `document_key` / `diagram_key` (and optional `previous_review_id` for a re-review). Returns `202` with a `review_id`. |
+| `GET` | `/reviews/{id}/status` | Per-stage progress, written by the pipeline as each stage runs. This is what the UI polls. |
+| `GET` | `/reviews/{id}` | The finished review as structured JSON — scores, findings, remediation, and the score delta if this was a re-review. |
+| `GET` | `/health` | Liveness probe. |
+
+The review runs in a second Lambda invoked asynchronously: a full analysis takes
+minutes, well past API Gateway's 30-second request ceiling.
+
+Two cost controls are built into the model calls. The rubric is byte-identical on
+every review and sits behind a prompt-cache breakpoint, so repeat reviews read it
+from cache rather than paying for it again. And effort is set per stage — the
+evaluation stage decides the score and gets `high`, while classification and
+remediation run at `medium`.
+
+## Tests
+
+```bash
+cd backend
+python -m pytest tests -q
+```
+
+The deterministic parts — draw.io parsing, scoring, and delta computation — are
+covered without any model call. `not_applicable` checks are excluded from the
+score rather than counted as failures, so an irrelevant check neither helps nor
+hurts; the tests pin that behaviour along with severity weighting and both
+directions of the score delta.
 
 ## Setup
 

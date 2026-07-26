@@ -21,6 +21,11 @@ Parameters:
     Default: http://localhost:5173
     Description: Comma-separated list of origins allowed to call the API.
 
+Conditions:
+  # Lets the stack deploy without a secret configured yet; the functions then
+  # fall back to an ANTHROPIC_API_KEY environment variable.
+  HasApiKeySecret: !Not [!Equals [!Ref AnthropicApiKeySecretArn, '']]
+
 Globals:
   Function:
     Runtime: python3.13
@@ -102,16 +107,23 @@ Resources:
       Tags:
         project: !Ref ProjectTag
 
+  # Serves the HTTP API. Returns 202 on submission and hands the review to
+  # WorkerFunction — an analysis run takes minutes, well past API Gateway's
+  # 30-second request ceiling.
   ApiFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       CodeUri: ../backend/
       Handler: main.handler
+      Timeout: 29
       Environment:
         Variables:
           UPLOADS_BUCKET: !Ref UploadsBucket
           REVIEWS_TABLE: !Ref ReviewsTable
           REVIEW_STATUS_TABLE: !Ref ReviewStatusTable
+          WORKER_FUNCTION_NAME: !Ref WorkerFunction
           ANTHROPIC_API_KEY_SECRET_ARN: !Ref AnthropicApiKeySecretArn
           CORS_ALLOW_ORIGINS: !Ref CorsAllowOrigins
       Policies:
@@ -121,6 +133,13 @@ Resources:
             TableName: !Ref ReviewsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewStatusTable
+        - LambdaInvokePolicy:
+            FunctionName: !Ref WorkerFunction
+        - !If
+          - HasApiKeySecret
+          - AWSSecretsManagerGetSecretValuePolicy:
+              SecretArn: !Ref AnthropicApiKeySecretArn
+          - !Ref AWS::NoValue
       Events:
         ApiRoute:
           Type: HttpApi
@@ -135,10 +154,49 @@ Resources:
             Path: /
             Method: ANY
 
+  # Runs the multi-stage agent pipeline. Invoked asynchronously; writes per-stage
+  # progress to ReviewStatusTable as it goes.
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ../backend/
+      Handler: worker.handler
+      Timeout: 900
+      MemorySize: 2048
+      Environment:
+        Variables:
+          UPLOADS_BUCKET: !Ref UploadsBucket
+          REVIEWS_TABLE: !Ref ReviewsTable
+          REVIEW_STATUS_TABLE: !Ref ReviewStatusTable
+          ANTHROPIC_API_KEY_SECRET_ARN: !Ref AnthropicApiKeySecretArn
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref UploadsBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReviewsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReviewStatusTable
+        - !If
+          - HasApiKeySecret
+          - AWSSecretsManagerGetSecretValuePolicy:
+              SecretArn: !Ref AnthropicApiKeySecretArn
+          - !Ref AWS::NoValue
+
   ApiFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/aws/lambda/${ApiFunction}'
+      RetentionInDays: 30
+      Tags:
+        - Key: project
+          Value: !Ref ProjectTag
+
+  WorkerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${WorkerFunction}'
       RetentionInDays: 30
       Tags:
         - Key: project
