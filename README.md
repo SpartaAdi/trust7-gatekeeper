@@ -68,7 +68,7 @@ backend/
   maturity.py     score -> band; mirrors frontend/src/maturity.ts
   ingestion/      document, draw.io, and vision parsing; normalization
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          89 tests
+  tests/          117 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -209,12 +209,20 @@ points there.
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 89 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 117 tests
 cd frontend && npm test                                                          # 26 tests
 ```
 
 `requirements.txt` is runtime-only, so Render's build installs no test tooling;
 `requirements-dev.txt` includes it and pulls the runtime set in.
+
+`tests/test_pipeline_e2e.py` is the widest of these and runs in the default
+invocation above — no marker, no separate command, so it cannot be skipped by
+accident. It drives the real routes, the real pipeline, real background
+execution, and real filesystem persistence, stubbing only `llm.complete_json`.
+It is the only coverage `api/routes.py`, `agent/pipeline.py`, and
+`ingestion/normalize.py` have, so treat a failure there as a broken app rather
+than a broken test.
 
 Both suites above stub the model, so neither spends tokens or proves the live API
 accepts our request shape. That last check is a separate, explicit script:
