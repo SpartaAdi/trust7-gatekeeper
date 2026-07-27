@@ -5,6 +5,16 @@ from __future__ import annotations
 import os
 import pathlib
 
+from dotenv import load_dotenv
+
+# Load `backend/.env` then the repo-root `.env`, before anything below reads the
+# environment. Neither overrides a variable already set, so a real environment
+# variable (how Render supplies the key) always wins over a stray local file.
+_HERE = pathlib.Path(__file__).resolve().parent
+for _env_file in (_HERE / ".env", _HERE.parent / ".env"):
+    if _env_file.is_file():
+        load_dotenv(_env_file)
+
 # Claude API direct — not Bedrock. Pay-per-token, no provisioned throughput.
 MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5")
 

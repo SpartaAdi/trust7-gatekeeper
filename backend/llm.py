@@ -23,7 +23,10 @@ log = logging.getLogger(__name__)
 # ones get less; see agent/stages.py for the per-stage choice.
 Effort = str
 
-_FALLBACK_BETA = "server-side-fallback-2026-07-01"
+# Structured outputs live on the beta endpoint in anthropic 0.75.0 — `output_config`
+# is not a parameter of the non-beta `messages.create` at all — and the server
+# gates it behind this flag. The SDK's own `parse()` helper appends the same one.
+_STRUCTURED_OUTPUTS_BETA = "structured-outputs-2025-11-13"
 
 
 class ModelRefusal(RuntimeError):
@@ -75,7 +78,7 @@ def complete_json(
         },
     }
 
-    message = _call_with_fallback(request)
+    message = _create_with_retry(request)
 
     if message.stop_reason == "refusal":
         detail = getattr(message.stop_details, "explanation", "") or ""
@@ -89,23 +92,62 @@ def complete_json(
     return json.loads(_text_of(message)), _usage_of(message)
 
 
-def _call_with_fallback(request: dict[str, Any]) -> Any:
-    """Send the request with a server-side refusal fallback, degrading if unavailable.
+def _create(request: dict[str, Any]) -> Any:
+    """The single point where this codebase calls the Anthropic SDK."""
+    return _client().beta.messages.create(
+        **request, betas=[_STRUCTURED_OUTPUTS_BETA]
+    )
 
-    A benign governance review can trip a safety classifier when the design under
-    review is itself security tooling, so the fallback is worth having. It sits
-    behind a beta flag, so a rejection of the flag falls back to a plain call
-    rather than failing the review.
+
+def _create_with_retry(request: dict[str, Any]) -> Any:
+    """Send the request, retrying once on failure.
+
+    Two distinct failure modes, each with the retry that actually helps:
+
+    `BadRequestError` usually means the server rejected a parameter this SDK or
+    account cannot use. Repeating the same call would fail identically, so the
+    retry drops the optional tuning parameters and keeps only what the caller
+    depends on — the JSON schema, without which the response would not parse.
+
+    `APIStatusError` covers overload and server faults that outlived the SDK's
+    own retries (it retries 429/5xx twice by default), so here one plain repeat
+    is the whole strategy — but only for statuses that can actually change on a
+    retry. Repeating a 401 or a 404 just doubles the latency before the same
+    failure.
     """
     try:
-        return _client().beta.messages.create(
-            **request, betas=[_FALLBACK_BETA], fallbacks="default"
-        )
+        return _create(request)
     except anthropic.BadRequestError as exc:
-        if "fallback" not in str(exc).lower():
+        simplified = _without_tuning(request)
+        if simplified is None:
             raise
-        log.warning("Server-side fallbacks unavailable, retrying without: %s", exc)
-        return _client().messages.create(**request)
+        log.warning("Request rejected (%s); retrying without tuning parameters.", exc)
+        return _create(simplified)
+    except anthropic.APIStatusError as exc:
+        if not _is_transient(exc.status_code):
+            raise
+        log.warning("Transient API error %s; retrying once.", exc.status_code)
+        return _create(request)
+
+
+def _is_transient(status_code: int) -> bool:
+    """Statuses where the identical request might succeed on a second attempt."""
+    return status_code >= 500 or status_code in (408, 409, 429)
+
+
+def _without_tuning(request: dict[str, Any]) -> dict[str, Any] | None:
+    """Strip optional parameters, keeping the output schema. None if nothing to strip.
+
+    `output_config.format` stays: the caller parses the response as JSON, so
+    dropping the schema would turn a clear API error into a JSON decode failure.
+    """
+    simplified = {k: v for k, v in request.items() if k != "thinking"}
+    output_config = simplified.get("output_config")
+    if isinstance(output_config, dict) and "effort" in output_config:
+        simplified["output_config"] = {
+            k: v for k, v in output_config.items() if k != "effort"
+        }
+    return simplified if simplified != request else None
 
 
 def image_block(media_type: str, data_b64: str) -> dict[str, Any]:
