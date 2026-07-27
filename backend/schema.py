@@ -168,6 +168,10 @@ class ReviewResult(BaseModel):
     findings: list[Finding] = Field(default_factory=list)
     components: list[Component] = Field(default_factory=list)
     summary: str = ""
+    executive_summary: str = Field(
+        default="",
+        description="Deploy-readiness summary written by the remediate stage.",
+    )
     delta: ScoreDelta | None = None
     token_usage: dict[str, int] = Field(default_factory=dict)
 

@@ -12,6 +12,7 @@ would eventually read a half-written file.
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
@@ -104,6 +105,54 @@ def get_review(review_id: str) -> ReviewResult | None:
     if not path.is_file():
         return None
     return ReviewResult.model_validate_json(path.read_text())
+
+
+def list_reviews() -> list[dict[str, object]]:
+    """Summaries for the history view, newest first.
+
+    Reads each stored review but returns only what the list renders — findings
+    and evidence are the bulk of a review record and the history page shows
+    none of it.
+    """
+    summaries: list[dict[str, object]] = []
+    for path in _dir(_REVIEWS).glob("*.json"):
+        try:
+            record = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            # A truncated file from an interrupted write should not break the
+            # whole history page.
+            continue
+        findings = record.get("findings", [])
+        summaries.append(
+            {
+                "review_id": record.get("review_id", path.stem),
+                "title": record.get("title", ""),
+                "created_at": record.get("created_at", ""),
+                "overall_score": record.get("overall_score", 0.0),
+                "open_findings": sum(
+                    1 for f in findings if f.get("status") in ("fail", "partial")
+                ),
+                "high_severity_open": sum(
+                    1
+                    for f in findings
+                    if f.get("severity") == "high"
+                    and f.get("status") in ("fail", "partial")
+                ),
+                "has_delta": record.get("delta") is not None,
+                "pillars": [
+                    {
+                        "framework": pillar.get("framework", ""),
+                        "pillar_id": pillar.get("pillar_id", ""),
+                        "pillar_name": pillar.get("pillar_name", ""),
+                        "score": pillar.get("score", 0.0),
+                        "checks_evaluated": pillar.get("checks_evaluated", 0),
+                    }
+                    for framework in record.get("frameworks", [])
+                    for pillar in framework.get("pillars", [])
+                ],
+            }
+        )
+    return sorted(summaries, key=lambda item: str(item["created_at"]), reverse=True)
 
 
 # --------------------------------------------------------------------------- #

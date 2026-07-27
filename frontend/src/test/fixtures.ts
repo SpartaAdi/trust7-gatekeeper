@@ -39,6 +39,10 @@ export function resultFixture(overrides: Partial<ReviewResult> = {}): ReviewResu
     title: 'Payments platform',
     overall_score: 62.5,
     summary: 'Solid foundations, with gaps in data residency and audit logging.',
+    executive_summary:
+      'This design scores 62.5 of 100, a Governed posture. Security is the ' +
+      'weakest pillar at 55. One high-severity finding should be closed before ' +
+      'deployment.',
     components: [],
     token_usage: { input_tokens: 1000, output_tokens: 500 },
     delta: null,

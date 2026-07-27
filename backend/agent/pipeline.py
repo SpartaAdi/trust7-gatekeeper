@@ -146,18 +146,23 @@ def run(
             finding.priority = ranks.get(finding.check_id, 0)
         progress.finish("prioritize", f"{len(ranks)} findings ranked")
 
-        # ---- remediate ------------------------------------------------------ #
+        # ---- score, then remediate ------------------------------------------ #
+        # Scoring only needs the findings, so it runs before remediation: the
+        # executive summary quotes these figures rather than recounting them.
+        overall, framework_scores = scoring.score(findings)
+
         stage = "remediate"
-        progress.start("remediate", "Generating remediation")
-        remediations, efforts, usage = stages.remediate(findings, classification)
+        progress.start("remediate", "Generating remediation and summary")
+        remediations, efforts, executive_summary, usage = stages.remediate(
+            findings, classification, scoring.scoreboard(overall, framework_scores, findings)
+        )
         usages.append(usage)
         for finding in findings:
             finding.remediation = remediations.get(finding.check_id, "")
             finding.remediation_effort = efforts.get(finding.check_id, "")  # type: ignore[assignment]
         progress.finish("remediate", f"{len(remediations)} remediations written")
 
-        # ---- score, delta, persist ------------------------------------------ #
-        overall, framework_scores = scoring.score(findings)
+        # ---- delta and persist ----------------------------------------------- #
         findings.sort(key=lambda f: (f.priority == 0, f.priority))
 
         result = ReviewResult(
@@ -169,6 +174,7 @@ def run(
             findings=findings,
             components=components,
             summary=ranking_payload.get("summary", ""),
+            executive_summary=executive_summary,
             token_usage=_sum(usages),
         )
 

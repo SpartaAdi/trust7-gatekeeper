@@ -10,7 +10,12 @@ plus architecture diagrams — against two frameworks:
 
 The rubric stays general to both frameworks' principles; it is not tuned to any
 single example design or client. Revised designs can be re-reviewed, and the
-result shows a score delta against the prior review.
+result shows a score delta against the prior review. Past reviews are listed on
+the home page and reopen from stored data without re-analysis.
+
+The executive summary at the top of a result is written by the remediate stage
+rather than a fifth API call: that stage already holds the findings in context,
+and it is handed the computed scores so it interprets them instead of recounting.
 
 ## Architecture
 
@@ -35,7 +40,7 @@ result shows a score delta against the prior review.
                                           │
                                           ▼
                                    dashboard UI
-                        Step 1 Upload ─► Step 2 Analyzing ─► Step 3 Results
+       History (home) ─► Step 1 Upload ─► Step 2 Analyzing ─► Step 3 Results
 
    Per-stage progress: each stage writes to local-data/status/<id>.json;
    the UI polls it, so the progress bar reflects real stage state.
@@ -63,12 +68,13 @@ backend/
   agent/          the four pipeline stages, orchestration, injection guard
   tests/          30 tests
 frontend/
-  src/App.tsx     single-page flow: Upload -> Analyzing -> Results
+  src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
   src/types.ts    mirrors backend/schema.py — the wire shapes
   src/maturity.ts score -> Aware/Managed/Governed/Certified/Pioneering
-  src/components/ StepTracker, FilePicker, SeverityMark
-  src/views/      UploadView, AnalyzingView, ResultsView
+  src/fileKind.ts dropped-file classification (SoW / diagram / ask)
+  src/components/ StepTracker, DropZone, SeverityMark
+  src/views/      HistoryView, UploadView, AnalyzingView, ResultsView
 rubric/
   rubric.json     45 checks across 13 pillars
 render.yaml       backend service definition
@@ -83,6 +89,7 @@ frontend/vercel.json  SPA routing
 | `POST` | `/reviews` | Submits `document_key` / `diagram_key`. Returns `202` with a `review_id`. |
 | `POST` | `/reviews/{id}/reanalyze` | Same, but scored against review `{id}` and returned with a score delta. |
 | `GET` | `/reviews/{id}/status` | Per-stage progress, written by the pipeline as each stage runs. This is what the UI polls. |
+| `GET` | `/reviews` | Past reviews, newest first, with pillar scores for the history heatmap. |
 | `GET` | `/reviews/{id}` | The finished review as structured JSON. |
 | `GET` | `/health` | Liveness probe, and Render's health check path. |
 

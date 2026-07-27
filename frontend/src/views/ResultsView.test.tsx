@@ -15,7 +15,12 @@ describe('ResultsView', () => {
   it('renders the score, pillars, and findings', async () => {
     getReview.mockResolvedValue(resultFixture())
 
-    render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onStartOver={vi.fn()} />)
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
 
     expect(
       await screen.findByRole('heading', { name: /payments platform/i }),
@@ -55,7 +60,12 @@ describe('ResultsView', () => {
       }),
     )
 
-    render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onStartOver={vi.fn()} />)
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
 
     expect(
       await screen.findByRole('heading', { name: /change since the previous review/i }),
@@ -66,7 +76,12 @@ describe('ResultsView', () => {
   it('shows an error instead of an empty page when the fetch fails', async () => {
     getReview.mockRejectedValue(new Error('boom'))
 
-    render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onStartOver={vi.fn()} />)
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       /could not load the review/i,

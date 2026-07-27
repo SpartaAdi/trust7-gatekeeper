@@ -9,6 +9,7 @@ import type {
   ReviewAccepted,
   ReviewResult,
   ReviewStatus,
+  ReviewSummary,
   UploadTicket,
 } from './types'
 
@@ -129,4 +130,9 @@ export function getStatus(reviewId: string): Promise<ReviewStatus> {
 
 export function getReview(reviewId: string): Promise<ReviewResult> {
   return request<ReviewResult>(`/reviews/${encodeURIComponent(reviewId)}`)
+}
+
+/** Past reviews, newest first. Read from stored data; no re-analysis. */
+export function listReviews(): Promise<ReviewSummary[]> {
+  return request<ReviewSummary[]>('/reviews')
 }

@@ -137,3 +137,48 @@ def test_delta_is_zero_for_an_unchanged_design() -> None:
     assert delta.new_checks == []
     assert len(delta.unchanged_failures) == 45
     assert all(p.change == 0.0 for p in delta.pillars)
+
+
+# --------------------------------------------------------------------------- #
+# Executive-summary scoreboard
+# --------------------------------------------------------------------------- #
+
+
+def test_scoreboard_reports_strongest_and_weakest_evaluated_pillars() -> None:
+    findings = _all("pass")
+    pillar = rubric.load()[0].pillars[0]
+    for finding in findings:
+        if finding.pillar_id == pillar.pillar_id:
+            finding.status = "fail"
+
+    overall, frameworks = scoring.score(findings)
+    board = scoring.scoreboard(overall, frameworks, findings)
+
+    assert f"Weakest pillar: {pillar.name} (0.0)" in board
+    assert "Strongest pillar:" in board
+    assert "High-severity findings still open:" in board
+
+
+def test_scoreboard_ignores_unevaluated_pillars_when_picking_weakest() -> None:
+    """An unevaluated pillar scores 0.0 and would otherwise always be 'weakest'."""
+    skipped = rubric.load()[0].pillars[0]
+    findings = [
+        _finding(c.check_id, "not_applicable" if c.pillar_id == skipped.pillar_id else "pass")
+        for c in rubric.all_checks()
+    ]
+
+    overall, frameworks = scoring.score(findings)
+    board = scoring.scoreboard(overall, frameworks, findings)
+
+    assert skipped.name not in board
+
+
+def test_scoreboard_counts_only_open_high_severity_findings() -> None:
+    findings = _all("pass")
+    high = next(f for f in findings if f.severity == "high")
+    high.status = "fail"
+
+    overall, frameworks = scoring.score(findings)
+    assert "High-severity findings still open: 1" in scoring.scoreboard(
+        overall, frameworks, findings
+    )

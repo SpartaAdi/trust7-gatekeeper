@@ -70,6 +70,26 @@ export interface ScoreDelta {
   unchanged_failures: string[]
 }
 
+export interface PillarSummary {
+  framework: string
+  pillar_id: string
+  pillar_name: string
+  score: number
+  checks_evaluated: number
+}
+
+/** One row of the history list. Deliberately lighter than a full ReviewResult. */
+export interface ReviewSummary {
+  review_id: string
+  title: string
+  created_at: string
+  overall_score: number
+  open_findings: number
+  high_severity_open: number
+  has_delta: boolean
+  pillars: PillarSummary[]
+}
+
 export interface ReviewResult {
   review_id: string
   created_at: string
@@ -79,6 +99,7 @@ export interface ReviewResult {
   findings: Finding[]
   components: Component[]
   summary: string
+  executive_summary: string
   delta: ScoreDelta | null
   token_usage: Record<string, number>
 }

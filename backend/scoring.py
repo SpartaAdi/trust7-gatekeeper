@@ -74,6 +74,34 @@ def score(findings: list[Finding]) -> tuple[float, list[FrameworkScore]]:
     return overall, framework_scores
 
 
+def scoreboard(overall: float, frameworks: list[FrameworkScore], findings: list[Finding]) -> str:
+    """The figures the executive summary must quote, computed here not by the model.
+
+    Strongest and weakest are drawn only from pillars that were actually
+    evaluated — an unevaluated pillar scores 0.0 and would otherwise always win
+    "weakest" while meaning nothing.
+    """
+    scored = [p for f in frameworks for p in f.pillars if p.checks_evaluated]
+    high_open = [
+        f for f in findings if f.severity == "high" and f.status in ("fail", "partial")
+    ]
+
+    lines = [f"- Overall score: {overall:.1f} of 100"]
+    for framework in frameworks:
+        lines.append(f"- {framework.framework_name}: {framework.score:.1f}")
+    if scored:
+        strongest = max(scored, key=lambda p: p.score)
+        weakest = min(scored, key=lambda p: p.score)
+        lines.append(f"- Strongest pillar: {strongest.pillar_name} ({strongest.score:.1f})")
+        lines.append(f"- Weakest pillar: {weakest.pillar_name} ({weakest.score:.1f})")
+    lines.append(f"- High-severity findings still open: {len(high_open)}")
+    lines.append(
+        f"- Total open findings: "
+        f"{sum(1 for f in findings if f.status in ('fail', 'partial'))}"
+    )
+    return "\n".join(lines)
+
+
 def delta(previous: ReviewResult, current: ReviewResult) -> ScoreDelta:
     """Compare a revised design's review against the prior one."""
     prev_pillars = {

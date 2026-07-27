@@ -465,11 +465,23 @@ Where a change has a material cost or operational tradeoff, say so in one clause
 change), medium (a component or flow change), high (a structural change to the \
 architecture).
 
+You also write the `executive_summary`: three or four sentences for someone \
+deciding whether this design is ready to deploy. State the overall score and \
+what it means, name the strongest and weakest pillar, and say how many \
+high-severity findings must be closed first. Write it as prose for a reader who \
+will not scroll further — no bullet points, no headings, no restating the \
+numbers you were given without interpreting them. The counts and scores are \
+supplied below; use them exactly rather than recomputing.
+
 {guard}""".format(guard=untrusted.GUARD)
 
 _REMEDIATE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
+        "executive_summary": {
+            "type": "string",
+            "description": "Three or four sentences for a deploy/no-deploy decision.",
+        },
         "remediations": {
             "type": "array",
             "items": {
@@ -484,18 +496,29 @@ _REMEDIATE_SCHEMA: dict[str, Any] = {
             },
         }
     },
-    "required": ["remediations"],
+    "required": ["executive_summary", "remediations"],
     "additionalProperties": False,
 }
 
 
 def remediate(
-    findings: list[Finding], classification: dict[str, Any]
-) -> tuple[dict[str, str], dict[str, str], dict[str, int]]:
-    """Generate remediation guidance for the non-passing findings."""
+    findings: list[Finding],
+    classification: dict[str, Any],
+    scoreboard: str = "",
+) -> tuple[dict[str, str], dict[str, str], str, dict[str, int]]:
+    """Generate remediation guidance and the executive summary.
+
+    The summary rides along with this stage rather than costing a fifth API
+    call: by this point the model already has the findings and their severities
+    in context, and `scoreboard` supplies the computed numbers so it interprets
+    them instead of recounting.
+    """
     open_findings = [f for f in findings if f.status in ("fail", "partial")]
     if not open_findings:
-        return {}, {}, {}
+        return {}, {}, (
+            "Every applicable check passed. No high-severity findings block "
+            "deployment."
+        ), {}
 
     payload, usage = llm.complete_json(
         system=[
@@ -510,6 +533,8 @@ def remediate(
                 "type": "text",
                 "text": (
                     f"## Design\n{untrusted.wrap(_render_classification(classification))}\n\n"
+                    f"## Scoreboard (computed — use these figures verbatim)\n"
+                    f"{scoreboard}\n\n"
                     f"## Findings needing remediation\n"
                     f"{untrusted.wrap(_render_findings(open_findings))}"
                 ),
@@ -527,7 +552,7 @@ def remediate(
         if check_id:
             text[check_id] = item.get("remediation", "")
             effort[check_id] = item.get("effort", "")
-    return text, effort, usage
+    return text, effort, payload.get("executive_summary", ""), usage
 
 
 def _render_findings(findings: list[Finding]) -> str:

@@ -147,6 +147,31 @@ def _run_pipeline(**kwargs: str) -> None:
         log.exception("Review %s failed", kwargs.get("review_id"))
 
 
+class PillarSummary(BaseModel):
+    framework: str
+    pillar_id: str
+    pillar_name: str
+    score: float
+    checks_evaluated: int
+
+
+class ReviewSummary(BaseModel):
+    review_id: str
+    title: str
+    created_at: str
+    overall_score: float
+    open_findings: int
+    high_severity_open: int
+    has_delta: bool
+    pillars: list[PillarSummary]
+
+
+@router.get("/reviews", response_model=list[ReviewSummary])
+def list_reviews() -> list[ReviewSummary]:
+    """Past reviews, newest first. Backs the history landing page."""
+    return [ReviewSummary.model_validate(item) for item in storage.list_reviews()]
+
+
 @router.get("/reviews/{review_id}/status", response_model=ReviewStatus)
 def get_status(review_id: str) -> ReviewStatus:
     """Per-stage progress. The UI polls this while the pipeline runs."""

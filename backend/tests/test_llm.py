@@ -107,7 +107,7 @@ def _overloaded() -> anthropic.InternalServerError:
 
 
 FULL_REQUEST: dict[str, Any] = {
-    "model": "claude-opus-5",
+    "model": "claude-sonnet-5",
     "max_tokens": 16000,
     "messages": [],
     "thinking": {"type": "adaptive"},

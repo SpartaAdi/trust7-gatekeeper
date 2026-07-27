@@ -16,9 +16,15 @@ interface Props {
   reviewId: string
   onReReview: () => void
   onStartOver: () => void
+  onBackToHistory: () => void
 }
 
-export function ResultsView({ reviewId, onReReview, onStartOver }: Props) {
+export function ResultsView({
+  reviewId,
+  onReReview,
+  onStartOver,
+  onBackToHistory,
+}: Props) {
   const [result, setResult] = useState<ReviewResult | null>(null)
   const [error, setError] = useState('')
 
@@ -116,8 +122,17 @@ export function ResultsView({ reviewId, onReReview, onStartOver }: Props) {
 
       {result.delta && <DeltaSummary delta={result.delta} />}
 
+      {result.executive_summary && (
+        <section className="mt-12 border-l-2 border-minfy-navy bg-surface-sunken px-5 py-5">
+          <h3 className="t-eyebrow text-ink-muted">Executive summary</h3>
+          <p className="t-body mt-2.5 max-w-prose text-pretty text-[0.9375rem] leading-relaxed">
+            {result.executive_summary}
+          </p>
+        </section>
+      )}
+
       {result.summary && (
-        <section className="mt-12">
+        <section className="mt-10">
           <h3 className="t-eyebrow text-ink-muted">Assessment</h3>
           <p className="t-body mt-3 max-w-prose text-pretty">{result.summary}</p>
         </section>
@@ -148,6 +163,13 @@ export function ResultsView({ reviewId, onReReview, onStartOver }: Props) {
           className="t-caption text-ink-muted underline underline-offset-2 transition-colors hover:text-ink"
         >
           Review a different design
+        </button>
+        <button
+          type="button"
+          onClick={onBackToHistory}
+          className="t-caption text-ink-muted underline underline-offset-2 transition-colors hover:text-ink"
+        >
+          All reviews
         </button>
         {Object.keys(result.token_usage).length > 0 && (
           <p className="tnum t-caption ml-auto text-ink-faint">

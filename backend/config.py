@@ -16,7 +16,7 @@ for _env_file in (_HERE / ".env", _HERE.parent / ".env"):
         load_dotenv(_env_file)
 
 # Claude API direct — not Bedrock. Pay-per-token, no provisioned throughput.
-MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5")
+MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 
 # Everything persistent lives here: uploads, reviews, and progress records.
 DATA_DIR = pathlib.Path(os.environ.get("LOCAL_DATA_DIR", "./local-data")).resolve()
