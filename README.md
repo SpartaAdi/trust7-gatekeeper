@@ -94,15 +94,20 @@ remediation run at `medium`.
 ## Tests
 
 ```bash
-cd backend
-python -m pytest tests -q
+cd backend && python -m pytest tests -q     # 20 tests
+cd frontend && npm test                     # 12 tests
 ```
 
-The deterministic parts — draw.io parsing, scoring, and delta computation — are
-covered without any model call. `not_applicable` checks are excluded from the
-score rather than counted as failures, so an irrelevant check neither helps nor
-hurts; the tests pin that behaviour along with severity weighting and both
+Backend tests cover the deterministic parts — draw.io parsing, scoring, and delta
+computation — without any model call. `not_applicable` checks are excluded from
+the score rather than counted as failures, so an irrelevant check neither helps
+nor hurts; the tests pin that behaviour along with severity weighting and both
 directions of the score delta.
+
+Frontend tests are deliberately shallow: each view renders with mocked API
+responses and must not crash. They are a build-breakage alarm, not coverage. The
+test setup throws on any unmocked `fetch`, so a test that reaches the network
+fails rather than hanging.
 
 ## Setup
 
