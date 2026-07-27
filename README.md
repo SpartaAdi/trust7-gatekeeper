@@ -68,7 +68,7 @@ backend/
   maturity.py     score -> band; mirrors frontend/src/maturity.ts
   ingestion/      document, draw.io, and vision parsing; normalization
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          79 tests
+  tests/          89 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -162,6 +162,34 @@ trailing slash) and let it redeploy. Until this is done the browser blocks every
 request. There is no wildcard fallback — a wildcard would let any site call the
 API on a user's behalf.
 
+For this deployment that is:
+
+| Variable | Value |
+| --- | --- |
+| `CORS_ALLOWED_ORIGIN` | `https://trust7-gatekeeper.vercel.app` |
+
+**Where the origin comes from, highest precedence first.** Nothing is hardcoded
+at the middleware — `main.py` passes `config.CORS_ALLOWED_ORIGIN` straight
+through, and `config.py` resolves it as:
+
+1. the `CORS_ALLOWED_ORIGIN` **environment variable** — how Render supplies it,
+   and what wins in production;
+2. `CORS_ALLOWED_ORIGIN` in `backend/.env` or the repo-root `.env` —
+   `load_dotenv` is called *without* `override=True`, so a real environment
+   variable always beats a file;
+3. the development default `http://localhost:5173`.
+
+So if the dashboard variable and a local `.env` disagree, **the dashboard wins.**
+The effective origin and its source are logged at startup, and an unset variable
+logs a warning — otherwise a missing dashboard value shows up only as an opaque
+CORS error in someone's browser with nothing on the server to explain it.
+
+Two consequences of exact matching worth knowing: a trailing slash is stripped
+before use (a browser's `Origin` header never has one), and **Vercel preview
+deployments will be blocked**, because they get their own hostnames
+(`…-git-<branch>.vercel.app`) that are not this origin. Preview testing needs
+that preview origin set instead, or a second Render service.
+
 ### Free tier caveats
 
 **`local-data/` does not survive a restart on Render's free tier.** The disk is
@@ -181,7 +209,7 @@ points there.
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 79 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 89 tests
 cd frontend && npm test                                                          # 26 tests
 ```
 
