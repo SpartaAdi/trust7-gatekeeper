@@ -3,4 +3,5 @@
 -r requirements.txt
 
 pytest==9.1.1
-httpx==0.28.1   # FastAPI's TestClient transport
+httpx==0.28.1        # FastAPI's TestClient transport
+jsonschema==4.26.0   # scripts/real_api_e2e.py validates live responses

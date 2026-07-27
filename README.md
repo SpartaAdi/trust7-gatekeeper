@@ -185,6 +185,24 @@ cd frontend && npm test                                                         
 `requirements.txt` is runtime-only, so Render's build installs no test tooling;
 `requirements-dev.txt` includes it and pulls the runtime set in.
 
+Both suites above stub the model, so neither spends tokens or proves the live API
+accepts our request shape. That last check is a separate, explicit script:
+
+```bash
+cd backend && python scripts/real_api_e2e.py
+```
+
+It runs all six stages against the live API on a synthetic fixture — an invented
+expense portal, deliberately not any real engagement — and prints every request
+as sent, plus per-stage progress and token usage. It confirms four things: the
+calls complete, the model resolves to `claude-sonnet-5`, the
+`structured-outputs-2025-11-13` beta is accepted, and the responses validate
+against schemas with `additionalProperties: false` on every object node. It exits
+`2` without spending anything if no key is configured, and it treats a
+fallback retry as a failure rather than a pass, since a retry means the first
+request was rejected. The key is read from `backend/.env` or the environment and
+is never printed — only a length and a SHA-256 prefix.
+
 Backend tests cover the deterministic parts — draw.io parsing, scoring, delta
 computation, and prompt-injection defences — without any model call.
 `not_applicable` checks are excluded from the score rather than counted as
