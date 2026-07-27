@@ -66,7 +66,7 @@ backend/
   schema.py       Pydantic models — the common schema
   ingestion/      document, draw.io, and vision parsing; normalization
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          30 tests
+  tests/          41 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -178,9 +178,12 @@ points there.
 ## Tests
 
 ```bash
-cd backend && python -m pytest tests -q     # 30 tests
-cd frontend && npm test                     # 13 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 41 tests
+cd frontend && npm test                                                          # 23 tests
 ```
+
+`requirements.txt` is runtime-only, so Render's build installs no test tooling;
+`requirements-dev.txt` includes it and pulls the runtime set in.
 
 Backend tests cover the deterministic parts — draw.io parsing, scoring, delta
 computation, and prompt-injection defences — without any model call.
