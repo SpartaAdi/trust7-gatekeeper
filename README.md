@@ -64,9 +64,11 @@ backend/
   rubric.py       loads and flattens rubric.json
   scoring.py      pillar/framework scores and re-review deltas
   schema.py       Pydantic models — the common schema
+  report.py       PDF export (ReportLab)
+  maturity.py     score -> band; mirrors frontend/src/maturity.ts
   ingestion/      document, draw.io, and vision parsing; normalization
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          41 tests
+  tests/          79 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -91,6 +93,7 @@ frontend/vercel.json  SPA routing
 | `GET` | `/reviews/{id}/status` | Per-stage progress, written by the pipeline as each stage runs. This is what the UI polls. |
 | `GET` | `/reviews` | Past reviews, newest first, with pillar scores for the history heatmap. |
 | `GET` | `/reviews/{id}` | The finished review as structured JSON. |
+| `GET` | `/reviews/{id}/report.pdf` | The review as a formatted PDF, rendered on demand. |
 | `GET` | `/health` | Liveness probe, and Render's health check path. |
 
 Two cost controls are built into the model calls. The rubric is byte-identical on
@@ -178,8 +181,8 @@ points there.
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 41 tests
-cd frontend && npm test                                                          # 23 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 79 tests
+cd frontend && npm test                                                          # 26 tests
 ```
 
 `requirements.txt` is runtime-only, so Render's build installs no test tooling;
@@ -212,6 +215,42 @@ Frontend tests are deliberately shallow: each view renders with mocked API
 responses and must not crash, plus one interaction test covering the upload path.
 The test setup throws on any unmocked `fetch`, so a test that reaches the network
 fails rather than hanging.
+
+## PDF export
+
+The Results page has a **Download Report** button behind
+`GET /reviews/{id}/report.pdf`. The document is a Minfy-branded cover (navy
+`#0A2540`, one flat orange `#E85D26` band — no gradient), the executive summary,
+a scorecard covering all 13 pillars, findings grouped by severity with their
+remediation text, and an appendix holding the uploaded diagram.
+
+Pillar strength in the scorecard is encoded the same way as the history heatmap:
+depth of a single navy tone, never hue. `report.swatch_alpha` is the shared
+formula, and a test asserts the ramp is strictly monotonic in luminance — so the
+scorecard survives greyscale printing and reads correctly with any colour vision
+deficiency. A dashed cell means *not evaluated*, which is visually distinct from
+a scored zero rather than merely a lighter shade of it.
+
+**ReportLab, not WeasyPrint.** WeasyPrint renders fine in this container, so this
+isn't a claim that it's broken — the reasons are narrower. It declares eight
+runtime dependencies against ReportLab's two, and reaches libpango/libgobject
+through cffi at render time; those shared libraries are not guaranteed on
+Render's native Python runtime, where `apt-get` isn't available during a
+free-tier build. ReportLab's failure mode would be a pip error at build time,
+WeasyPrint's an ImportError the first time a user clicks Download in production.
+It also consumes HTML, and no templating engine is installed — so it would mean
+adding jinja2 too.
+
+One consequence worth stating: every string in the report is model-generated
+from attacker-controlled uploads, and ReportLab's `Paragraph` parses a markup
+dialect. All of it goes through `report._t()`, which XML-escapes. A test injects
+`<font color="purple">` into a finding title and asserts both that the tag
+renders literally and that no purple fill reaches the page.
+
+The report is rendered per request rather than cached: generation is well under a
+second, and storing a second artefact would add an invalidation problem for no
+gain. If the uploaded diagram has been reclaimed from Render's ephemeral disk,
+the appendix says so and the rest of the report is still produced.
 
 ## Prompt-injection posture
 

@@ -175,6 +175,7 @@ def run(
             components=components,
             summary=ranking_payload.get("summary", ""),
             executive_summary=executive_summary,
+            diagram_key=diagram_key,
             token_usage=_sum(usages),
         )
 

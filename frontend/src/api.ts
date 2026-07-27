@@ -136,3 +136,54 @@ export function getReview(reviewId: string): Promise<ReviewResult> {
 export function listReviews(): Promise<ReviewSummary[]> {
   return request<ReviewSummary[]>('/reviews')
 }
+
+export interface ReportDownload {
+  blob: Blob
+  filename: string
+}
+
+/**
+ * Fetch the PDF report as a blob.
+ *
+ * Deliberately not a plain `<a href>`: a link cannot report a failure, and a
+ * dead download button that does nothing is exactly the silent failure this
+ * module exists to prevent. The cost is buffering the file in memory, which is
+ * fine for a report measured in tens of kilobytes.
+ */
+export async function downloadReport(reviewId: string): Promise<ReportDownload> {
+  const path = `/reviews/${encodeURIComponent(reviewId)}/report.pdf`
+
+  let response: Response
+  try {
+    response = await fetch(`${BASE_URL}${path}`)
+  } catch {
+    throw new ApiError(
+      `Cannot reach the API at ${BASE_URL}. Is the backend running?`,
+      0,
+    )
+  }
+
+  if (!response.ok) {
+    let message = `Could not generate the report (${response.status}).`
+    try {
+      const body: unknown = await response.json()
+      if (typeof body === 'object' && body !== null && 'detail' in body) {
+        message = detailToMessage((body as { detail: unknown }).detail, message)
+      }
+    } catch {
+      // A non-JSON error body; the status line is the best available message.
+    }
+    throw new ApiError(message, response.status)
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: filenameFromDisposition(response.headers.get('Content-Disposition')),
+  }
+}
+
+/** Read the server's chosen filename, falling back to a sane default. */
+function filenameFromDisposition(header: string | null): string {
+  const match = header?.match(/filename="([^"]+)"/)
+  return match?.[1] ?? 'trust7-review.pdf'
+}

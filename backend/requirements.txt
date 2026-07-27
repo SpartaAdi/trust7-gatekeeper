@@ -6,3 +6,4 @@ python-multipart==0.0.20
 python-dotenv==1.2.1
 pypdf==6.1.1
 python-docx==1.2.0
+reportlab==5.0.0     # PDF export; pulls pillow in for diagram embedding

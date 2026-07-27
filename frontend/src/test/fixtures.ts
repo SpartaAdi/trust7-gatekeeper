@@ -44,6 +44,7 @@ export function resultFixture(overrides: Partial<ReviewResult> = {}): ReviewResu
       'weakest pillar at 55. One high-severity finding should be closed before ' +
       'deployment.',
     components: [],
+    diagram_key: 'uploads/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/design.drawio',
     token_usage: { input_tokens: 1000, output_tokens: 500 },
     delta: null,
     frameworks: [

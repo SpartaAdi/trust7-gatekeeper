@@ -6,10 +6,11 @@ import logging
 import pathlib
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 
 import config
+import report
 import storage
 from agent import pipeline
 from schema import ReviewResult, ReviewStatus
@@ -182,6 +183,43 @@ def get_status(review_id: str) -> ReviewStatus:
     if status is None:
         raise HTTPException(status_code=404, detail=f"No review {review_id!r}.")
     return status
+
+
+@router.get(
+    "/reviews/{review_id}/report.pdf",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+def get_report(review_id: str) -> Response:
+    """The review as a formatted PDF.
+
+    Rendered on demand rather than cached: a review is a few hundred kilobytes of
+    JSON and generation is well under a second, so storing a second artefact
+    would add an invalidation problem for no gain.
+    """
+    result = get_review(review_id)  # reuses the 404/409/400 handling above
+
+    diagram: tuple[str, bytes] | None = None
+    if result.diagram_key:
+        try:
+            diagram = (
+                pathlib.Path(result.diagram_key).name,
+                storage.get_object(result.diagram_key),
+            )
+        except (ValueError, OSError) as exc:
+            # The uploaded file is gone (Render's free-tier disk is ephemeral) or
+            # the key is unusable. The report is still worth producing without it.
+            log.warning("Diagram %r unavailable for %s: %s", result.diagram_key, review_id, exc)
+
+    pdf = report.build_pdf(result, diagram)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{report.filename_for(result)}"',
+            "Content-Length": str(len(pdf)),
+        },
+    )
 
 
 @router.get("/reviews/{review_id}", response_model=ReviewResult)

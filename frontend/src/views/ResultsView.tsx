@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { ApiError, getReview } from '../api'
+import { ApiError, downloadReport, getReview } from '../api'
 import { SeverityMark } from '../components/SeverityMark'
 import { maturityFor, scoreToneClass } from '../maturity'
 import type {
@@ -157,6 +157,7 @@ export function ResultsView({
         >
           Re-review a revised design
         </button>
+        <DownloadReportButton reviewId={result.review_id} />
         <button
           type="button"
           onClick={onStartOver}
@@ -186,6 +187,65 @@ export function ResultsView({
         )}
       </footer>
     </div>
+  )
+}
+
+/**
+ * Downloads the PDF report.
+ *
+ * The blob is turned into a temporary object URL and clicked through a
+ * synthetic anchor — the standard way to give a fetched file the server's
+ * filename. The URL is revoked immediately afterwards so the blob is not
+ * retained for the life of the page.
+ */
+function DownloadReportButton({ reviewId }: { reviewId: string }) {
+  const [state, setState] = useState<'idle' | 'working'>('idle')
+  const [error, setError] = useState('')
+
+  async function run() {
+    setState('working')
+    setError('')
+    try {
+      const { blob, filename } = await downloadReport(reviewId)
+      const url = URL.createObjectURL(blob)
+      try {
+        const anchor = document.createElement('a')
+        anchor.href = url
+        anchor.download = filename
+        document.body.appendChild(anchor)
+        anchor.click()
+        anchor.remove()
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    } catch (caught: unknown) {
+      setError(
+        caught instanceof ApiError ? caught.message : 'Could not download the report.',
+      )
+    } finally {
+      setState('idle')
+    }
+  }
+
+  return (
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <button
+        type="button"
+        onClick={run}
+        disabled={state === 'working'}
+        className="t-body flex items-center gap-2 border border-minfy-navy px-4 py-2.5 font-semibold text-minfy-navy transition-colors duration-150 hover:bg-minfy-navy hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true" className="size-3.5 fill-current">
+          <path d="M7.25 1.5h1.5v7.19l2.22-2.22 1.06 1.06L8 12.06 3.97 7.53l1.06-1.06 2.22 2.22V1.5Z M2.5 12.5h11V14h-11Z" />
+        </svg>
+        {state === 'working' ? 'Preparing PDF…' : 'Download Report'}
+      </button>
+      {error && (
+        <span role="alert" className="t-caption text-sev-high">
+          {error}
+        </span>
+      )}
+    </span>
   )
 }
 

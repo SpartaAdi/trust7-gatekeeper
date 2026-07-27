@@ -100,6 +100,8 @@ export interface ReviewResult {
   components: Component[]
   summary: string
   executive_summary: string
+  /** Upload key of the diagram, used by the PDF appendix. '' on older reviews. */
+  diagram_key: string
   delta: ScoreDelta | null
   token_usage: Record<string, number>
 }

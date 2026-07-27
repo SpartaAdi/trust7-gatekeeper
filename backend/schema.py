@@ -172,6 +172,11 @@ class ReviewResult(BaseModel):
         default="",
         description="Deploy-readiness summary written by the remediate stage.",
     )
+    diagram_key: str = Field(
+        default="",
+        description="Upload key of the architecture diagram, retained so the PDF "
+        "export can embed it in its appendix. Empty for older reviews.",
+    )
     delta: ScoreDelta | None = None
     token_usage: dict[str, int] = Field(default_factory=dict)
 
