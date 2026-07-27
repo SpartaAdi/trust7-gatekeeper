@@ -72,54 +72,34 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T
 }
 
-/**
- * Content type for a file, used for BOTH the presign request and the PUT.
- *
- * The presigned URL is signed over the content type, so the two must match
- * exactly or S3 rejects the upload with a signature error. Browsers report an
- * empty type for `.drawio`, hence the extension fallback.
- */
-export function contentTypeFor(file: File): string {
-  if (file.type) return file.type
-  const extension = file.name.toLowerCase().split('.').pop() ?? ''
-  const byExtension: Record<string, string> = {
-    drawio: 'application/xml',
-    xml: 'application/xml',
-    md: 'text/markdown',
-    txt: 'text/plain',
-    json: 'application/json',
-    yaml: 'application/yaml',
-    yml: 'application/yaml',
-  }
-  return byExtension[extension] ?? 'application/octet-stream'
-}
-
-/** Presign, then PUT straight to S3. Returns the object key to submit. */
+/** Upload a file and return the key to reference it by. */
 export async function uploadFile(file: File): Promise<string> {
-  const contentType = contentTypeFor(file)
-
-  const ticket = await request<UploadTicket>('/uploads', {
-    method: 'POST',
-    body: JSON.stringify({ filename: file.name, content_type: contentType }),
-  })
+  const body = new FormData()
+  body.append('file', file)
 
   let response: Response
   try {
-    response = await fetch(ticket.upload_url, {
-      method: 'PUT',
-      headers: { 'Content-Type': contentType },
-      body: file,
-    })
+    // No Content-Type header: the browser sets it, including the multipart
+    // boundary, which cannot be written by hand.
+    response = await fetch(`${BASE_URL}/uploads`, { method: 'POST', body })
   } catch {
     throw new ApiError(`Upload of ${file.name} failed: the request never completed.`, 0)
   }
+
   if (!response.ok) {
-    throw new ApiError(
-      `Upload of ${file.name} was rejected by storage (${response.status}).`,
-      response.status,
-    )
+    let message = `Upload of ${file.name} failed (${response.status}).`
+    try {
+      const payload: unknown = await response.json()
+      if (typeof payload === 'object' && payload !== null && 'detail' in payload) {
+        message = detailToMessage((payload as { detail: unknown }).detail, message)
+      }
+    } catch {
+      // Non-JSON error body; the status line is the best message available.
+    }
+    throw new ApiError(message, response.status)
   }
 
+  const ticket = (await response.json()) as UploadTicket
   return ticket.key
 }
 

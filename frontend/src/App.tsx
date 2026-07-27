@@ -26,12 +26,16 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>({ name: 'upload' })
 
   return (
-    <div className="min-h-screen bg-surface text-ink">
+    <div className="flex min-h-screen flex-col bg-surface text-ink">
       <header className="border-b border-hairline">
-        <div className="mx-auto flex max-w-5xl items-baseline justify-between gap-4 px-6 py-5">
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight">Trust7 Gatekeeper</h1>
-            <p className="mt-0.5 text-sm text-ink-muted">
+        <div className="mx-auto flex max-w-5xl items-center gap-3 px-6 py-4">
+          <span
+            aria-hidden="true"
+            className="h-7 w-1 shrink-0 rounded-full bg-minfy-orange"
+          />
+          <div className="min-w-0">
+            <h1 className="t-heading truncate">Trust7 Gatekeeper</h1>
+            <p className="t-caption truncate text-ink-muted">
               Solution design review — AWS Well-Architected and Minfy TRUST-7
             </p>
           </div>
@@ -40,7 +44,11 @@ export default function App() {
 
       <StepTracker current={STEP_FOR[phase.name]} />
 
-      <main>
+      {/*
+        Keying on the phase remounts the view, so the enter animation replays on
+        every step change rather than only on first mount.
+      */}
+      <main key={phase.name} className="animate-enter flex-1">
         {phase.name === 'upload' && (
           <UploadView
             {...(phase.previousReviewId !== undefined && {

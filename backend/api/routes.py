@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 import pathlib
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 import config
 import storage
+from agent import pipeline
 from schema import ReviewResult, ReviewStatus
 
+log = logging.getLogger(__name__)
 router = APIRouter()
 
 _ALLOWED_SUFFIXES = frozenset(
@@ -24,27 +27,17 @@ _ALLOWED_SUFFIXES = frozenset(
 )
 
 
-# --------------------------------------------------------------------------- #
-# Uploads
-# --------------------------------------------------------------------------- #
-
-
-class UploadRequest(BaseModel):
-    filename: str
-    content_type: str = "application/octet-stream"
-
-
 class UploadResponse(BaseModel):
     key: str
-    upload_url: str
-    expires_in: int
+    filename: str
+    size_bytes: int
 
 
 @router.post("/uploads", response_model=UploadResponse)
-def create_upload(request: UploadRequest) -> UploadResponse:
-    """Issue a presigned URL so the browser uploads straight to S3."""
-    name = pathlib.Path(request.filename).name
-    suffix = "".join(pathlib.Path(name.lower()).suffixes[-1:])
+async def create_upload(file: UploadFile = File(...)) -> UploadResponse:
+    """Accept a file and return the key to reference it by."""
+    name = pathlib.Path(file.filename or "").name
+    suffix = pathlib.Path(name.lower()).suffix
     if suffix not in _ALLOWED_SUFFIXES:
         raise HTTPException(
             status_code=400,
@@ -52,17 +45,19 @@ def create_upload(request: UploadRequest) -> UploadResponse:
             f"{', '.join(sorted(_ALLOWED_SUFFIXES))}",
         )
 
-    key = f"uploads/{uuid.uuid4()}/{name}"
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail=f"{name!r} is empty.")
+    if len(data) > config.MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{name!r} is {len(data) // 1_048_576} MB; the limit is "
+            f"{config.MAX_UPLOAD_BYTES // 1_048_576} MB.",
+        )
+
     return UploadResponse(
-        key=key,
-        upload_url=storage.presigned_put(key, request.content_type),
-        expires_in=config.UPLOAD_URL_TTL_SECONDS,
+        key=storage.save_upload(name, data), filename=name, size_bytes=len(data)
     )
-
-
-# --------------------------------------------------------------------------- #
-# Reviews
-# --------------------------------------------------------------------------- #
 
 
 class ReviewRequest(BaseModel):
@@ -85,27 +80,34 @@ class ReviewAccepted(BaseModel):
 @router.post(
     "/reviews/{review_id}/reanalyze", response_model=ReviewAccepted, status_code=202
 )
-def reanalyze(review_id: str, request: ReviewRequest) -> ReviewAccepted:
+def reanalyze(
+    review_id: str, request: ReviewRequest, background: BackgroundTasks
+) -> ReviewAccepted:
     """Re-review a revised design against an earlier review.
 
     The prior review comes from the path, so the caller can't accidentally submit
     a re-review that compares against nothing. Any `previous_review_id` in the
     body is ignored.
     """
-    return _start_review(request.model_copy(update={"previous_review_id": review_id}))
+    return _start_review(
+        request.model_copy(update={"previous_review_id": review_id}), background
+    )
 
 
 @router.post("/reviews", response_model=ReviewAccepted, status_code=202)
-def create_review(request: ReviewRequest) -> ReviewAccepted:
-    """Accept a design for review and start the pipeline asynchronously."""
-    return _start_review(request)
+def create_review(
+    request: ReviewRequest, background: BackgroundTasks
+) -> ReviewAccepted:
+    """Accept a design for review and start the pipeline in the background."""
+    return _start_review(request, background)
 
 
-def _start_review(request: ReviewRequest) -> ReviewAccepted:
+def _start_review(
+    request: ReviewRequest, background: BackgroundTasks
+) -> ReviewAccepted:
     if not request.document_key and not request.diagram_key:
         raise HTTPException(
-            status_code=400,
-            detail="Provide document_key, diagram_key, or both.",
+            status_code=400, detail="Provide document_key, diagram_key, or both."
         )
     for key in (request.document_key, request.diagram_key):
         if key and not storage.object_exists(key):
@@ -118,14 +120,17 @@ def _start_review(request: ReviewRequest) -> ReviewAccepted:
 
     review_id = str(uuid.uuid4())
     storage.put_status(ReviewStatus.initial(review_id))
-    storage.invoke_worker(
-        {
-            "review_id": review_id,
-            "title": request.title,
-            "document_key": request.document_key,
-            "diagram_key": request.diagram_key,
-            "previous_review_id": request.previous_review_id,
-        }
+
+    # Runs after the response is sent, on the threadpool — a review takes minutes,
+    # far longer than any client will hold a request open. The pipeline records
+    # its own failures in the status file, so the UI sees them either way.
+    background.add_task(
+        _run_pipeline,
+        review_id=review_id,
+        title=request.title,
+        document_key=request.document_key,
+        diagram_key=request.diagram_key,
+        previous_review_id=request.previous_review_id,
     )
 
     return ReviewAccepted(
@@ -135,10 +140,20 @@ def _start_review(request: ReviewRequest) -> ReviewAccepted:
     )
 
 
+def _run_pipeline(**kwargs: str) -> None:
+    try:
+        pipeline.run(**kwargs)  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001 — already in the status file; log and move on
+        log.exception("Review %s failed", kwargs.get("review_id"))
+
+
 @router.get("/reviews/{review_id}/status", response_model=ReviewStatus)
 def get_status(review_id: str) -> ReviewStatus:
     """Per-stage progress. The UI polls this while the pipeline runs."""
-    status = storage.get_status(review_id)
+    try:
+        status = storage.get_status(review_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if status is None:
         raise HTTPException(status_code=404, detail=f"No review {review_id!r}.")
     return status
@@ -147,9 +162,13 @@ def get_status(review_id: str) -> ReviewStatus:
 @router.get("/reviews/{review_id}", response_model=ReviewResult)
 def get_review(review_id: str) -> ReviewResult:
     """The finished review as structured JSON."""
-    result = storage.get_review(review_id)
+    try:
+        result = storage.get_review(review_id)
+        status = None if result else storage.get_status(review_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     if result is None:
-        status = storage.get_status(review_id)
         if status is not None and status.state != "complete":
             raise HTTPException(
                 status_code=409,

@@ -19,20 +19,23 @@ hard-coded to any single example design or client.
 
 Do not deviate from these without asking.
 
-### Hosting
+### Deployment
 
-- AWS only, serverless: Lambda + API Gateway + S3 + DynamoDB (on-demand billing
-  mode).
-- No EC2, no RDS, no NAT Gateway, nothing always-on.
+- **Frontend**: Vercel. **Backend**: Render (web service, free tier).
+- No AWS. No serverless target, no Lambda adapter — a plain FastAPI app run
+  under uvicorn.
 
 ### LLM
 
 - Claude API **direct** via the Anthropic API — not AWS Bedrock.
+- `ANTHROPIC_API_KEY` is required, set as a dashboard environment variable and
+  never committed.
 - Cost control is a top priority: no provisioned throughput, pay-per-token only.
 
-### Tagging
+### Storage
 
-- Tag all AWS resources: `project=trust7gatekeeper`
+- Local filesystem: JSON and uploaded files under `./local-data/`, persisted on
+  Render's disk. No database, no object store, no cloud SDK.
 
 ### Architecture pattern
 

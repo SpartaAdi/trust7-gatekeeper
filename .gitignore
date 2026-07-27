@@ -12,7 +12,5 @@ venv/
 node_modules/
 dist/
 
-# SAM
-.aws-sam/
-infra/samconfig.toml
-packaged.yaml
+# Runtime data (uploads, reviews, progress records)
+local-data/

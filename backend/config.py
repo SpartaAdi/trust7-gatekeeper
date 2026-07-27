@@ -1,42 +1,34 @@
-"""Runtime configuration, read from the environment set by the SAM stack."""
+"""Runtime configuration, read from the environment."""
 
-import functools
+from __future__ import annotations
+
 import os
-
-UPLOADS_BUCKET = os.environ.get("UPLOADS_BUCKET", "")
-REVIEWS_TABLE = os.environ.get("REVIEWS_TABLE", "")
-REVIEW_STATUS_TABLE = os.environ.get("REVIEW_STATUS_TABLE", "")
-WORKER_FUNCTION_NAME = os.environ.get("WORKER_FUNCTION_NAME", "")
+import pathlib
 
 # Claude API direct — not Bedrock. Pay-per-token, no provisioned throughput.
 MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5")
 
-# Progress records are transient; expire them so the status table stays near-empty.
-STATUS_TTL_SECONDS = int(os.environ.get("STATUS_TTL_SECONDS", str(7 * 24 * 3600)))
+# Everything persistent lives here: uploads, reviews, and progress records.
+DATA_DIR = pathlib.Path(os.environ.get("LOCAL_DATA_DIR", "./local-data")).resolve()
 
-# Presigned upload URLs are short-lived by design.
-UPLOAD_URL_TTL_SECONDS = int(os.environ.get("UPLOAD_URL_TTL_SECONDS", "900"))
+# Exact origin of the deployed frontend. No wildcard — the browser sends the
+# origin, and a wildcard would let any site call this API on a user's behalf.
+CORS_ALLOWED_ORIGIN = os.environ.get("CORS_ALLOWED_ORIGIN", "http://localhost:5173")
+
+# Uploads are read fully into memory before being written, so cap them.
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
 
 
-@functools.lru_cache(maxsize=1)
 def anthropic_api_key() -> str:
-    """Resolve the Anthropic API key.
+    """The Anthropic API key, from the environment.
 
-    Prefers a Secrets Manager secret (the deployed path — the key never lands in
-    the CloudFormation template or environment) and falls back to
-    ANTHROPIC_API_KEY for local development.
+    Set as a dashboard environment variable in the hosting provider — never
+    committed, never written to `local-data/`.
     """
-    secret_arn = os.environ.get("ANTHROPIC_API_KEY_SECRET_ARN", "")
-    if secret_arn:
-        import boto3
-
-        secret = boto3.client("secretsmanager").get_secret_value(SecretId=secret_arn)
-        return secret["SecretString"].strip()
-
-    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not key:
         raise RuntimeError(
-            "No Anthropic API key: set ANTHROPIC_API_KEY_SECRET_ARN (deployed) "
-            "or ANTHROPIC_API_KEY (local)."
+            "ANTHROPIC_API_KEY is not set. Set it in the Render dashboard "
+            "(Environment tab), or in a local .env file for development."
         )
     return key

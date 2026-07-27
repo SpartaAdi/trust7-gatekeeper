@@ -125,8 +125,8 @@ export interface ReviewStatus {
 
 export interface UploadTicket {
   key: string
-  upload_url: string
-  expires_in: number
+  filename: string
+  size_bytes: number
 }
 
 export interface ReviewAccepted {

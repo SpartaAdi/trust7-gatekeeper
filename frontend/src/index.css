@@ -12,12 +12,15 @@
   --color-hairline: #e2e0dc;
   --color-ink: #0a2540;
   --color-ink-muted: #5c6b7a;
+  --color-ink-faint: #8a97a3;
 
   /* Status. Muted on purpose — a findings list full of neon is unreadable. */
   --color-sev-high: #b3261e;
   --color-sev-medium: #a35b00;
   --color-sev-low: #6b7280;
   --color-verdict-pass: #1e6b45;
+
+  --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 html {
@@ -27,14 +30,86 @@ html {
 body {
   background-color: var(--color-surface);
   color: var(--color-ink);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", sans-serif;
   font-synthesis-weight: none;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Type scale.
+ *
+ * Six deliberate steps rather than ad-hoc sizes at each call site. Sizes are in
+ * rem so browser zoom and user font settings still work; tracking tightens as
+ * size grows, which is what keeps large text from looking loose.
+ */
+@layer components {
+  .t-display {
+    font-size: 1.875rem;
+    line-height: 1.15;
+    letter-spacing: -0.022em;
+    font-weight: 600;
+  }
+  .t-title {
+    font-size: 1.25rem;
+    line-height: 1.25;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+  }
+  .t-heading {
+    font-size: 0.9375rem;
+    line-height: 1.4;
+    letter-spacing: -0.006em;
+    font-weight: 600;
+  }
+  .t-body {
+    font-size: 0.875rem;
+    line-height: 1.6;
+  }
+  .t-caption {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+  /* Section eyebrows. Uppercase needs extra tracking to stay legible. */
+  .t-eyebrow {
+    font-size: 0.6875rem;
+    line-height: 1.2;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
 }
 
 /* Tabular figures keep score columns from jittering as values change. */
 .tnum {
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Step transitions. Short and downward-settling — enough to signal that the
+ * view changed, not enough to make the reviewer wait for it.
+ */
+@keyframes t7-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-enter {
+  animation: t7-enter 200ms var(--ease-out-soft) both;
+}
+
+/* One visible focus treatment everywhere, including keyboard-only navigation. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-minfy-orange);
+  outline-offset: 2px;
+  border-radius: 1px;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,41 +1,54 @@
-"""S3 and DynamoDB access.
+"""Persistence: JSON files and uploaded blobs under `local-data/`.
 
-Results and progress records are stored as JSON strings rather than nested
-DynamoDB maps: no Decimal round-tripping, one attribute to read, and the item
-shape stays decoupled from the Pydantic models.
+    local-data/
+      uploads/<upload-id>/<filename>
+      reviews/<review-id>.json
+      status/<review-id>.json
+
+Writes go to a temp file in the same directory and are then renamed, because
+rename is atomic on POSIX. Without that, the UI polls `status/` every 1.5s and
+would eventually read a half-written file.
 """
 
 from __future__ import annotations
 
-import functools
-import json
+import os
+import pathlib
+import re
+import tempfile
 import time
-from typing import Any
-
-import boto3
+import uuid
 
 import config
 from schema import ReviewResult, ReviewStatus
 
+_UPLOADS = "uploads"
+_REVIEWS = "reviews"
+_STATUS = "status"
 
-@functools.lru_cache(maxsize=1)
-def _s3():
-    return boto3.client("s3")
-
-
-@functools.lru_cache(maxsize=1)
-def _dynamodb():
-    return boto3.resource("dynamodb")
+# Upload keys are `uploads/<uuid>/<filename>` and are echoed back by the client,
+# so they are untrusted input and must never escape the data directory.
+_KEY_PATTERN = re.compile(r"^uploads/[0-9a-f-]{36}/[^/\\]{1,255}$")
 
 
-@functools.lru_cache(maxsize=1)
-def _reviews_table():
-    return _dynamodb().Table(config.REVIEWS_TABLE)
+def _dir(name: str) -> pathlib.Path:
+    path = config.DATA_DIR / name
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
-@functools.lru_cache(maxsize=1)
-def _status_table():
-    return _dynamodb().Table(config.REVIEW_STATUS_TABLE)
+def _write_atomic(path: pathlib.Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(handle, "wb") as file:
+            file.write(data)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_name, path)
+    except BaseException:
+        pathlib.Path(temp_name).unlink(missing_ok=True)
+        raise
 
 
 # --------------------------------------------------------------------------- #
@@ -43,32 +56,34 @@ def _status_table():
 # --------------------------------------------------------------------------- #
 
 
-def presigned_put(key: str, content_type: str) -> str:
-    """A short-lived URL the browser uploads straight to S3 with.
+def save_upload(filename: str, data: bytes) -> str:
+    """Store an uploaded file and return its key."""
+    safe_name = pathlib.Path(filename).name or "upload"
+    key = f"{_UPLOADS}/{uuid.uuid4()}/{safe_name}"
+    _write_atomic(config.DATA_DIR / key, data)
+    return key
 
-    Uploads bypass Lambda entirely, so the 6 MB invocation payload limit doesn't
-    cap document or diagram size.
-    """
-    return _s3().generate_presigned_url(
-        "put_object",
-        Params={
-            "Bucket": config.UPLOADS_BUCKET,
-            "Key": key,
-            "ContentType": content_type,
-        },
-        ExpiresIn=config.UPLOAD_URL_TTL_SECONDS,
-    )
+
+def _upload_path(key: str) -> pathlib.Path:
+    """Resolve an upload key, refusing anything that escapes the data directory."""
+    if not _KEY_PATTERN.match(key):
+        raise ValueError(f"Malformed upload key: {key!r}")
+    path = (config.DATA_DIR / key).resolve()
+    # Belt and braces: the pattern already forbids separators and `..`, but a
+    # symlink inside the data directory could still redirect the resolved path.
+    if not path.is_relative_to(config.DATA_DIR):
+        raise ValueError(f"Upload key escapes the data directory: {key!r}")
+    return path
 
 
 def get_object(key: str) -> bytes:
-    return _s3().get_object(Bucket=config.UPLOADS_BUCKET, Key=key)["Body"].read()
+    return _upload_path(key).read_bytes()
 
 
 def object_exists(key: str) -> bool:
     try:
-        _s3().head_object(Bucket=config.UPLOADS_BUCKET, Key=key)
-        return True
-    except _s3().exceptions.ClientError:
+        return _upload_path(key).is_file()
+    except ValueError:
         return False
 
 
@@ -78,21 +93,17 @@ def object_exists(key: str) -> bool:
 
 
 def put_review(result: ReviewResult) -> None:
-    _reviews_table().put_item(
-        Item={
-            "review_id": result.review_id,
-            "created_at": result.created_at,
-            "overall_score": str(result.overall_score),
-            "result": result.model_dump_json(),
-        }
+    _write_atomic(
+        _dir(_REVIEWS) / f"{result.review_id}.json",
+        result.model_dump_json(indent=2).encode(),
     )
 
 
 def get_review(review_id: str) -> ReviewResult | None:
-    item = _reviews_table().get_item(Key={"review_id": review_id}).get("Item")
-    if not item:
+    path = _dir(_REVIEWS) / f"{_safe_id(review_id)}.json"
+    if not path.is_file():
         return None
-    return ReviewResult.model_validate_json(item["result"])
+    return ReviewResult.model_validate_json(path.read_text())
 
 
 # --------------------------------------------------------------------------- #
@@ -101,44 +112,21 @@ def get_review(review_id: str) -> ReviewResult | None:
 
 
 def put_status(status: ReviewStatus) -> None:
-    status.updated_at = _now()
-    _status_table().put_item(
-        Item={
-            "review_id": status.review_id,
-            "status": status.model_dump_json(),
-            "expires_at": int(time.time()) + config.STATUS_TTL_SECONDS,
-        }
+    status.updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    _write_atomic(
+        _dir(_STATUS) / f"{status.review_id}.json", status.model_dump_json().encode()
     )
 
 
 def get_status(review_id: str) -> ReviewStatus | None:
-    item = _status_table().get_item(Key={"review_id": review_id}).get("Item")
-    if not item:
+    path = _dir(_STATUS) / f"{_safe_id(review_id)}.json"
+    if not path.is_file():
         return None
-    return ReviewStatus.model_validate_json(item["status"])
+    return ReviewStatus.model_validate_json(path.read_text())
 
 
-# --------------------------------------------------------------------------- #
-# Worker dispatch
-# --------------------------------------------------------------------------- #
-
-
-@functools.lru_cache(maxsize=1)
-def _lambda_client():
-    return boto3.client("lambda")
-
-
-def invoke_worker(payload: dict[str, Any]) -> None:
-    """Kick off the pipeline asynchronously so the API can return 202 immediately.
-
-    An analysis run takes minutes; an HTTP API request cannot wait that long.
-    """
-    _lambda_client().invoke(
-        FunctionName=config.WORKER_FUNCTION_NAME,
-        InvocationType="Event",
-        Payload=json.dumps(payload).encode(),
-    )
-
-
-def _now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+def _safe_id(review_id: str) -> str:
+    """Review ids come from the URL, so they cannot be trusted as filenames."""
+    if not re.fullmatch(r"[0-9a-fA-F-]{1,64}", review_id):
+        raise ValueError(f"Malformed review id: {review_id!r}")
+    return review_id

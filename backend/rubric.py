@@ -13,21 +13,13 @@ import pathlib
 from dataclasses import dataclass
 
 def _rubric_path() -> pathlib.Path:
-    """Locate rubric.json in both layouts.
-
-    Local dev runs from the repo, where the rubric lives at `rubric/rubric.json`.
-    On Lambda it arrives as a layer and is mounted at `/opt/rubric.json`.
-    """
+    """Locate rubric.json. `RUBRIC_PATH` overrides the repo location."""
     override = os.environ.get("RUBRIC_PATH")
     if override:
         return pathlib.Path(override)
 
     here = pathlib.Path(__file__).resolve().parent
-    for candidate in (
-        pathlib.Path("/opt/rubric.json"),
-        here / "rubric.json",
-        here.parent / "rubric" / "rubric.json",
-    ):
+    for candidate in (here.parent / "rubric" / "rubric.json", here / "rubric.json"):
         if candidate.exists():
             return candidate
     raise FileNotFoundError("rubric.json not found; set RUBRIC_PATH")

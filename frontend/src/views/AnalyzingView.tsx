@@ -66,38 +66,69 @@ export function AnalyzingView({ reviewId, onComplete, onStartOver }: Props) {
   const stages = status?.stages ?? []
   const doneCount = stages.filter((stage) => stage.state === 'done').length
   const failed = status?.state === 'error'
+  const percent = stages.length > 0 ? Math.round((doneCount / stages.length) * 100) : 0
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-12">
+    <div className="mx-auto max-w-2xl px-6 py-12 lg:py-16">
       <header>
-        <h2 className="text-2xl font-semibold tracking-tight">
-          {failed ? 'Analysis failed' : 'Analyzing the design'}
-        </h2>
-        <p className="mt-2 text-sm text-ink-muted">
+        <h2 className="t-display">{failed ? 'Analysis stopped' : 'Analyzing the design'}</h2>
+        <p className="t-body mt-3 text-ink-muted">
           {failed ? (
-            'The pipeline stopped at the stage marked below.'
+            'The pipeline failed at the stage marked below. Nothing was scored.'
           ) : (
             <>
-              Review <span className="font-mono text-xs">{reviewId}</span>
-              {stages.length > 0 && (
-                <span className="tnum">
-                  {' '}
-                  — {doneCount} of {stages.length} stages complete
-                </span>
-              )}
+              Reviewing against all 45 checks. This usually takes a few minutes —
+              the steps below update as each one finishes.
             </>
           )}
         </p>
+        <p className="t-caption mt-1.5 font-mono text-ink-faint">{reviewId}</p>
       </header>
 
+      {stages.length > 0 && !failed && (
+        <div className="mt-8">
+          <div className="flex items-baseline justify-between">
+            <span className="t-eyebrow text-ink-muted">Progress</span>
+            <span className="tnum t-caption text-ink-muted">
+              {doneCount} of {stages.length} stages
+            </span>
+          </div>
+          <div
+            className="mt-2 h-1 w-full overflow-hidden bg-hairline"
+            role="progressbar"
+            aria-valuenow={percent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="Analysis progress"
+          >
+            <div
+              className="h-full bg-minfy-orange transition-[width] duration-500 ease-out"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {status === null && !gaveUp && (
-        <p className="mt-10 text-sm text-ink-muted">Waiting for the first status…</p>
+        <div className="mt-10 space-y-3" aria-live="polite">
+          <p className="t-body text-ink-muted">Starting the pipeline…</p>
+          {/* Skeleton rows, so the layout does not jump when the first status lands. */}
+          {[0, 1, 2].map((row) => (
+            <div key={row} className="flex items-center gap-4 py-2">
+              <span className="size-5 animate-pulse rounded-full bg-hairline" />
+              <span
+                className="h-3 animate-pulse bg-hairline"
+                style={{ width: `${55 - row * 10}%` }}
+              />
+            </div>
+          ))}
+        </div>
       )}
 
       {stages.length > 0 && (
-        <ol className="mt-10 divide-y divide-hairline border-y border-hairline">
-          {stages.map((stage) => (
-            <StageRow key={stage.name} stage={stage} />
+        <ol className="mt-8 divide-y divide-hairline border-y border-hairline">
+          {stages.map((stage, index) => (
+            <StageRow key={stage.name} stage={stage} index={index} />
           ))}
         </ol>
       )}
@@ -105,29 +136,34 @@ export function AnalyzingView({ reviewId, onComplete, onStartOver }: Props) {
       {failed && status?.error && (
         <div
           role="alert"
-          className="mt-8 border-l-2 border-sev-high bg-surface-sunken px-4 py-3 text-sm"
+          className="animate-enter mt-8 flex gap-3 border-l-2 border-sev-high bg-surface-sunken px-4 py-3.5"
         >
-          <p className="font-medium text-sev-high">Pipeline error</p>
-          <p className="mt-1 break-words text-ink-muted">{status.error}</p>
+          <svg viewBox="0 0 16 16" aria-hidden="true" className="mt-0.5 size-4 shrink-0 fill-sev-high">
+            <path d="M8 1.5 L14.5 13.5 L1.5 13.5 Z" />
+          </svg>
+          <div className="min-w-0">
+            <p className="t-heading text-sev-high">Pipeline error</p>
+            <p className="t-caption mt-1 break-words text-ink-muted">{status.error}</p>
+          </div>
         </div>
       )}
 
       {pollError && !failed && (
         <div
           role="alert"
-          className="mt-8 border-l-2 border-sev-medium bg-surface-sunken px-4 py-3 text-sm"
+          className="animate-enter mt-8 border-l-2 border-sev-medium bg-surface-sunken px-4 py-3.5"
         >
-          <p className="font-medium text-sev-medium">
-            {gaveUp ? 'Stopped polling for updates' : 'Status update failed — retrying'}
+          <p className="t-heading text-sev-medium">
+            {gaveUp ? 'Stopped checking for updates' : 'Status update failed — retrying'}
           </p>
-          <p className="mt-1 text-ink-muted">{pollError}</p>
+          <p className="t-caption mt-1 text-ink-muted">{pollError}</p>
           {gaveUp && (
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="mt-3 border border-minfy-navy px-3 py-1.5 text-xs font-medium text-minfy-navy hover:bg-minfy-navy hover:text-white"
+              className="t-caption mt-3 border border-minfy-navy px-3 py-1.5 font-medium text-minfy-navy transition-colors hover:bg-minfy-navy hover:text-white"
             >
-              Retry
+              Reload and retry
             </button>
           )}
         </div>
@@ -137,7 +173,7 @@ export function AnalyzingView({ reviewId, onComplete, onStartOver }: Props) {
         <button
           type="button"
           onClick={onStartOver}
-          className="mt-8 text-sm text-ink-muted underline underline-offset-2 hover:text-ink"
+          className="t-caption mt-8 text-ink-muted underline underline-offset-2 transition-colors hover:text-ink"
         >
           Start over
         </button>
@@ -146,34 +182,38 @@ export function AnalyzingView({ reviewId, onComplete, onStartOver }: Props) {
   )
 }
 
-function StageRow({ stage }: { stage: StageProgress }) {
+function StageRow({ stage, index }: { stage: StageProgress; index: number }) {
   const label = STAGE_LABELS[stage.name] ?? stage.name
   const running = stage.state === 'running'
 
   return (
-    <li className="flex items-start gap-4 py-4">
+    <li
+      className="animate-enter flex items-start gap-4 py-4"
+      style={{ animationDelay: `${Math.min(index, 5) * 40}ms` }}
+      aria-current={running ? 'step' : undefined}
+    >
       <StageMarker state={stage.state} />
       <div className="min-w-0 flex-1">
         <p
           className={[
-            'text-sm',
+            't-body',
             running
               ? 'font-semibold text-ink'
               : stage.state === 'done'
                 ? 'text-ink'
                 : stage.state === 'error'
                   ? 'font-semibold text-sev-high'
-                  : 'text-ink-muted',
+                  : 'text-ink-faint',
           ].join(' ')}
         >
           {label}
         </p>
         {stage.detail && (
-          <p className="mt-0.5 break-words text-xs text-ink-muted">{stage.detail}</p>
+          <p className="t-caption mt-0.5 break-words text-ink-muted">{stage.detail}</p>
         )}
       </div>
       {stage.state === 'done' && stage.started_at && stage.finished_at && (
-        <span className="tnum shrink-0 text-xs text-ink-muted">
+        <span className="tnum t-caption shrink-0 text-ink-faint">
           {durationSeconds(stage.started_at, stage.finished_at)}
         </span>
       )}
@@ -183,21 +223,22 @@ function StageRow({ stage }: { stage: StageProgress }) {
 
 function StageMarker({ state }: { state: StageProgress['state'] }) {
   const base = 'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full'
+
   if (state === 'done') {
     return (
-      <span
-        aria-label="done"
-        className={`${base} bg-minfy-navy text-[10px] font-bold text-white`}
-      >
-        ✓
+      <span aria-label="Complete" role="img" className={`${base} bg-minfy-navy`}>
+        <svg viewBox="0 0 12 12" aria-hidden="true" className="size-3 fill-none stroke-white stroke-2">
+          <path d="M2.5 6.2 L4.8 8.5 L9.5 3.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </span>
     )
   }
   if (state === 'error') {
     return (
       <span
-        aria-label="failed"
-        className={`${base} bg-sev-high text-[10px] font-bold text-white`}
+        aria-label="Failed"
+        role="img"
+        className={`${base} bg-sev-high text-[11px] font-bold text-white`}
       >
         !
       </span>
@@ -205,14 +246,14 @@ function StageMarker({ state }: { state: StageProgress['state'] }) {
   }
   if (state === 'running') {
     return (
-      <span aria-label="in progress" className={`${base} relative`}>
-        <span className="absolute size-5 animate-ping rounded-full bg-minfy-orange/30" />
+      <span aria-label="In progress" role="img" className={`${base} relative`}>
+        <span className="absolute size-5 animate-ping rounded-full bg-minfy-orange/25" />
         <span className="size-2.5 rounded-full bg-minfy-orange" />
       </span>
     )
   }
   return (
-    <span aria-label="pending" className={`${base} border border-hairline`}>
+    <span aria-label="Pending" role="img" className={`${base} border border-hairline`}>
       <span className="size-1.5 rounded-full bg-hairline" />
     </span>
   )

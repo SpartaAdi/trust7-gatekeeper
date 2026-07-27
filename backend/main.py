@@ -1,17 +1,18 @@
-"""Trust7 Gatekeeper — Lambda entrypoint.
+"""Trust7 Gatekeeper — FastAPI application.
 
-FastAPI application wrapped by Mangum so the same app runs locally
-(`uvicorn main:app`) and behind API Gateway HTTP API on Lambda.
-
-No business logic lives here. Routers from `api/` are mounted as they
-are implemented.
+Run with `uvicorn main:app`. Deployed as a Render web service; there is no
+serverless target and no Lambda adapter.
 """
 
-import os
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from mangum import Mangum
+
+import config
+from api.routes import router as api_router
+
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(
     title="Trust7 Gatekeeper",
@@ -20,26 +21,21 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Comma-separated list of allowed origins; defaults to the local Vite dev server.
-_allowed_origins = os.environ.get("CORS_ALLOW_ORIGINS", "http://localhost:5173")
-
+# One exact origin, never a wildcard: the browser sends the user's origin, and a
+# wildcard would let any site call this API on their behalf.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in _allowed_origins.split(",") if o.strip()],
+    allow_origins=[config.CORS_ALLOWED_ORIGIN],
     allow_credentials=False,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    """Liveness probe."""
+    """Liveness probe — also Render's health check path."""
     return {"status": "ok", "service": "trust7-gatekeeper"}
 
 
-from api.routes import router as api_router  # noqa: E402 — after app/middleware setup
-
 app.include_router(api_router)
-
-handler = Mangum(app)
