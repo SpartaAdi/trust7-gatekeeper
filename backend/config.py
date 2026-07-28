@@ -48,11 +48,18 @@ OPENROUTER_BASE_URL = os.environ.get(
 # more than this — see the note in llm.py.
 OPENROUTER_LOWEST_ENDPOINT_COMPLETION_CAP = 16_384
 
-# Hard ceiling on what any stage may request from OpenRouter. Defaults to the
-# largest a stage actually asks for; lower it to force every request under the
-# floor above if routing turns out to reach a low-capability endpoint.
+# Hard ceiling on what any stage may request from OpenRouter, applied as a clamp
+# in llm.py. It must stay >= the largest per-stage request or that stage is
+# silently reduced: raising evaluate to 64000 while this sat at 32000 would have
+# looked applied and changed nothing.
+#
+# 64000 also keeps the routable provider set wide. Of the 22 endpoints serving
+# kimi-k2.6, only DeepInfra (16,384) and Venice (65,536) declare a cap below
+# 256,000, so a request at or under 65,536 still reaches 15 of them. Lower this to
+# force every request under the floor below if routing ever reaches a
+# low-capability endpoint.
 OPENROUTER_MAX_COMPLETION_TOKENS = int(
-    os.environ.get("OPENROUTER_MAX_COMPLETION_TOKENS", "32000")
+    os.environ.get("OPENROUTER_MAX_COMPLETION_TOKENS", "64000")
 )
 
 # Operational escape hatch: comma-separated OpenRouter provider names to exclude

@@ -268,7 +268,21 @@ def evaluate(
         schema=_EVALUATE_SCHEMA,
         # The stage that decides the score. Worth the tokens.
         effort="high",
-        max_tokens=32000,
+        # Raised from 32000, which truncated in a real run: finish_reason "length"
+        # with 32000/32000 consumed, so a framework's findings never completed.
+        #
+        # This is already the per-framework call — 26 checks for AWS WAF, then 19
+        # for TRUST-7 — so the budget is not being asked to cover all 45 at once.
+        # It still ran out because `reasoning: {effort: "high"}` is carved out of
+        # the same max_tokens: OpenRouter allocates roughly 80% of it to reasoning
+        # at that effort, leaving only ~6k for the JSON itself.
+        #
+        # 64000 rather than more: it stays at or under Venice's 65,536 ceiling, so
+        # 15 of the 22 providers serving this model remain routable. Going higher
+        # would drop to 13 for headroom no framework needs. The only provider this
+        # excludes is DeepInfra at 16,384, which could not have served the old
+        # 32000 either.
+        max_tokens=64000,
     )
 
     return _to_findings(payload.get("findings", []), framework_key), usage

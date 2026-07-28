@@ -175,20 +175,36 @@ between reviews, which is what implicit caching keys on.
 
 ### The output-token squeeze
 
-`OPENROUTER_MAX_COMPLETION_TOKENS` (default 32000) caps every request, and
+`OPENROUTER_MAX_COMPLETION_TOKENS` (default 64000) caps every request, and
 `finish_reason: "length"` raises `TruncatedResponse` rather than surfacing as a
-JSON decode error.
+JSON decode error. That guard earned its place: a real run truncated the evaluate
+stage at 32000/32000 tokens with `finish_reason: "length"`, so a framework's
+findings never completed.
 
-**This is genuinely tight and worth fixing properly.** The evaluate stage asks for
-32,000 output tokens, while the lowest-capability endpoint serving this model
-advertises 16,384 — and reasoning tokens count against the same budget. Most
-endpoints offer 262,144, so routing normally avoids the problem, but the margin
-depends on routing rather than on design. The real fix is to split evaluate from
-one call per framework (26 and 19 checks) into one per pillar (13 calls of 2–7
-checks), which would drop each request to a few thousand output tokens and remove
-the dependence entirely. That is a pipeline change and is deliberately not in this
-one; until then, `TruncatedResponse` names the cause and `OPENROUTER_IGNORE_PROVIDERS`
-can exclude a low-cap provider.
+Evaluate now asks for 64000; no other stage changed. Three things about that
+number, because the obvious diagnosis was wrong:
+
+*Evaluate was already split per framework* — 26 checks for AWS WAF, then 19 for
+TRUST-7 — so the budget was never being asked to cover all 45 at once. Splitting
+it "into two calls" is what it has always done.
+
+*Reasoning shares the same budget.* `reasoning: {effort: "high"}` is carved out of
+`max_tokens`, and OpenRouter allocates roughly 80% of it to reasoning at that
+effort — leaving only ~6k of the old 32000 for the JSON. That is why a request
+large enough on paper still ran out, and it means the cost of this headroom is
+mostly reasoning tokens, which bill as output.
+
+*64000 is chosen to keep routing wide.* Of the 22 endpoints serving kimi-k2.6,
+only DeepInfra (16,384) and Venice (65,536) declare a cap below 256,000, so a
+request at or under 65,536 still reaches 15 of them. Going higher would drop to 13
+for headroom no framework needs. The only provider this excludes is DeepInfra,
+which could not have served the old 32000 either.
+
+The remaining lever, if evaluate ever truncates again, is capping reasoning
+explicitly with `reasoning: {max_tokens: N}` so the JSON gets a guaranteed share
+rather than a leftover one. Splitting evaluate per pillar (13 calls of 2-7 checks)
+is the other option and would remove the dependence entirely, at the cost of more
+requests per review.
 
 ## Running locally
 

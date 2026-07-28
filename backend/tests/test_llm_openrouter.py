@@ -17,6 +17,7 @@ was a way the swap could look fine and be silently wrong:
 from __future__ import annotations
 
 import inspect
+import pathlib
 from typing import Any
 
 import httpx
@@ -302,6 +303,56 @@ def test_a_request_below_the_ceiling_is_left_alone(monkeypatch) -> None:
     monkeypatch.setattr(config, "OPENROUTER_MAX_COMPLETION_TOKENS", 32_000)
 
     assert sent_request(monkeypatch, max_tokens=16_000)["max_tokens"] == 16_000
+
+
+def test_the_configured_ceiling_is_not_below_what_any_stage_requests() -> None:
+    """The trap this guards: llm.py clamps every request to
+    OPENROUTER_MAX_COMPLETION_TOKENS, so a stage raised above the ceiling is
+    silently reduced instead of erroring. Raising evaluate to 64000 while the
+    ceiling sat at 32000 would have looked applied and changed nothing.
+    """
+    import re
+
+    stages_src = (
+        pathlib.Path(__file__).resolve().parent.parent / "agent" / "stages.py"
+    ).read_text()
+    requested = [int(n) for n in re.findall(r"max_tokens=(\d+),", stages_src)]
+
+    assert requested, "no max_tokens call sites found — has stages.py moved?"
+    assert config.OPENROUTER_MAX_COMPLETION_TOKENS >= max(requested), (
+        f"ceiling {config.OPENROUTER_MAX_COMPLETION_TOKENS} is below the largest "
+        f"stage request {max(requested)}; that stage would be silently clamped"
+    )
+
+
+def test_evaluate_asks_for_more_output_than_the_other_stages() -> None:
+    """Evaluate emits a finding per check with evidence, and truncated at 32000 in
+    a real run. It should be the stage with the most headroom."""
+    from agent import stages
+
+    evaluate_max = _stage_max_tokens("evaluate")
+    assert evaluate_max == 64_000, evaluate_max
+    for name in ("classify", "prioritize", "remediate"):
+        assert _stage_max_tokens(name) < evaluate_max, (
+            f"{name} should not have been raised alongside evaluate"
+        )
+
+
+def _stage_max_tokens(stage: str) -> int:
+    """The max_tokens literal inside one stage function, read from source.
+
+    Read rather than executed because calling the stage would need a live client;
+    the point is to pin the per-stage numbers against accidental drift.
+    """
+    import inspect
+    import re
+
+    from agent import stages
+
+    source = inspect.getsource(getattr(stages, stage))
+    found = re.search(r"max_tokens=(\d+)", source)
+    assert found, f"no max_tokens in {stage}()"
+    return int(found.group(1))
 
 
 def test_hitting_the_output_limit_raises_rather_than_returning_half_a_json(
