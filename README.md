@@ -69,7 +69,7 @@ backend/
   maturity.py     score -> band; mirrors frontend/src/maturity.ts
   ingestion/      document, draw.io, and vision parsing; normalization
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          228 tests
+  tests/          231 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -366,6 +366,7 @@ live minfytech.com stylesheet**, not from the older orange/navy brand document:
 | `minfy-indigo` | `#1420be` | primary accent — buttons, active states, focus ring |
 | `minfy-blue` | `#1c55bb` | hover state for primary actions |
 | `minfy-navy` | `#1b263b` | header bar, dark sections, ink |
+| `minfy-yellow` | `#fdc921` | the logo mark's second colour, mark only |
 | `pastel-sky` / `mint` / `tan` / `cream` / `teal` | `#cee2fd` … | flat accent blocks behind cards |
 
 Type is a serif display face over a sans body, matching the site's Financier
@@ -375,15 +376,25 @@ by design. The two largest steps of the type scale (`.t-display`, `.t-title`) ar
 the serif ones; everything else is sans. `.t-tab` is the small-caps treatment used
 by the header nav and the step tracker.
 
-Two things deliberately still use the old orange/navy: the **PDF report**
-(`backend/report.py`) and nothing else. The PDF and the web UI therefore do not
-match — see the note at the end of the PDF section.
+The **PDF report** (`backend/report.py`) carries the same palette, with the token
+each colour mirrors named in a comment beside it, and a test asserting the two
+agree. The one intentional divergence is `ACCENT_ON_DARK` (`#4a81f2`, also sampled):
+the primary `#1420be` is a dark blue that all but vanishes on the navy cover, so
+cover text uses the lighter blue instead.
+
+The **logo mark** in `frontend/src/components/MinfyMark.tsx` is a REDRAW, not the
+supplied asset — the logo arrived as an image in conversation and never landed on
+disk, so there was no file to embed. The mark is pure geometry and redraws exactly;
+the "minfy" wordmark is a custom typeface and is deliberately not reproduced, since
+hand-drawn letterforms would be an imitation of the brand rather than the brand.
+The PDF cover draws the same geometry via `report._draw_minfy_mark`. To swap in the
+real asset, replace those two — nothing else references the shape.
 
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 228 tests
-cd frontend && npm test                                                          # 61 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 231 tests
+cd frontend && npm test                                                          # 76 tests
 ```
 
 `requirements.txt` is runtime-only, so Render's build installs no test tooling;
@@ -430,7 +441,8 @@ fails rather than hanging.
 
 The Results page has a **Download Report** button behind
 `GET /reviews/{id}/report.pdf`. The document is a Minfy-branded cover (navy
-`#0A2540`, one flat orange `#E85D26` band — no gradient), the executive summary,
+`#1b263b`, the logo mark, one flat indigo `#1420be` band — no gradient), the
+executive summary,
 a scorecard covering all 13 pillars, findings grouped by severity with their
 remediation text, and an appendix holding the uploaded diagram.
 

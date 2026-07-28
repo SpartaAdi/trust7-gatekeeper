@@ -140,7 +140,7 @@ def test_cover_states_the_headline_counts(pdf: bytes) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 2. Branding: navy, orange, and no purple anywhere
+# 2. Branding: navy, indigo, and no purple anywhere
 # --------------------------------------------------------------------------- #
 
 def _content_streams(pdf: bytes) -> str:
@@ -169,17 +169,54 @@ def _rgb_fills(streams: str) -> list[tuple[float, float, float]]:
     return fills
 
 
-def test_cover_paints_the_minfy_navy_background_and_orange_accent(pdf: bytes) -> None:
+def _near(actual, expected, tol=0.02) -> bool:
+    return all(abs(a - e) <= tol for a, e in zip(actual, expected))
+
+
+def _rgb(hex_colour: str) -> tuple[float, float, float]:
+    value = hex_colour.lstrip("#")
+    return tuple(int(value[i : i + 2], 16) / 255 for i in (0, 2, 4))  # type: ignore[return-value]
+
+
+def test_cover_paints_the_minfy_navy_background_and_indigo_accent(pdf: bytes) -> None:
     fills = _rgb_fills(_content_streams(pdf))
     assert fills, "no colour operators found"
 
-    def near(actual, expected, tol=0.02) -> bool:
-        return all(abs(a - e) <= tol for a, e in zip(actual, expected))
+    assert any(_near(f, _rgb("#1B263B")) for f in fills), "Minfy navy #1B263B not used"
+    assert any(_near(f, _rgb("#1420BE")) for f in fills), (
+        "Minfy indigo #1420BE not used"
+    )
 
-    navy = (0x0A / 255, 0x25 / 255, 0x40 / 255)
-    orange = (0xE8 / 255, 0x5D / 255, 0x26 / 255)
-    assert any(near(f, navy) for f in fills), "Minfy navy #0A2540 not used"
-    assert any(near(f, orange) for f in fills), "Minfy orange #E85D26 not used"
+
+def test_the_report_palette_matches_the_web_ui_theme_tokens() -> None:
+    """The PDF and the dashboard must not disagree about the brand.
+
+    A reviewer downloads this from the results page; two different accent colours
+    for one review reads as two different products. These are the literal values of
+    the `@theme` tokens in frontend/src/index.css.
+    """
+    assert report.ACCENT.hexval() == '0x1420be'  # --color-minfy-indigo
+    assert report.ACCENT_LIGHT.hexval() == '0x1c55bb'  # --color-minfy-blue
+    assert report.NAVY.hexval() == '0x1b263b'  # --color-minfy-navy
+    assert report.INK_MUTED.hexval() == '0x5d6c7b'  # --color-ink-muted
+    assert report.HAIRLINE.hexval() == '0xe2e2e2'  # --color-hairline
+    assert report.PASTEL_SKY.hexval() == '0xcee2fd'  # --color-pastel-sky
+    assert report.PASTEL_MINT.hexval() == '0xcff5de'  # --color-pastel-mint
+    assert report.PASTEL_CREAM.hexval() == '0xfbf8de'  # --color-pastel-cream
+
+
+def test_no_superseded_orange_survives_anywhere(pdf: bytes) -> None:
+    """The old brand accent must be gone, not merely unused by the cover."""
+    superseded = _rgb("#E85D26")
+    offenders = [f for f in _rgb_fills(_content_streams(pdf)) if _near(f, superseded)]
+    assert not offenders, f"superseded Minfy orange still painted: {offenders}"
+
+
+def test_framework_blocks_are_painted_and_carry_no_severity_meaning(pdf: bytes) -> None:
+    """Both framework pastels appear, and neither is a status colour."""
+    fills = _rgb_fills(_content_streams(pdf))
+    assert any(_near(f, _rgb("#CEE2FD")) for f in fills), "AWS WAF sky block missing"
+    assert any(_near(f, _rgb("#CFF5DE")) for f in fills), "TRUST-7 mint block missing"
 
 
 def test_no_purple_or_violet_anywhere(pdf: bytes) -> None:

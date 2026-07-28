@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { MinfyMark } from './components/MinfyMark'
 import { StepTracker, type Step } from './components/StepTracker'
 import { TokenGate } from './components/TokenGate'
 import { getToken, onTokenCleared } from './token'
@@ -65,12 +66,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen flex-col bg-surface text-ink">
-      {/*
-        Dark navy bar, as on the live site. The wordmark is type, not an image:
-        the supplied logo file never reached this environment (see the note in
-        the commit message), and a placeholder graphic would be worse than a
-        clean wordmark.
-      */}
+      {/* Dark navy bar, as on the live site. */}
       <header className="bg-minfy-navy text-white">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-8 gap-y-3 px-6 py-4">
           <button
@@ -79,10 +75,8 @@ export default function App() {
             className="flex min-w-0 items-center gap-3 text-left"
             aria-label="Trust7 Gatekeeper — back to all reviews"
           >
-            <span
-              aria-hidden="true"
-              className="h-7 w-1 shrink-0 rounded-full bg-white/70"
-            />
+            <MinfyMark size={26} tone="onDark" className="shrink-0" />
+            <span aria-hidden="true" className="h-8 w-px shrink-0 bg-white/25" />
             <span className="min-w-0">
               <span className="t-title block truncate leading-tight">
                 Trust7 Gatekeeper

@@ -2,7 +2,13 @@ import { useEffect, useState } from 'react'
 
 import { ApiError, downloadReport, getReview } from '../api'
 import { SeverityMark } from '../components/SeverityMark'
-import { maturityFor, scoreToneClass } from '../maturity'
+import {
+  MATURITY_BOUND_NOTE,
+  MATURITY_SCALE,
+  maturityFor,
+  scoreToneClass,
+  type MaturityLabel,
+} from '../maturity'
 import type {
   Finding,
   FrameworkScore,
@@ -113,14 +119,21 @@ export function ResultsView({
         <div className="shrink-0 text-right">
           <p className="tnum text-5xl font-semibold leading-none tracking-tight">
             {result.overall_score.toFixed(1)}
+            {/* The denominator, so a 4.5 is not mistaken for 4.5 out of 5. */}
+            <span className="t-title align-baseline font-normal text-ink-muted">
+              /100
+            </span>
           </p>
-          <p className="t-eyebrow mt-2 text-ink-muted">
+          <p className="t-eyebrow mt-2 flex items-center justify-end gap-1.5 text-ink-muted">
             Overall · {maturityFor(result.overall_score)}
+            <MaturityScaleHint current={maturityFor(result.overall_score)} />
           </p>
         </div>
       </header>
 
       {result.delta && <DeltaSummary delta={result.delta} />}
+
+      <TopActionItems findings={result.findings} />
 
       {result.executive_summary && (
         <section className="mt-12 bg-pastel-cream px-5 py-5">
@@ -187,6 +200,168 @@ export function ResultsView({
         )}
       </footer>
     </div>
+  )
+}
+
+/** Cap on the action list. Beyond this it stops being a shortlist. */
+const MAX_ACTION_ITEMS = 10
+
+/**
+ * The one-per-pillar high-severity shortlist, computed here from the findings the
+ * API already returned — no extra request, no backend change.
+ *
+ * Two deliberate departures from a literal reading of "take severity=high
+ * findings", both because the literal version would put nonsense on the page:
+ *
+ *  - Only OPEN findings qualify (`fail` or `partial`). A high-severity check that
+ *    PASSED has nothing to act on and carries no remediation text, so it would
+ *    render as a blank action item.
+ *  - The imperative line is the finding's `remediation`, not its `title`. Titles
+ *    are written as observations ("X has no encryption specified") and cannot be
+ *    turned into imperatives without inventing wording; `remediation` is generated
+ *    as "what the delivery team should change" and is already imperative. The
+ *    title is kept underneath as context. Nothing is rephrased client-side.
+ *
+ * A finding with no remediation text falls back to its title, marked as an
+ * observation rather than dressed up as an instruction.
+ */
+export function selectTopActions(findings: readonly Finding[]): Finding[] {
+  const open = findings.filter(
+    (finding) =>
+      finding.severity === 'high' &&
+      (finding.status === 'fail' || finding.status === 'partial'),
+  )
+
+  // One per pillar, keeping the widest-reaching finding. Priority breaks a tie so
+  // the choice is deterministic rather than dependent on array order.
+  const perPillar = new Map<string, Finding>()
+  for (const finding of open) {
+    const key = `${finding.framework}:${finding.pillar_id}`
+    const held = perPillar.get(key)
+    if (held === undefined || beats(finding, held)) perPillar.set(key, finding)
+  }
+
+  return [...perPillar.values()].sort(byPriority).slice(0, MAX_ACTION_ITEMS)
+}
+
+function beats(candidate: Finding, held: Finding): boolean {
+  if (candidate.affected_components.length !== held.affected_components.length) {
+    return candidate.affected_components.length > held.affected_components.length
+  }
+  return byPriority(candidate, held) < 0
+}
+
+/** Remediation order: 1 first, and an unranked 0 last rather than first. */
+function byPriority(a: Finding, b: Finding): number {
+  const rank = (finding: Finding) =>
+    finding.priority > 0 ? finding.priority : Number.MAX_SAFE_INTEGER
+  return rank(a) - rank(b)
+}
+
+function TopActionItems({ findings }: { findings: Finding[] }) {
+  const actions = selectTopActions(findings)
+  if (actions.length === 0) return null
+
+  return (
+    <section className="mt-12" data-testid="top-actions">
+      <h3 className="t-eyebrow text-ink-muted">
+        Top action items
+        <span className="tnum font-normal normal-case tracking-normal text-ink-faint">
+          {' '}
+          · highest severity, one per pillar
+        </span>
+      </h3>
+      <ol className="mt-4 divide-y divide-hairline border-y border-hairline">
+        {actions.map((finding, index) => (
+          <li
+            key={`${finding.framework}-${finding.check_id}`}
+            className="flex items-start gap-4 py-3"
+          >
+            <span className="tnum t-body mt-px w-5 shrink-0 text-right font-semibold text-minfy-indigo">
+              {index + 1}
+            </span>
+            <span className="min-w-0">
+              <span className="t-body block">
+                {finding.remediation || finding.title}
+              </span>
+              <span className="t-caption mt-0.5 block text-ink-muted">
+                {finding.remediation ? (
+                  finding.title
+                ) : (
+                  <>Observed gap — no remediation text was generated.</>
+                )}
+                <span aria-hidden="true"> · </span>
+                <span>{finding.pillar_id.replace(/_/g, ' ')}</span>
+              </span>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
+}
+
+/**
+ * The maturity scale, on hover and on tap.
+ *
+ * Both, deliberately: hover alone is unreachable on a touch screen, so the icon is
+ * a real button that toggles as well. The panel is in the DOM only while shown, so
+ * a screen reader is not read the whole scale on every results page.
+ *
+ * The tiers come from `MATURITY_SCALE`, which is derived from the same `BANDS`
+ * table `maturityFor` uses — the tooltip cannot disagree with the badge above it.
+ */
+function MaturityScaleHint({ current }: { current: MaturityLabel }) {
+  // Hover and tap are tracked separately on purpose. Sharing one flag means a
+  // mouse click — which arrives after a hover has already opened the panel —
+  // toggles it straight back shut, so the tooltip is unopenable with a mouse.
+  const [pinned, setPinned] = useState(false)
+  const [hovered, setHovered] = useState(false)
+  const shown = pinned || hovered
+
+  return (
+    <span
+      className="relative inline-flex"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <button
+        type="button"
+        onClick={() => setPinned((value) => !value)}
+        aria-expanded={shown}
+        aria-label="What the maturity tiers mean"
+        className="flex size-4 items-center justify-center rounded-full border border-ink-faint text-[9px] font-bold text-ink-faint transition-colors hover:border-minfy-indigo hover:text-minfy-indigo"
+      >
+        i
+      </button>
+
+      {shown && (
+        <span
+          role="tooltip"
+          // The badge above is `.t-eyebrow`, so uppercase and letter-spacing are
+          // inherited; the panel is prose and has to opt out of both.
+          className="animate-enter absolute right-0 top-6 z-10 w-60 border border-hairline bg-surface p-3 text-left font-normal normal-case tracking-normal shadow-sm"
+        >
+          <span className="t-eyebrow block text-ink-muted">Maturity tiers</span>
+          <span className="mt-2 block">
+            {MATURITY_SCALE.map((tier) => (
+              <span
+                key={tier.label}
+                className={`t-caption flex items-baseline justify-between gap-4 py-0.5 ${
+                  tier.label === current ? 'font-semibold text-ink' : 'text-ink-muted'
+                }`}
+              >
+                <span>{tier.label}</span>
+                <span className="tnum">{tier.range}</span>
+              </span>
+            ))}
+          </span>
+          <span className="t-caption mt-2 block text-[0.6875rem] leading-snug text-ink-faint">
+            {MATURITY_BOUND_NOTE}
+          </span>
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -456,71 +631,154 @@ function FindingsList({ findings }: { findings: Finding[] }) {
           const group = open.filter((finding) => finding.severity === severity)
           if (group.length === 0) return null
           return (
-            <div key={severity} className="mt-8">
-              <div className="flex items-center gap-2.5">
-                <SeverityMark severity={severity} decorative />
-                <h4 className="t-heading">{SEVERITY_HEADING[severity]}</h4>
-                <span className="tnum t-caption text-ink-muted">({group.length})</span>
-                <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
-              </div>
-              <ol className="divide-y divide-hairline">
-                {group.map((finding) => (
-                  <FindingRow key={`${finding.framework}-${finding.check_id}`} finding={finding} />
-                ))}
-              </ol>
-            </div>
+            <SeverityGroup
+              key={severity}
+              heading={SEVERITY_HEADING[severity]}
+              severity={severity}
+              findings={group}
+            />
           )
         })
       )}
 
       {showPassing && rest.length > 0 && (
-        <div className="animate-enter mt-10">
-          <div className="flex items-center gap-2.5">
-            <h4 className="t-heading text-ink-muted">Passing and not applicable</h4>
-            <span className="tnum t-caption text-ink-muted">({rest.length})</span>
-            <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
-          </div>
-          <ol className="divide-y divide-hairline">
-            {rest.map((finding) => (
-              <FindingRow key={`${finding.framework}-${finding.check_id}`} finding={finding} />
-            ))}
-          </ol>
+        <div className="animate-enter">
+          <SeverityGroup heading="Passing and not applicable" findings={rest} muted />
         </div>
       )}
     </section>
   )
 }
 
-function FindingRow({ finding }: { finding: Finding }) {
-  const muted = finding.status === 'pass' || finding.status === 'not_applicable'
+/**
+ * One collapsible severity group. Closed by default.
+ *
+ * Closed-by-default because a full review is 45 checks: expanded, the page opens
+ * on a wall of text and the reviewer has to scroll to find whether there are any
+ * blockers at all. The count in the header is the thing they actually came for, so
+ * it stays visible whether the group is open or shut.
+ *
+ * A real `<button>` with `aria-expanded`, not a click handler on a div — this has
+ * to work from the keyboard, and the count belongs inside the accessible name so a
+ * screen reader announces "High severity, 14, collapsed".
+ */
+function SeverityGroup({
+  heading,
+  severity,
+  findings,
+  muted,
+}: {
+  heading: string
+  severity?: Severity
+  findings: Finding[]
+  muted?: boolean
+}) {
+  const [open, setOpen] = useState(false)
 
   return (
-    <li className="py-6">
-      <div className="flex items-start gap-4">
+    <div className="mt-8">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="group flex w-full items-center gap-2.5 py-1 text-left"
+      >
+        <Chevron open={open} />
+        {severity && <SeverityMark severity={severity} decorative />}
+        <h4 className={`t-heading ${muted ? 'text-ink-muted' : ''}`}>{heading}</h4>
+        <span className="tnum t-caption text-ink-muted">({findings.length})</span>
+        <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
+      </button>
+
+      {open && (
+        <ol className="animate-enter divide-y divide-hairline">
+          {findings.map((finding) => (
+            <FindingRow
+              key={`${finding.framework}-${finding.check_id}`}
+              finding={finding}
+            />
+          ))}
+        </ol>
+      )}
+    </div>
+  )
+}
+
+/** Shared disclosure affordance, so both levels of the accordion rotate alike. */
+function Chevron({ open, className }: { open: boolean; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 12 12"
+      aria-hidden="true"
+      className={`size-3 shrink-0 fill-none stroke-ink-muted stroke-2 transition-transform duration-200 ${
+        open ? 'rotate-90' : ''
+      } ${className ?? ''}`}
+    >
+      <path d="M4 2.5 L8 6 L4 9.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/**
+ * One finding, collapsed to its title and how much it touches.
+ *
+ * The collapsed row carries the title, the status tag, and the affected-component
+ * count — enough to decide whether to open it. Evidence and remediation are the
+ * long text and are what expanding reveals.
+ *
+ * The count is deliberately a count and not the list of names: names are as long as
+ * the design's naming convention allows, and a collapsed row has to stay one line.
+ */
+function FindingRow({ finding }: { finding: Finding }) {
+  const [open, setOpen] = useState(false)
+  const muted = finding.status === 'pass' || finding.status === 'not_applicable'
+  const affected = finding.affected_components.length
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="flex w-full items-start gap-4 py-4 text-left transition-colors hover:bg-surface-sunken"
+      >
         <span
           className="tnum t-caption mt-0.5 w-6 shrink-0 text-right text-ink-faint"
           aria-hidden={finding.priority === 0}
         >
           {finding.priority > 0 ? finding.priority : '·'}
         </span>
+        <Chevron open={open} className="mt-1.5" />
 
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5">
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5">
             <h5 className={`t-heading ${muted ? 'font-medium text-ink-muted' : ''}`}>
               {finding.title}
             </h5>
             <StatusTag status={finding.status} />
-          </div>
+          </span>
 
-          <p className="t-caption mt-1.5 flex flex-wrap items-center gap-x-2 text-ink-muted">
+          <span className="t-caption mt-1.5 flex flex-wrap items-center gap-x-2 text-ink-muted">
             <SeverityMark severity={finding.severity} />
             <span>{finding.pillar_id.replace(/_/g, ' ')}</span>
             <span aria-hidden="true">·</span>
             <span className="font-mono text-ink-faint">{finding.check_id}</span>
-          </p>
+            {affected > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="tnum">
+                  {affected} component{affected === 1 ? '' : 's'}
+                </span>
+              </>
+            )}
+          </span>
+        </span>
+      </button>
 
+      {open && (
+        <div className="animate-enter pb-6 pl-14">
           {finding.evidence && (
-            <p className="t-body mt-3 max-w-prose text-ink-muted">{finding.evidence}</p>
+            <p className="t-body max-w-prose text-ink-muted">{finding.evidence}</p>
           )}
 
           {finding.remediation && (
@@ -538,13 +796,13 @@ function FindingRow({ finding }: { finding: Finding }) {
             </div>
           )}
 
-          {finding.affected_components.length > 0 && (
+          {affected > 0 && (
             <p className="t-caption mt-3 text-ink-faint">
               Affects: {finding.affected_components.join(', ')}
             </p>
           )}
         </div>
-      </div>
+      )}
     </li>
   )
 }

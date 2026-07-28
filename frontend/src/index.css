@@ -17,6 +17,9 @@
   --color-minfy-blue: #1c55bb;
   --color-minfy-navy: #1b263b;
   --color-minfy-slate: #062f6d;
+  /* The logo's second colour, also from that stylesheet (#fdc921). Used by the
+     mark only — it is not a status colour and must not encode severity. */
+  --color-minfy-yellow: #fdc921;
 
   /*
    * Pastel accent blocks, also from that stylesheet. The live site uses them as

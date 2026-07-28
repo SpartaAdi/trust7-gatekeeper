@@ -34,10 +34,177 @@ describe('ResultsView', () => {
     expect(screen.getByText('AWS Well-Architected Framework')).toBeInTheDocument()
     expect(screen.getByText('Minfy TRUST-7 Framework')).toBeInTheDocument()
     expect(screen.getByText('Security')).toBeInTheDocument()
+
+    // The findings list itself, not the action-items shortlist above it — both
+    // draw on the same finding, so this query is scoped to the collapsed group.
+    const group = screen.getByRole('button', { name: /high severity/i })
+    await userEvent.click(group)
+    const list = group.parentElement!
+    expect(list).toHaveTextContent(/customer data store has no encryption at rest/i)
+
+    // The remediation text lives one level deeper, inside the finding itself.
+    await userEvent.click(
+      screen.getByRole('button', { name: /sec_encryption_at_rest/i }),
+    )
+    expect(list).toHaveTextContent(/enable sse-kms on the table/i)
+  })
+
+  it('shows the score out of 100, not as a bare number', async () => {
+    getReview.mockResolvedValue(resultFixture({ overall_score: 4.5 }))
+
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+
+    // A bare "4.5" reads as 4.5 out of 5 to anyone who has seen a star rating.
+    expect(await screen.findByText('/100')).toBeInTheDocument()
+  })
+
+  it('explains the maturity tiers on demand, using the scoring boundaries', async () => {
+    getReview.mockResolvedValue(resultFixture())
+    const user = userEvent.setup()
+
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    await user.click(
+      await screen.findByRole('button', { name: /what the maturity tiers mean/i }),
+    )
+
+    const tip = screen.getByRole('tooltip')
+    // Every tier, with the boundaries that maturity.ts actually uses.
+    for (const { label, range } of [
+      { label: 'Pioneering', range: '90–100' },
+      { label: 'Certified', range: '75–90' },
+      { label: 'Governed', range: '60–75' },
+      { label: 'Managed', range: '40–60' },
+      { label: 'Aware', range: '0–40' },
+    ]) {
+      expect(tip).toHaveTextContent(label)
+      expect(tip).toHaveTextContent(range)
+    }
+  })
+
+  it('lists top action items above the executive summary', async () => {
+    getReview.mockResolvedValue(resultFixture())
+
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+
+    const actions = await screen.findByTestId('top-actions')
+    // The imperative comes from the finding's own remediation text.
+    expect(actions).toHaveTextContent(/enable sse-kms on the table/i)
+    // And the observation it addresses is kept as context.
+    expect(actions).toHaveTextContent(/customer data store has no encryption/i)
+
+    // Position matters: this is a shortlist to read before the narrative.
+    const summary = screen.getByText(/this design scores 62.5 of 100/i)
     expect(
-      screen.getByText(/customer data store has no encryption at rest/i),
-    ).toBeInTheDocument()
-    expect(screen.getByText(/enable sse-kms on the table/i)).toBeInTheDocument()
+      actions.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('omits the action list entirely when nothing is open at high severity', async () => {
+    getReview.mockResolvedValue(
+      resultFixture({
+        findings: resultFixture().findings.map((f) => ({ ...f, status: 'pass' as const })),
+      }),
+    )
+
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+
+    await screen.findByRole('heading', { name: /payments platform/i })
+    expect(screen.queryByTestId('top-actions')).not.toBeInTheDocument()
+  })
+
+  describe('findings accordion', () => {
+    it('starts every severity group collapsed', async () => {
+      getReview.mockResolvedValue(resultFixture())
+
+      render(<ResultsView
+          reviewId="rev-1"
+          onReReview={vi.fn()}
+          onStartOver={vi.fn()}
+          onBackToHistory={vi.fn()}
+        />)
+
+      const group = await screen.findByRole('button', { name: /high severity/i })
+      expect(group).toHaveAttribute('aria-expanded', 'false')
+      // The count is on the header, so it is readable while shut.
+      expect(group).toHaveTextContent('(1)')
+      // No finding row exists yet, so nothing inside can be read or tabbed to.
+      expect(
+        screen.queryByRole('button', { name: /sec_encryption_at_rest/i }),
+      ).not.toBeInTheDocument()
+    })
+
+    it('expands a group to collapsed findings, then a finding to its detail', async () => {
+      getReview.mockResolvedValue(resultFixture())
+      const user = userEvent.setup()
+
+      render(<ResultsView
+          reviewId="rev-1"
+          onReReview={vi.fn()}
+          onStartOver={vi.fn()}
+          onBackToHistory={vi.fn()}
+        />)
+
+      await user.click(await screen.findByRole('button', { name: /high severity/i }))
+
+      // Level one open: the finding is present, but only as a summary row —
+      // its title, its status, and how much it touches.
+      const row = screen.getByRole('button', { name: /sec_encryption_at_rest/i })
+      expect(row).toHaveAttribute('aria-expanded', 'false')
+      expect(row).toHaveTextContent('1 component')
+      expect(row).not.toHaveTextContent(/the design names a dynamodb table/i)
+
+      // Level two open: the observation text appears.
+      await user.click(row)
+      expect(row).toHaveAttribute('aria-expanded', 'true')
+      expect(
+        screen.getByText(/the design names a dynamodb table/i),
+      ).toBeInTheDocument()
+    })
+
+    it('collapses again on a second click', async () => {
+      getReview.mockResolvedValue(resultFixture())
+      const user = userEvent.setup()
+
+      render(<ResultsView
+          reviewId="rev-1"
+          onReReview={vi.fn()}
+          onStartOver={vi.fn()}
+          onBackToHistory={vi.fn()}
+        />)
+
+      const group = await screen.findByRole('button', { name: /high severity/i })
+      await user.click(group)
+      expect(
+        screen.getByRole('button', { name: /sec_encryption_at_rest/i }),
+      ).toBeInTheDocument()
+
+      await user.click(group)
+      expect(
+        screen.queryByRole('button', { name: /sec_encryption_at_rest/i }),
+      ).not.toBeInTheDocument()
+    })
   })
 
   it('renders the delta panel when the review was a re-review', async () => {

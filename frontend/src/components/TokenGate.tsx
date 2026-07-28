@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { setToken } from '../token'
+import { MinfyMark } from './MinfyMark'
 
 interface Props {
   /** Set when a previous request was rejected, rather than on first load. */
@@ -33,10 +34,7 @@ export function TokenGate({ rejected, onUnlocked }: Props) {
         onSubmit={submit}
         className="animate-enter w-full max-w-sm bg-surface px-7 py-8"
       >
-        <span
-          aria-hidden="true"
-          className="mb-6 block h-1 w-12 rounded-full bg-minfy-indigo"
-        />
+        <MinfyMark size={30} className="mb-6 block" />
         <h1 className="t-title">Trust7 Gatekeeper</h1>
         <p className="t-body mt-2 text-ink-muted">
           This demo is access-restricted. Enter the access token to continue.

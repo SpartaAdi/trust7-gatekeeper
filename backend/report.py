@@ -53,15 +53,32 @@ from schema import Finding, ReviewResult
 
 # --------------------------------------------------------------------------- #
 # Brand palette — Minfy. No purple, no gradient, no third accent hue.
+#
+# These are the same values as the web UI's theme tokens in
+# `frontend/src/index.css`, sampled from the live minfytech.com stylesheet. The
+# report and the dashboard have to agree: a reviewer downloads the PDF from the
+# results page, and two different accent colours for the same review reads as two
+# different tools. Frontend token names are given so the pairing is greppable.
 # --------------------------------------------------------------------------- #
-NAVY = HexColor("#0A2540")
-ORANGE = HexColor("#E85D26")
-NAVY_LIGHT = HexColor("#1A3A5C")
-INK = HexColor("#333333")
+NAVY = HexColor("#1B263B")       # --color-minfy-navy
+ACCENT = HexColor("#1420BE")     # --color-minfy-indigo — the primary accent
+ACCENT_LIGHT = HexColor("#1C55BB")  # --color-minfy-blue
+# The accent again, for text sitting ON the navy cover. #1420BE is a dark blue on a
+# dark navy — legible on the white body pages and close to unreadable on the cover,
+# which the superseded orange never was. #4A81F2 is the lighter blue from the same
+# stylesheet, and is the cover's accent for that reason alone.
+ACCENT_ON_DARK = HexColor("#4A81F2")
+INK = HexColor("#1B263B")        # --color-ink
 WHITE = HexColor("#FFFFFF")
-OFF_WHITE = HexColor("#F5F5F5")
-HAIRLINE = HexColor("#D8DCE1")
-INK_MUTED = HexColor("#6B7480")
+OFF_WHITE = HexColor("#F6F7FD")  # --color-surface-sunken
+HAIRLINE = HexColor("#E2E2E2")   # --color-hairline
+INK_MUTED = HexColor("#5D6C7B")  # --color-ink-muted
+
+# Flat pastel blocks, as the dashboard uses behind its framework cards. They carry
+# no severity meaning; pillar strength is the opacity ramp below, never hue.
+PASTEL_SKY = HexColor("#CEE2FD")   # --color-pastel-sky — AWS Well-Architected
+PASTEL_MINT = HexColor("#CFF5DE")  # --color-pastel-mint — Minfy TRUST-7
+PASTEL_CREAM = HexColor("#FBF8DE")  # --color-pastel-cream — executive summary
 
 PAGE = pagesizes.A4
 PAGE_W, PAGE_H = PAGE
@@ -120,11 +137,11 @@ def _style(
 
 
 S = {
-    "cover_eyebrow": _style("ce", 8.5, 12, ORANGE, bold=True, tracking=1.6),
+    "cover_eyebrow": _style("ce", 8.5, 12, ACCENT_ON_DARK, bold=True, tracking=1.6),
     "cover_title": _style("ct", 30, 35, WHITE, bold=True),
     "cover_meta": _style("cm", 10, 15, HexColor("#AEBAC7")),
     "cover_score": _style("cs", 66, 66, WHITE, bold=True),
-    "cover_band": _style("cb", 13, 17, ORANGE, bold=True),
+    "cover_band": _style("cb", 13, 17, ACCENT_ON_DARK, bold=True),
     "cover_foot": _style("cf", 8, 11, HexColor("#8494A5")),
     "h1": _style("h1", 17, 21, NAVY, bold=True, space_after=2),
     "h2": _style("h2", 12, 16, NAVY, bold=True, space_before=10, space_after=4),
@@ -201,15 +218,36 @@ class HRule(Flowable):
 # Page furniture
 # --------------------------------------------------------------------------- #
 
+def _draw_minfy_mark(canvas, x: float, y: float, size: float, block: Color) -> None:
+    """The Minfy mark: a block with the top-right corner notched out for a square.
+
+    Same geometry as `frontend/src/components/MinfyMark.tsx`, in three rectangles
+    rather than one path because that is all the canvas API needs here. `block` is
+    white on the navy cover and the brand blue anywhere light. The wordmark is
+    deliberately not reproduced — see that component's note.
+    """
+    canvas.saveState()
+    canvas.setFillColor(block)
+    canvas.rect(x, y, 0.46 * size, size, stroke=0, fill=1)          # left column
+    canvas.rect(x, y, size, 0.50 * size, stroke=0, fill=1)          # bottom half
+    canvas.setFillColor(HexColor("#FDC921"))                        # logo yellow
+    canvas.rect(x + 0.54 * size, y + 0.58 * size, 0.46 * size, 0.42 * size,
+                stroke=0, fill=1)
+    canvas.restoreState()
+
+
 def _cover_background(canvas, _doc) -> None:
     canvas.saveState()
     canvas.setFillColor(NAVY)
     canvas.rect(0, 0, PAGE_W, PAGE_H, stroke=0, fill=1)
-    # One flat orange band as the only accent — a solid fill, not a gradient.
-    canvas.setFillColor(ORANGE)
+    # One flat accent band, the same indigo the dashboard uses for primary
+    # actions — a solid fill, not a gradient.
+    canvas.setFillColor(ACCENT)
     canvas.rect(0, PAGE_H - 6 * mm, PAGE_W, 6 * mm, stroke=0, fill=1)
-    canvas.setFillColor(NAVY_LIGHT)
+    canvas.setFillColor(ACCENT_LIGHT)
     canvas.rect(MARGIN, 34 * mm, 52 * mm, 0.9 * mm, stroke=0, fill=1)
+    # Between the accent band and the cover frame, which starts 22mm down.
+    _draw_minfy_mark(canvas, MARGIN, PAGE_H - 19 * mm, 8 * mm, WHITE)
     canvas.restoreState()
 
 
@@ -290,6 +328,9 @@ def _cover(result: ReviewResult) -> list:
         # block of text stranded at the top.
         Spacer(1, 46 * mm),
         Paragraph(f"{result.overall_score:.1f}", S["cover_score"]),
+        # Leading equals the 66pt size, so without this the band label sits in the
+        # score's descender space and the two read as one collided line.
+        Spacer(1, 2.5 * mm),
         Paragraph(f"{_t(band)} · overall maturity", S["cover_band"]),
         Spacer(1, 26 * mm),
     ]
@@ -332,6 +373,38 @@ def _cover(result: ReviewResult) -> list:
     return story
 
 
+# Which pastel sits behind which framework, matching FRAMEWORK_BLOCK in
+# frontend/src/views/ResultsView.tsx. An unrecognised framework still gets a block
+# rather than none, so a third framework would read as a card too.
+FRAMEWORK_BLOCK = {
+    "aws_waf": PASTEL_SKY,
+    "trust7": PASTEL_MINT,
+}
+
+
+def _pastel_block(content: Flowable, colour: Color, width: float) -> Table:
+    """One flat pastel band behind a flowable, as the dashboard does for cards.
+
+    Deliberately NOT applied behind the scorecard table itself: the pillar swatches
+    are alpha flattened onto white by `_blend_on_white`, so on a tinted background
+    a weak score would render as a pale *white* cell rather than a pale tint of the
+    ramp — the encoding would invert at the low end.
+    """
+    block = Table([[content]], colWidths=[width])
+    block.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colour),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4 * mm),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4 * mm),
+                ("TOPPADDING", (0, 0), (-1, -1), 3 * mm),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3 * mm),
+            ]
+        )
+    )
+    return block
+
+
 def _scorecard(result: ReviewResult) -> list:
     width = PAGE_W - 2 * MARGIN
     story: list = [
@@ -347,11 +420,15 @@ def _scorecard(result: ReviewResult) -> list:
 
     for framework in result.frameworks:
         story.append(
-            Paragraph(
-                f"{_t(framework.framework_name)} "
-                f'<font color="#6B7480" size="9">— {framework.score:.1f} · '
-                f"{_t(maturity.maturity_for(framework.score))}</font>",
-                S["h2"],
+            _pastel_block(
+                Paragraph(
+                    f"{_t(framework.framework_name)} "
+                    f'<font color="#5D6C7B" size="9">— {framework.score:.1f} · '
+                    f"{_t(maturity.maturity_for(framework.score))}</font>",
+                    S["h2"],
+                ),
+                FRAMEWORK_BLOCK.get(framework.framework, PASTEL_SKY),
+                width,
             )
         )
         rows: list[list] = [
@@ -460,7 +537,7 @@ def _findings(result: ReviewResult) -> list:
                 [
                     Paragraph(
                         f"{_t(SEVERITY_HEADING[severity])} "
-                        f'<font color="#6B7480">({len(group)})</font>',
+                        f'<font color="#5D6C7B">({len(group)})</font>',
                         S["h2"],
                     ),
                     HRule(width, NAVY, 0.8),
@@ -489,7 +566,7 @@ def _finding_block(finding: Finding, width: float) -> Flowable:
     rank = str(finding.priority) if finding.priority > 0 else "·"
     parts: list = [
         Paragraph(
-            f'<font color="#E85D26"><b>{_t(rank)}</b></font>&nbsp;&nbsp;'
+            f'<font color="#1420BE"><b>{_t(rank)}</b></font>&nbsp;&nbsp;'
             f"<b>{_t(finding.title)}</b>",
             S["h3"],
         ),
@@ -526,7 +603,7 @@ def _finding_block(finding: Finding, width: float) -> Flowable:
             TableStyle(
                 [
                     ("BACKGROUND", (0, 0), (-1, -1), OFF_WHITE),
-                    ("LINEBEFORE", (0, 0), (0, -1), 1.4, ORANGE),
+                    ("LINEBEFORE", (0, 0), (0, -1), 1.4, ACCENT),
                     ("LEFTPADDING", (0, 0), (-1, -1), 4 * mm),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
                     ("TOPPADDING", (0, 0), (-1, -1), 3 * mm),
@@ -550,12 +627,18 @@ def _finding_block(finding: Finding, width: float) -> Flowable:
 
 
 def _summaries(result: ReviewResult) -> list:
+    width = PAGE_W - 2 * MARGIN
     story: list = []
     if result.executive_summary:
+        # Cream block, the same treatment the dashboard gives this paragraph.
         story += [
             Paragraph("Executive summary", S["h1"]),
             Spacer(1, 2 * mm),
-            Paragraph(_t(result.executive_summary), S["body"]),
+            _pastel_block(
+                Paragraph(_t(result.executive_summary), S["body"]),
+                PASTEL_CREAM,
+                width,
+            ),
             Spacer(1, 6 * mm),
         ]
     if result.summary:
