@@ -81,6 +81,7 @@ frontend/
 rubric/
   rubric.json     45 checks across 13 pillars
 render.yaml       backend service definition
+scripts/warm.sh   keeps the Render free tier awake during a demo
 frontend/vercel.json  SPA routing
 ```
 
@@ -95,7 +96,7 @@ frontend/vercel.json  SPA routing
 | `GET` | `/reviews` | Past reviews, newest first, with pillar scores for the history heatmap. |
 | `GET` | `/reviews/{id}` | The finished review as structured JSON. |
 | `GET` | `/reviews/{id}/report.pdf` | The review as a formatted PDF, rendered on demand. |
-| `GET` | `/health` | Liveness probe, and Render's health check path. The only ungated route. |
+| `GET`/`HEAD` | `/health` | Liveness probe, Render's health check, and the warm-up ping target. The only ungated route. |
 
 ## Demo access gate
 
@@ -294,6 +295,43 @@ reviews, and progress records are lost on the next wake. Consequences:
 For history that outlives a restart, attach a Render **persistent disk** mounted
 at `./local-data` (a paid plan) — no code change needed, `LOCAL_DATA_DIR` already
 points there.
+
+### Keeping the backend awake
+
+A ping inside the 15-minute idle window prevents the spin-down, which avoids the
+cold start *and* keeps `local-data/` alive for the duration — so for a demo it is
+worth doing. `/health` is the one route the demo token gate skips, so a pinger
+needs no credentials, and it answers both `GET` and `HEAD` so any monitor works.
+
+**Recommended for an unattended demo — an external free pinger.** Nothing to run
+and it survives your laptop closing. On [cron-job.org](https://cron-job.org) or
+[UptimeRobot](https://uptimerobot.com), create one monitor:
+
+| Setting | Value |
+| --- | --- |
+| URL | `https://<your-service>.onrender.com/health` |
+| Interval | 5 or 10 minutes (must be under 15) |
+| Method | `GET` or `HEAD` — both return 200 |
+
+**For a window you are sitting through — run it locally.** One line, no signup:
+
+```bash
+while true; do curl -sS -o /dev/null -w "%{http_code} $(date +%H:%M:%S)\n" \
+  https://<your-service>.onrender.com/health; sleep 600; done
+```
+
+Or the committed version, which logs legibly and keeps going through a failed
+ping rather than exiting:
+
+```bash
+./scripts/warm.sh https://<your-service>.onrender.com
+```
+
+Two caveats. Free instance-hours are ~750/month across the account, and holding
+one service up continuously spends ~720 of them — fine for a day, not as a
+permanent arrangement, so turn the pinger off afterwards. And warming prevents
+idle spin-down, not redeploys or platform restarts; if either happens,
+`local-data/` is still lost.
 
 ## Tests
 

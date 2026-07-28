@@ -117,9 +117,15 @@ else:
     )
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health() -> dict[str, str]:
-    """Liveness probe — also Render's health check path. Never gated."""
+    """Liveness probe — also Render's health check path. Never gated.
+
+    HEAD as well as GET because free uptime pingers, used to keep Render's free
+    tier from spinning down, often send HEAD by default. A GET-only route answers
+    those with 405, which still resets the idle timer but shows the service as
+    down on the monitor's dashboard.
+    """
     return {"status": "ok", "service": "trust7-gatekeeper"}
 
 
