@@ -61,7 +61,7 @@ backend/
   main.py         FastAPI app (uvicorn entrypoint)
   config.py       environment configuration
   storage.py      JSON + blob persistence under local-data/
-  llm.py          the only module that calls the Anthropic SDK
+  llm.py          the only module that calls an LLM provider
   rubric.py       loads and flattens rubric.json
   scoring.py      pillar/framework scores and re-review deltas
   schema.py       Pydantic models — the common schema
