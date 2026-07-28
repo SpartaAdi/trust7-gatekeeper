@@ -53,14 +53,25 @@ OPENROUTER_LOWEST_ENDPOINT_COMPLETION_CAP = 16_384
 # silently reduced: raising evaluate to 64000 while this sat at 32000 would have
 # looked applied and changed nothing.
 #
-# 64000 also keeps the routable provider set wide. Of the 22 endpoints serving
-# kimi-k2.6, only DeepInfra (16,384) and Venice (65,536) declare a cap below
-# 256,000, so a request at or under 65,536 still reaches 15 of them. Lower this to
-# force every request under the floor below if routing ever reaches a
-# low-capability endpoint.
+# 128000 is headroom, not a target. It changes no request today — evaluate asks
+# 64000 and min(64000, 128000) is 64000 — it just means a future stage needing
+# more is not silently clipped by this constant.
+#
+# The trade-off it introduces: at 64000 this constant doubled as a routing
+# guard, because it could not pass a request large enough to exclude providers.
+# It no longer can, so ROUTING_SAFE_COMPLETION_TOKENS below carries that job and
+# a test asserts no stage exceeds it. Lower this to force every request under the
+# floor if routing ever reaches a low-capability endpoint.
 OPENROUTER_MAX_COMPLETION_TOKENS = int(
-    os.environ.get("OPENROUTER_MAX_COMPLETION_TOKENS", "64000")
+    os.environ.get("OPENROUTER_MAX_COMPLETION_TOKENS", "128000")
 )
+
+# The largest request that still reaches a wide set of providers. Of the 22
+# endpoints serving kimi-k2.6, only DeepInfra (16,384) and Venice (65,536)
+# declare a cap below 256,000, so a request at or under 65,536 reaches 15 of
+# them; above it, 13. No stage needs more, and a stage that crosses this should
+# be a deliberate decision rather than a number nudged upward.
+OPENROUTER_ROUTING_SAFE_COMPLETION_TOKENS = 65_536
 
 # Operational escape hatch: comma-separated OpenRouter provider names to exclude
 # from routing, e.g. "DeepInfra,Sail Research". Empty by default.

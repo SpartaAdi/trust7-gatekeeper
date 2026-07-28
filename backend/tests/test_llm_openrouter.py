@@ -325,6 +325,40 @@ def test_the_configured_ceiling_is_not_below_what_any_stage_requests() -> None:
     )
 
 
+def test_no_stage_requests_more_than_the_routing_safe_ceiling() -> None:
+    """The guard the ceiling used to provide implicitly.
+
+    While OPENROUTER_MAX_COMPLETION_TOKENS was 64000 it could not pass a request
+    big enough to narrow routing. At 128000 it can, so this asserts the thing that
+    actually matters: no stage asks for more than 65,536, above which only 13 of
+    the 22 providers serving kimi-k2.6 remain routable instead of 15.
+    """
+    import re
+
+    stages_src = (
+        pathlib.Path(__file__).resolve().parent.parent / "agent" / "stages.py"
+    ).read_text()
+    requested = [int(n) for n in re.findall(r"max_tokens=(\d+),", stages_src)]
+
+    assert requested, "no max_tokens call sites found — has stages.py moved?"
+    over = [n for n in requested if n > config.OPENROUTER_ROUTING_SAFE_COMPLETION_TOKENS]
+    assert not over, (
+        f"stage(s) requesting {over} exceed the routing-safe "
+        f"{config.OPENROUTER_ROUTING_SAFE_COMPLETION_TOKENS}, which drops Venice "
+        f"and StreamLake from the routable set"
+    )
+
+
+def test_raising_the_ceiling_did_not_change_what_evaluate_actually_requests(
+    monkeypatch,
+) -> None:
+    """Headroom must not become a bigger request by accident: the clamp takes the
+    minimum, so a 128000 ceiling still sends evaluate's own 64000."""
+    monkeypatch.setattr(config, "OPENROUTER_MAX_COMPLETION_TOKENS", 128_000)
+
+    assert sent_request(monkeypatch, max_tokens=64_000)["max_tokens"] == 64_000
+
+
 def test_evaluate_asks_for_more_output_than_the_other_stages() -> None:
     """Evaluate emits a finding per check with evidence, and truncated at 32000 in
     a real run. It should be the stage with the most headroom."""

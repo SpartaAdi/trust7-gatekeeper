@@ -69,7 +69,7 @@ backend/
   maturity.py     score -> band; mirrors frontend/src/maturity.ts
   ingestion/      document, draw.io, and vision parsing; normalization
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          224 tests
+  tests/          228 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -175,7 +175,7 @@ between reviews, which is what implicit caching keys on.
 
 ### The output-token squeeze
 
-`OPENROUTER_MAX_COMPLETION_TOKENS` (default 64000) caps every request, and
+`OPENROUTER_MAX_COMPLETION_TOKENS` (default 128000) caps every request, and
 `finish_reason: "length"` raises `TruncatedResponse` rather than surfacing as a
 JSON decode error. That guard earned its place: a real run truncated the evaluate
 stage at 32000/32000 tokens with `finish_reason: "length"`, so a framework's
@@ -199,6 +199,12 @@ only DeepInfra (16,384) and Venice (65,536) declare a cap below 256,000, so a
 request at or under 65,536 still reaches 15 of them. Going higher would drop to 13
 for headroom no framework needs. The only provider this excludes is DeepInfra,
 which could not have served the old 32000 either.
+
+The ceiling sits at 128000 as headroom and changes no request today: the clamp
+takes the minimum, so evaluate still sends its own 64000. It used to double as a
+routing guard — at 64000 it could not pass a request large enough to narrow the
+provider set — so that job moved to `OPENROUTER_ROUTING_SAFE_COMPLETION_TOKENS`
+(65,536), and a test asserts no stage exceeds it.
 
 The remaining lever, if evaluate ever truncates again, is capping reasoning
 explicitly with `reasoning: {max_tokens: N}` so the JSON gets a guaranteed share
@@ -352,7 +358,7 @@ idle spin-down, not redeploys or platform restarts; if either happens,
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 224 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 228 tests
 cd frontend && npm test                                                          # 37 tests
 ```
 
