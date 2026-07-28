@@ -11,7 +11,13 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.13.5"
+      # Which provider serves model calls. Flip to "anthropic" to revert.
+      - key: LLM_PROVIDER
+        value: openrouter
       # Set in the Render dashboard (Environment tab). Never committed.
+      # Only the key for the selected LLM_PROVIDER is required.
+      - key: OPENROUTER_API_KEY
+        sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
       # The Vercel frontend's exact origin — no wildcard. Set after the

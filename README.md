@@ -49,9 +49,10 @@ and it is handed the computed scores so it interprets them instead of recounting
 The backend is a plain FastAPI app run under uvicorn — no serverless target and
 no Lambda adapter. The review runs as a background task in-process, because a
 full analysis takes minutes and no client will hold a request open that long.
-Persistence is JSON files and uploaded blobs on the local filesystem. The LLM is
-the Claude API accessed directly via the Anthropic API — not Bedrock —
-pay-per-token with no provisioned throughput.
+Persistence is JSON files and uploaded blobs on the local filesystem. Model calls
+go through OpenRouter to `moonshotai/kimi-k2.6` by default, pay-per-token with no
+provisioned throughput; `LLM_PROVIDER=anthropic` switches back to the Claude API
+direct (not Bedrock) without a code change. See **LLM provider** below.
 
 ## Layout
 
@@ -68,7 +69,7 @@ backend/
   maturity.py     score -> band; mirrors frontend/src/maturity.ts
   ingestion/      document, draw.io, and vision parsing; normalization
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          147 tests
+  tests/          183 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -96,11 +97,71 @@ frontend/vercel.json  SPA routing
 | `GET` | `/reviews/{id}/report.pdf` | The review as a formatted PDF, rendered on demand. |
 | `GET` | `/health` | Liveness probe, and Render's health check path. |
 
-Two cost controls are built into the model calls. The rubric is byte-identical on
-every review and sits behind a prompt-cache breakpoint, so repeat reviews read it
-from cache rather than paying for it again. And effort is set per stage — the
-evaluation stage decides the score and gets `high`, while classification and
-remediation run at `medium`.
+## LLM provider
+
+One switch, `LLM_PROVIDER`, chosen so a bad day is an environment change and a
+restart rather than a revert commit:
+
+| Value | Client | Model | Key |
+| --- | --- | --- | --- |
+| `openrouter` (default) | OpenAI-compatible, `https://openrouter.ai/api/v1` | `moonshotai/kimi-k2.6` | `OPENROUTER_API_KEY` |
+| `anthropic` | Anthropic SDK | `claude-sonnet-5` | `ANTHROPIC_API_KEY` |
+
+Callers speak one internal dialect and `llm.py` translates per provider, so
+`agent/stages.py` and `ingestion/vision.py` are provider-agnostic and the
+Anthropic path stays tested rather than rotting.
+
+`moonshotai/kimi-k2.6` was picked against the live model list, not a blog post: it
+is the current general Moonshot model with **both** image input and structured
+outputs, at 262k context and roughly a tenth of Sonnet's per-token cost. Note that
+`moonshotai/kimi-k2` — the obvious-looking slug — is text-only with no structured
+output, and would have silently broken the vision path and schema enforcement.
+
+**Three things about OpenRouter that shape the implementation.**
+
+*Support is per endpoint, not per model.* Of the 22 providers serving kimi-k2.6,
+at least one reports no `structured_outputs` and another no `response_format`, so
+default routing can land somewhere the schema is ignored. Every request therefore
+sets `provider: {require_parameters: true}`. `OPENROUTER_IGNORE_PROVIDERS` is the
+escape hatch for excluding a specific provider without a deploy.
+
+*A schema is a request, not a promise.* OpenRouter's own docs say some providers
+"guarantee schema-conforming output, while others translate your schema or treat
+it as a strong hint". So `llm.enforce_schema` validates every response, on both
+providers, and it is the real guarantee. Additive deviations — keys forbidden by
+`additionalProperties: false` — are pruned and logged, because dropping them
+loses nothing we asked for and failing an already-paid-for review would be worse.
+Substantive ones — a missing required field, a wrong type, a value outside an enum
+— raise. A findings list with an invented status is worse than no findings list.
+
+*Effort had to be re-homed.* kimi-k2.6 exposes no `reasoning_effort`, so the
+per-stage tuning moved to OpenRouter's unified `reasoning: {effort}`, which takes
+the same vocabulary and maps it to the nearest level the endpoint supports. The
+intent survives: evaluate decides the score and runs at `high`, everything else at
+`medium`. `exclude: true` keeps reasoning text out of the response, since we never
+read it and reasoning tokens bill as output tokens.
+
+Caching still applies but is no longer ours to place: Moonshot caching via
+OpenRouter is automatic and takes no breakpoints, so the explicit `cache_control`
+on the rubric prefix is dropped on this path. The prefix is still byte-identical
+between reviews, which is what implicit caching keys on.
+
+### The output-token squeeze
+
+`OPENROUTER_MAX_COMPLETION_TOKENS` (default 32000) caps every request, and
+`finish_reason: "length"` raises `TruncatedResponse` rather than surfacing as a
+JSON decode error.
+
+**This is genuinely tight and worth fixing properly.** The evaluate stage asks for
+32,000 output tokens, while the lowest-capability endpoint serving this model
+advertises 16,384 — and reasoning tokens count against the same budget. Most
+endpoints offer 262,144, so routing normally avoids the problem, but the margin
+depends on routing rather than on design. The real fix is to split evaluate from
+one call per framework (26 and 19 checks) into one per pillar (13 calls of 2–7
+checks), which would drop each request to a few thousand output tokens and remove
+the dependence entirely. That is a pipeline change and is deliberately not in this
+one; until then, `TruncatedResponse` names the cause and `OPENROUTER_IGNORE_PROVIDERS`
+can exclude a low-cap provider.
 
 ## Running locally
 
@@ -122,8 +183,9 @@ npm install
 npm run dev                     # http://localhost:5173
 ```
 
-`ANTHROPIC_API_KEY` is required — the pipeline fails at the classify stage
-without it, and the error surfaces in the UI rather than silently.
+A provider key is required — `OPENROUTER_API_KEY` by default — and the pipeline
+fails at the classify stage without it, with the error surfacing in the UI rather
+than silently.
 
 ## Deploying
 
@@ -138,7 +200,8 @@ Point Render at this repo; `render.yaml` defines the service (free tier, Python
 
 | Variable | Value |
 | --- | --- |
-| `ANTHROPIC_API_KEY` | your key. Never committed; `.env` is gitignored. |
+| `OPENROUTER_API_KEY` | your key, for the default provider. Never committed; `.env` is gitignored. |
+| `ANTHROPIC_API_KEY` | only needed if you set `LLM_PROVIDER=anthropic`. |
 | `CORS_ALLOWED_ORIGIN` | the Vercel URL from step 2. Set a placeholder now, correct it in step 3. |
 
 Note the service URL, e.g. `https://trust7-gatekeeper-api.onrender.com`.
@@ -209,7 +272,7 @@ points there.
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 147 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 183 tests
 cd frontend && npm test                                                          # 26 tests
 ```
 
@@ -234,8 +297,9 @@ cd backend && python scripts/real_api_e2e.py
 It runs all six stages against the live API on a synthetic fixture — an invented
 expense portal, deliberately not any real engagement — and prints every request
 as sent, plus per-stage progress and token usage. It confirms four things: the
-calls complete, the model resolves to `claude-sonnet-5`, the
-`structured-outputs-2025-11-13` beta is accepted, and the responses validate
+calls complete, the model resolves to the provider's expected default, structured
+output is accepted (`response_format` on OpenRouter, the beta header on
+Anthropic), and the responses validate
 against schemas with `additionalProperties: false` on every object node. It exits
 `2` without spending anything if no key is configured, and it treats a
 fallback retry as a failure rather than a pass, since a retry means the first

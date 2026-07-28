@@ -1,12 +1,17 @@
-"""One REAL end-to-end pipeline run against the live Anthropic API.
+"""One REAL end-to-end pipeline run against the live LLM provider.
 
 Nothing is stubbed. Every one of the six stages runs, and every model call goes
-to api.anthropic.com with the key from backend/.env (or the environment).
+to whichever provider `LLM_PROVIDER` selects, using the key from backend/.env (or
+the environment):
 
-Verifies the four conditions asked for:
+  openrouter (default) -> openrouter.ai, moonshotai/kimi-k2.6
+  anthropic            -> api.anthropic.com, claude-sonnet-5
+
+Verifies the four conditions:
   1. the API call actually completes without error
-  2. the model string resolves to claude-sonnet-5
-  3. the structured-outputs-2025-11-13 beta is accepted
+  2. the model string resolves to the provider's expected default
+  3. structured output is accepted (response_format on OpenRouter, the
+     structured-outputs-2025-11-13 beta on Anthropic)
   4. returned payloads validate against their schemas with
      additionalProperties: false enforced
 
@@ -43,18 +48,25 @@ rule("0. PREFLIGHT — credential")
 
 ENV_FILE = BACKEND / ".env"
 print(f"backend/.env exists:            {ENV_FILE.is_file()}")
-print(f"ANTHROPIC_API_KEY in environ:   {'ANTHROPIC_API_KEY' in os.environ}")
 
 import config  # noqa: E402  — importing loads backend/.env via python-dotenv
 
+PROVIDER = config.LLM_PROVIDER
+KEY_VAR = "OPENROUTER_API_KEY" if PROVIDER == "openrouter" else "ANTHROPIC_API_KEY"
+EXPECTED_MODEL = (
+    "moonshotai/kimi-k2.6" if PROVIDER == "openrouter" else "claude-sonnet-5"
+)
+print(f"LLM_PROVIDER:                   {PROVIDER}")
+print(f"{KEY_VAR} in environ:{' ' * max(1, 12 - len(KEY_VAR))}{KEY_VAR in os.environ}")
+
 try:
-    key = config.anthropic_api_key()
+    key = config.llm_api_key()
 except RuntimeError as exc:
     print(f"\nBLOCKED — no credential available.\n  {type(exc).__name__}: {exc}")
     print(
-        "\nProvide the key without pasting it in chat, either:\n"
-        "  printf 'ANTHROPIC_API_KEY=%s\\n' \"$KEY\" > backend/.env\n"
-        "  export ANTHROPIC_API_KEY=...   (in the session environment)\n"
+        f"\nProvide the key without pasting it in chat, either:\n"
+        f"  printf '{KEY_VAR}=%s\\n' \"$KEY\" > backend/.env\n"
+        f"  export {KEY_VAR}=...   (in the session environment)\n"
         "Then re-run this script. No other step is blocked."
     )
     sys.exit(2)
@@ -65,75 +77,118 @@ import hashlib  # noqa: E402
 print(f"key loaded:                     yes (len {len(key)}, "
       f"sha256:{hashlib.sha256(key.encode()).hexdigest()[:12]}…)")
 print(f"source:                         "
-      f"{'environment' if os.environ.get('ANTHROPIC_API_KEY') else 'backend/.env'}")
+      f"{'environment' if os.environ.get(KEY_VAR) else 'backend/.env'}")
 
 # --------------------------------------------------------------------------- #
 # 1. Model string
 # --------------------------------------------------------------------------- #
 rule("1. MODEL STRING")
 print(f"config.MODEL = {config.MODEL!r}")
-MODEL_OK = config.MODEL == "claude-sonnet-5"
-print(f"resolves to claude-sonnet-5:    {MODEL_OK}")
+MODEL_OK = config.MODEL == EXPECTED_MODEL
+print(f"expected for {PROVIDER}: {EXPECTED_MODEL}")
+print(f"matches:                        {MODEL_OK}")
 
 # --------------------------------------------------------------------------- #
 # 2. Instrument the single SDK seam so the raw request is observable
 # --------------------------------------------------------------------------- #
-import anthropic  # noqa: E402
-
 import llm  # noqa: E402
 
 CALLS: list[dict] = []
-_real_create = llm._create
-
-
-def traced_create(request: dict):
-    """Record exactly what goes over the wire, then make the real call."""
-    record = {
-        "model": request.get("model"),
-        "betas": [llm._STRUCTURED_OUTPUTS_BETA],
-        "has_output_config": "output_config" in request,
-        "effort": (request.get("output_config") or {}).get("effort"),
-        "thinking": (request.get("thinking") or {}).get("type"),
-        "max_tokens": request.get("max_tokens"),
-        "schema_additional_properties": (
-            (request.get("output_config") or {}).get("format", {}).get("schema", {})
-        ).get("additionalProperties", "<absent>"),
-        "started": time.time(),
-    }
-    CALLS.append(record)
-    try:
-        message = _real_create(request)
-    except BaseException as exc:  # noqa: BLE001 — recorded verbatim, then re-raised
-        record["error"] = f"{type(exc).__name__}: {exc}"
-        record["request_id"] = getattr(exc, "request_id", None)
-        record["elapsed"] = round(time.time() - record["started"], 2)
-        raise
-    record["elapsed"] = round(time.time() - record["started"], 2)
-    record["stop_reason"] = message.stop_reason
-    record["request_id"] = getattr(message, "_request_id", None)
-    record["usage"] = {
-        "in": message.usage.input_tokens,
-        "out": message.usage.output_tokens,
-        "cache_read": getattr(message.usage, "cache_read_input_tokens", 0) or 0,
-        "cache_write": getattr(message.usage, "cache_creation_input_tokens", 0) or 0,
-    }
-    return message
-
-
-llm._create = traced_create
-
-# Count fallback retries. A retry means the FIRST request was rejected — that is
-# not a clean pass, so it has to be visible rather than silently absorbed.
+# A retry means the FIRST request was rejected — not a clean pass, so it must be
+# visible rather than silently absorbed.
 RETRIES: list[str] = []
-_real_without_tuning = llm._without_tuning
 
 
-def traced_without_tuning(request: dict):
-    RETRIES.append("fallback engaged: first request was rejected")
-    return _real_without_tuning(request)
+def _record_common(request: dict) -> dict:
+    return {"model": request.get("model"), "max_tokens": request.get("max_tokens"),
+            "started": time.time()}
 
 
-llm._without_tuning = traced_without_tuning
+if PROVIDER == "openrouter":
+    _real_or_create = llm._openrouter_create
+
+    def traced_or_create(request: dict):
+        """Record exactly what goes over the wire, then make the real call."""
+        response_format = request.get("response_format") or {}
+        json_schema = response_format.get("json_schema") or {}
+        extra = request.get("extra_body") or {}
+        record = _record_common(request)
+        record.update({
+            "structured_output": response_format.get("type"),
+            "strict": json_schema.get("strict"),
+            "schema_additional_properties": (json_schema.get("schema") or {}).get(
+                "additionalProperties", "<absent>"),
+            "require_parameters": (extra.get("provider") or {}).get("require_parameters"),
+            "reasoning_effort": (extra.get("reasoning") or {}).get("effort"),
+            "content_parts": [p.get("type") for p in request["messages"][1]["content"]],
+        })
+        CALLS.append(record)
+        try:
+            response = _real_or_create(request)
+        except BaseException as exc:  # noqa: BLE001 — recorded verbatim, then re-raised
+            record["error"] = f"{type(exc).__name__}: {exc}"
+            record["request_id"] = getattr(exc, "request_id", None)
+            record["elapsed"] = round(time.time() - record["started"], 2)
+            raise
+        choice = response.choices[0]
+        record["elapsed"] = round(time.time() - record["started"], 2)
+        record["finish_reason"] = choice.finish_reason
+        record["provider_served_by"] = getattr(response, "provider", None)
+        usage = getattr(response, "usage", None)
+        details = getattr(usage, "prompt_tokens_details", None) if usage else None
+        record["usage"] = {
+            "in": getattr(usage, "prompt_tokens", 0) if usage else 0,
+            "out": getattr(usage, "completion_tokens", 0) if usage else 0,
+            "cache_read": getattr(details, "cached_tokens", 0) if details else 0,
+        }
+        return response
+
+    llm._openrouter_create = traced_or_create
+
+else:
+    import anthropic  # noqa: E402,F401
+
+    _real_create = llm._create
+
+    def traced_create(request: dict):
+        """Record exactly what goes over the wire, then make the real call."""
+        record = _record_common(request)
+        record.update({
+            "betas": [llm._STRUCTURED_OUTPUTS_BETA],
+            "structured_output": "output_config" if "output_config" in request else None,
+            "reasoning_effort": (request.get("output_config") or {}).get("effort"),
+            "thinking": (request.get("thinking") or {}).get("type"),
+            "schema_additional_properties": (
+                (request.get("output_config") or {}).get("format", {}).get("schema", {})
+            ).get("additionalProperties", "<absent>"),
+        })
+        CALLS.append(record)
+        try:
+            message = _real_create(request)
+        except BaseException as exc:  # noqa: BLE001 — recorded verbatim, then re-raised
+            record["error"] = f"{type(exc).__name__}: {exc}"
+            record["request_id"] = getattr(exc, "request_id", None)
+            record["elapsed"] = round(time.time() - record["started"], 2)
+            raise
+        record["elapsed"] = round(time.time() - record["started"], 2)
+        record["finish_reason"] = message.stop_reason
+        record["request_id"] = getattr(message, "_request_id", None)
+        record["usage"] = {
+            "in": message.usage.input_tokens,
+            "out": message.usage.output_tokens,
+            "cache_read": getattr(message.usage, "cache_read_input_tokens", 0) or 0,
+        }
+        return message
+
+    llm._create = traced_create
+
+    _real_without_tuning = llm._without_tuning
+
+    def traced_without_tuning(request: dict):
+        RETRIES.append("fallback engaged: first request was rejected")
+        return _real_without_tuning(request)
+
+    llm._without_tuning = traced_without_tuning
 
 # --------------------------------------------------------------------------- #
 # 3. Live stage-by-stage progress, straight off the real status writes
@@ -245,7 +300,8 @@ rule("3. PIPELINE — six stages, live API")
 from agent import pipeline  # noqa: E402
 from schema import ReviewStatus  # noqa: E402
 
-review_id = "real-e2e-001"
+# storage._safe_id accepts hex and dashes only, so this must look like a uuid4.
+review_id = "0e2ea11d-0000-4000-8000-000000000001"
 storage.put_status(ReviewStatus.initial(review_id))
 
 result = None
@@ -267,8 +323,10 @@ rule("4. MODEL CALLS (raw, as sent)")
 for i, call in enumerate(CALLS, 1):
     print(f"\ncall {i}:")
     for field in (
-        "model", "betas", "has_output_config", "effort", "thinking", "max_tokens",
-        "schema_additional_properties", "stop_reason", "request_id", "elapsed", "usage",
+        "model", "max_tokens", "structured_output", "strict", "require_parameters",
+        "reasoning_effort", "thinking", "betas", "schema_additional_properties",
+        "content_parts", "finish_reason", "provider_served_by", "request_id",
+        "elapsed", "usage",
     ):
         if field in call:
             print(f"  {field:<28} {call[field]}")
@@ -389,7 +447,7 @@ print(f"status breakdown   {by_status}")
 
 print("\nframework scores:")
 for fw in result.frameworks:
-    print(f"  {fw.name:<32} {fw.score:>6}")
+    print(f"  {fw.framework_name:<32} {fw.score:>6}")
     for p in fw.pillars:
         print(f"    {p.pillar_name:<28} {p.score:>6}  "
               f"({p.checks_evaluated}/{p.checks_total} evaluated)")
@@ -411,11 +469,15 @@ rule("7. CONFIRMATIONS")
 checks = [
     ("1. real API calls completed without error",
      len(CALLS) > 0 and all("error" not in c for c in CALLS)),
-    ("2. model string resolved to claude-sonnet-5",
-     MODEL_OK and all(c["model"] == "claude-sonnet-5" for c in CALLS)),
-    ("3. structured-outputs-2025-11-13 beta accepted",
-     all(c.get("betas") == ["structured-outputs-2025-11-13"] for c in CALLS)
-     and all(c.get("has_output_config") for c in CALLS)
+    (f"2. model string resolved to {EXPECTED_MODEL}",
+     MODEL_OK and all(c["model"] == EXPECTED_MODEL for c in CALLS)),
+    ("3. structured output accepted by the provider",
+     (all(c.get("structured_output") == "json_schema" for c in CALLS)
+      and all(c.get("strict") is True for c in CALLS)
+      and all(c.get("require_parameters") is True for c in CALLS))
+     if PROVIDER == "openrouter" else
+     (all(c.get("betas") == ["structured-outputs-2025-11-13"] for c in CALLS)
+      and all(c.get("structured_output") == "output_config" for c in CALLS))
      and not RETRIES),
     ("4. payloads conform, additionalProperties: false enforced",
      strict_ok and validation_ok),

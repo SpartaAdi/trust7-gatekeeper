@@ -1,4 +1,9 @@
-"""Guards on the one module that calls the Anthropic SDK.
+"""Guards on the Anthropic adapter in `llm`.
+
+Still exercised although OpenRouter is now the default provider: the point of
+keeping the Anthropic path is that `LLM_PROVIDER=anthropic` reverts same-day, and
+an untested revert path is not a revert path. `tests/test_llm_openrouter.py`
+covers the other adapter.
 
 The `fallbacks` incident: a parameter that does not exist in anthropic 0.75.0
 was passed to every model call, so the whole pipeline raised `TypeError` on
@@ -16,6 +21,7 @@ import anthropic
 import httpx
 import pytest
 
+import config
 import llm
 
 
@@ -55,6 +61,9 @@ def _sent_kwargs(monkeypatch) -> dict[str, Any]:
         "FakeClient", (), {"beta": type("Beta", (), {"messages": FakeMessages()})()}
     )()
     monkeypatch.setattr(llm, "_client", lambda: fake_client)
+    # OpenRouter is the default provider now, so the Anthropic path has to be
+    # selected explicitly to be tested at all.
+    monkeypatch.setattr(config, "LLM_PROVIDER", "anthropic")
 
     llm.complete_json(
         system=[{"type": "text", "text": "system"}],
@@ -107,7 +116,9 @@ def _overloaded() -> anthropic.InternalServerError:
 
 
 FULL_REQUEST: dict[str, Any] = {
-    "model": "claude-sonnet-5",
+    # Read from config rather than hardcoded, so the Anthropic default and this
+    # fixture cannot drift apart.
+    "model": config.ANTHROPIC_MODEL,
     "max_tokens": 16000,
     "messages": [],
     "thinking": {"type": "adaptive"},
