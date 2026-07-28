@@ -27,24 +27,24 @@
    * gradient. They carry no severity meaning; status colour is the `sev-*` set
    * below and must never be one of these.
    */
-  --color-pastel-mint: #cff5de;
-  --color-pastel-sky: #cee2fd;
-  --color-pastel-tan: #edd8c3;
+  --color-pastel-mint: #e5faed;
+  --color-pastel-sky: #eef5fe;
+  --color-pastel-tan: #faf4ed;
   --color-pastel-cream: #fbf8de;
-  --color-pastel-teal: #cbefee;
+  --color-pastel-teal: #e7f8f7;
 
   /* Surfaces and hairlines. Depth comes from separators, not stacked cards. */
   --color-surface: #ffffff;
   --color-surface-sunken: #f6f7fd;
-  --color-hairline: #e2e2e2;
+  --color-hairline: #ccd2dc;
   --color-ink: #1b263b;
-  --color-ink-muted: #5d6c7b;
-  --color-ink-faint: #9096a4;
+  --color-ink-muted: #47525e;
+  --color-ink-faint: #606675;
 
   /* Status. Muted on purpose — a findings list full of neon is unreadable. */
   --color-sev-high: #b3261e;
-  --color-sev-medium: #a35b00;
-  --color-sev-low: #6b7280;
+  --color-sev-medium: #9b5600;
+  --color-sev-low: #616874;
   --color-verdict-pass: #1e6b45;
 
   --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);

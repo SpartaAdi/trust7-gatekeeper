@@ -69,7 +69,7 @@ backend/
   maturity.py     score -> band; mirrors frontend/src/maturity.ts
   ingestion/      document, draw.io, and vision parsing; normalization
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          245 tests
+  tests/          260 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -397,42 +397,90 @@ idle spin-down, not redeploys or platform restarts; if either happens,
 ## Brand and theming
 
 Every colour and both type families live in `frontend/src/index.css` under
-`@theme`; no component hardcodes a hex value. The palette is **sampled from the
-live minfytech.com stylesheet**, not from the older orange/navy brand document:
+`@theme`; no component hardcodes a hex value. `backend/report.py` holds the PDF's
+twin of each token, named in a comment beside it and asserted equal by
+`tests/test_report.py`.
+
+**Accessibility first, brand identity second** — that is the order the palette was
+solved in. Three anchors are fixed, sampled from the live minfytech.com stylesheet:
 
 | Token | Value | Role |
 | --- | --- | --- |
+| `minfy-navy` | `#1b263b` | header bar, dark sections, ink |
 | `minfy-indigo` | `#1420be` | primary accent — buttons, active states, focus ring |
 | `minfy-blue` | `#1c55bb` | hover state for primary actions |
-| `minfy-navy` | `#1b263b` | header bar, dark sections, ink |
 | `minfy-yellow` | `#fdc921` | the logo mark's second colour, mark only |
-| `pastel-sky` / `mint` / `tan` / `cream` / `teal` | `#cee2fd` … | flat accent blocks behind cards |
 
-Type is a serif display face over a sans body, matching the site's Financier
-Display / Lato pairing. Financier is commercially licensed, so it is named first
-in the stack and a system serif renders in practice — **no webfont is fetched**,
-by design. The two largest steps of the type scale (`.t-display`, `.t-title`) are
-the serif ones; everything else is sans. `.t-tab` is the small-caps treatment used
-by the header nav and the step tracker.
+Everything else is derived so that it clears WCAG AA — 4.5:1 body text, 3.0:1 large
+text and meaningful graphics — on the **worst** surface it is used against, not the
+average. That distinction is the whole exercise: `ink-muted` used to pass on the
+mint block (4.56:1) while failing on the sky block (4.09:1).
 
-The **PDF report** (`backend/report.py`) carries the same palette, with the token
-each colour mirrors named in a comment beside it, and a test asserting the two
-agree. The one intentional divergence is `ACCENT_ON_DARK` (`#4a81f2`, also sampled):
-the primary `#1420be` is a dark blue that all but vanishes on the navy cover, so
-cover text uses the lighter blue instead.
+| Token | Value | Worst measured pair |
+| --- | --- | --- |
+| `ink` | `#1b263b` | 13.79:1 on `pastel-sky` |
+| `ink-muted` | `#47525e` | 7.25:1 on `pastel-sky` |
+| `ink-faint` | `#606675` | 5.23:1 on `pastel-sky` |
+| `sev-high` / `sev-medium` / `sev-low` | `#b3261e` / `#9b5600` / `#616874` | 5.03:1 on own 8% tint |
+| `verdict-pass` | `#1e6b45` | 5.76:1 on own 8% tint |
+| `pastel-sky` / `mint` / `tan` / `cream` / `teal` | `#eef5fe` / `#e5faed` / `#faf4ed` / `#fbf8de` / `#e7f8f7` | backgrounds |
+| `surface` / `surface-sunken` / `hairline` | `#ffffff` / `#f6f7fd` / `#ccd2dc` | — |
 
-The **logo mark** in `frontend/src/components/MinfyMark.tsx` is a REDRAW, not the
-supplied asset — the logo arrived as an image in conversation and never landed on
-disk, so there was no file to embed. The mark is pure geometry and redraws exactly;
-the "minfy" wordmark is a custom typeface and is deliberately not reproduced, since
-hand-drawn letterforms would be an imitation of the brand rather than the brand.
-The PDF cover draws the same geometry via `report._draw_minfy_mark`. To swap in the
-real asset, replace those two — nothing else references the shape.
+The pastels are lighter than the raw site samples. That is the deliberate trade: the
+sampled sky failed under the muted text the scorecard puts on it, and legibility
+outranks fidelity to a swatch. The blocks read as a subtler tint as a result.
+
+The ink tiers stay a hierarchy, not three barely-compliant greys — 15.1 / 8.0 / 5.8
+on white, each step at least 30% apart, asserted by a test. AA is the floor here,
+not the goal.
+
+### The audit
+
+```bash
+python3 scripts/contrast_audit.py              # full table
+python3 scripts/contrast_audit.py --fail-only  # just the misses
+```
+
+91 pairs, covering every real foreground/background combination the web app and the
+PDF render. Two rules make it an audit rather than a list of nominal values: tokens
+are **parsed** out of `index.css` and `report.py` rather than restated, and
+translucent colours are **composited** onto the surface actually behind them
+(`indigo/40`, `white/50`, `ink/15`, `sev-high/8`). `backend/tests/test_contrast.py`
+runs the same check as a test, so a token change that breaks AA fails the suite.
+
+This exists because a miss shipped. `ACCENT_ON_DARK` was picked by eye to fix an
+unreadable PDF cover, looked right, and measured 4.12:1 — passing for the 13pt band
+it was judged against and failing for the 8.5pt eyebrow next to it. The suite only
+knew the hex had changed.
+
+Two pairs pass with under 15% margin and are pinned in that test so a third shows up
+as a failure rather than accumulating: `sev-medium` on its own 8% tint (5.03:1) and
+the header's `text-white/50` inactive tab (4.85:1). Both need a component change
+rather than a token one.
+
+### Typography
+
+A serif display face over a sans body, matching the site's Financier Display / Lato
+pairing. Financier is commercially licensed, so it is named first in the stack and a
+system serif renders in practice — **no webfont is fetched**, by design. The two
+largest steps of the type scale (`.t-display`, `.t-title`) are the serif ones;
+everything else is sans. `.t-tab` is the small-caps treatment used by the header nav
+and the step tracker.
+
+### The logo mark
+
+`frontend/src/components/MinfyMark.tsx` is a REDRAW, not the supplied asset — the
+logo arrived as an image in conversation and never landed on disk, so there was no
+file to embed. The mark is pure geometry and redraws exactly; the "minfy" wordmark is
+a custom typeface and is deliberately not reproduced, since hand-drawn letterforms
+would be an imitation of the brand rather than the brand. `report._draw_minfy_mark`
+draws the same geometry on the PDF cover. To swap in the real asset, replace those
+two — nothing else references the shape.
 
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 245 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 260 tests
 cd frontend && npm test                                                          # 76 tests
 ```
 

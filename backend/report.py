@@ -54,31 +54,50 @@ from schema import Finding, ReviewResult
 # --------------------------------------------------------------------------- #
 # Brand palette — Minfy. No purple, no gradient, no third accent hue.
 #
-# These are the same values as the web UI's theme tokens in
-# `frontend/src/index.css`, sampled from the live minfytech.com stylesheet. The
-# report and the dashboard have to agree: a reviewer downloads the PDF from the
-# results page, and two different accent colours for the same review reads as two
-# different tools. Frontend token names are given so the pairing is greppable.
+# Every value is the twin of a `@theme` token in `frontend/src/index.css`, named in
+# the comment beside it so the pairing is greppable, and asserted equal by
+# tests/test_report.py. The report and the dashboard have to agree: a reviewer
+# downloads the PDF from the results page, and two accent colours for one review
+# reads as two products.
+#
+# ACCESSIBILITY FIRST, brand identity second — that is the order these were solved
+# in. The three brand anchors (NAVY, the ACCENT blue family, LOGO_YELLOW) are the
+# sampled minfytech.com values and are fixed. Everything else was derived to clear
+# WCAG AA on the WORST surface it is used against, not the average, and
+# `scripts/contrast_audit.py` re-derives that claim from this file on demand.
 # --------------------------------------------------------------------------- #
 NAVY = HexColor("#1B263B")       # --color-minfy-navy
 ACCENT = HexColor("#1420BE")     # --color-minfy-indigo — the primary accent
 ACCENT_LIGHT = HexColor("#1C55BB")  # --color-minfy-blue
 # The accent again, for text sitting ON the navy cover. #1420BE is a dark blue on a
-# dark navy — legible on the white body pages and close to unreadable on the cover,
-# which the superseded orange never was. #4A81F2 is the lighter blue from the same
-# stylesheet, and is the cover's accent for that reason alone.
-ACCENT_ON_DARK = HexColor("#4A81F2")
+# dark navy — fine on the white body pages, unreadable on the cover. The first fix
+# here was #4A81F2, picked by eye; it measured 4.12:1, which passes for the 13pt
+# band and FAILS for the 8.5pt eyebrow. This value is solved, not judged: 5.23:1 on
+# NAVY, clearing AA body text with margin.
+ACCENT_ON_DARK = HexColor("#6896F4")
 INK = HexColor("#1B263B")        # --color-ink
 WHITE = HexColor("#FFFFFF")
 OFF_WHITE = HexColor("#F6F7FD")  # --color-surface-sunken
-HAIRLINE = HexColor("#E2E2E2")   # --color-hairline
-INK_MUTED = HexColor("#5D6C7B")  # --color-ink-muted
+HAIRLINE = HexColor("#CCD2DC")   # --color-hairline
+INK_MUTED = HexColor("#47525E")  # --color-ink-muted
 
 # Flat pastel blocks, as the dashboard uses behind its framework cards. They carry
 # no severity meaning; pillar strength is the opacity ramp below, never hue.
-PASTEL_SKY = HexColor("#CEE2FD")   # --color-pastel-sky — AWS Well-Architected
-PASTEL_MINT = HexColor("#CFF5DE")  # --color-pastel-mint — Minfy TRUST-7
+#
+# Lightened from the raw site samples until INK_MUTED cleared AA on every one of
+# them. The blocks read as a subtler tint than the sampled originals; that is the
+# deliberate trade, because the sampled sky failed at 4.09:1 under the muted text
+# the scorecard actually puts on it.
+PASTEL_SKY = HexColor("#EEF5FE")   # --color-pastel-sky — AWS Well-Architected
+PASTEL_MINT = HexColor("#E5FAED")  # --color-pastel-mint — Minfy TRUST-7
 PASTEL_CREAM = HexColor("#FBF8DE")  # --color-pastel-cream — executive summary
+
+# Cover-only greys, and the logo's yellow. Named rather than inline so
+# scripts/contrast_audit.py can read every colour this module paints straight out
+# of the source — an inline literal is a colour the audit cannot see.
+COVER_META = HexColor("#AEBAC7")
+COVER_FOOT = HexColor("#8E9DAC")
+LOGO_YELLOW = HexColor("#FDC921")   # --color-minfy-yellow
 
 PAGE = pagesizes.A4
 PAGE_W, PAGE_H = PAGE
@@ -139,10 +158,10 @@ def _style(
 S = {
     "cover_eyebrow": _style("ce", 8.5, 12, ACCENT_ON_DARK, bold=True, tracking=1.6),
     "cover_title": _style("ct", 30, 35, WHITE, bold=True),
-    "cover_meta": _style("cm", 10, 15, HexColor("#AEBAC7")),
+    "cover_meta": _style("cm", 10, 15, COVER_META),
     "cover_score": _style("cs", 66, 66, WHITE, bold=True),
     "cover_band": _style("cb", 13, 17, ACCENT_ON_DARK, bold=True),
-    "cover_foot": _style("cf", 8, 11, HexColor("#8494A5")),
+    "cover_foot": _style("cf", 8, 11, COVER_FOOT),
     "h1": _style("h1", 17, 21, NAVY, bold=True, space_after=2),
     "h2": _style("h2", 12, 16, NAVY, bold=True, space_before=10, space_after=4),
     "h3": _style("h3", 10.5, 14, INK, bold=True),
@@ -230,7 +249,7 @@ def _draw_minfy_mark(canvas, x: float, y: float, size: float, block: Color) -> N
     canvas.setFillColor(block)
     canvas.rect(x, y, 0.46 * size, size, stroke=0, fill=1)          # left column
     canvas.rect(x, y, size, 0.50 * size, stroke=0, fill=1)          # bottom half
-    canvas.setFillColor(HexColor("#FDC921"))                        # logo yellow
+    canvas.setFillColor(LOGO_YELLOW)
     canvas.rect(x + 0.54 * size, y + 0.58 * size, 0.46 * size, 0.42 * size,
                 stroke=0, fill=1)
     canvas.restoreState()
@@ -423,7 +442,7 @@ def _scorecard(result: ReviewResult) -> list:
             _pastel_block(
                 Paragraph(
                     f"{_t(framework.framework_name)} "
-                    f'<font color="#5D6C7B" size="9">— {framework.score:.1f} · '
+                    f'<font color="#47525E" size="9">— {framework.score:.1f} · '
                     f"{_t(maturity.maturity_for(framework.score))}</font>",
                     S["h2"],
                 ),
@@ -537,7 +556,7 @@ def _findings(result: ReviewResult) -> list:
                 [
                     Paragraph(
                         f"{_t(SEVERITY_HEADING[severity])} "
-                        f'<font color="#5D6C7B">({len(group)})</font>',
+                        f'<font color="#47525E">({len(group)})</font>',
                         S["h2"],
                     ),
                     HRule(width, NAVY, 0.8),

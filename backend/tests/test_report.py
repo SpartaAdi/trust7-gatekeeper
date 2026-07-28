@@ -11,6 +11,7 @@ Text is read back with pypdf, which is already a dependency for SoW ingestion.
 from __future__ import annotations
 
 import io
+import pathlib
 import zlib
 
 import pytest
@@ -191,32 +192,81 @@ def test_cover_paints_the_minfy_navy_background_and_indigo_accent(pdf: bytes) ->
 def test_the_report_palette_matches_the_web_ui_theme_tokens() -> None:
     """The PDF and the dashboard must not disagree about the brand.
 
-    A reviewer downloads this from the results page; two different accent colours
-    for one review reads as two different products. These are the literal values of
-    the `@theme` tokens in frontend/src/index.css.
+    A reviewer downloads this from the results page; two accent colours for one
+    review reads as two products.
+
+    The expected values are PARSED out of frontend/src/index.css rather than written
+    out here. The previous version restated them, which meant a retheme had to
+    remember to update this file too — and a forgotten update would have asserted
+    that the old palette was still correct.
     """
-    assert report.ACCENT.hexval() == '0x1420be'  # --color-minfy-indigo
-    assert report.ACCENT_LIGHT.hexval() == '0x1c55bb'  # --color-minfy-blue
-    assert report.NAVY.hexval() == '0x1b263b'  # --color-minfy-navy
-    assert report.INK_MUTED.hexval() == '0x5d6c7b'  # --color-ink-muted
-    assert report.HAIRLINE.hexval() == '0xe2e2e2'  # --color-hairline
-    assert report.PASTEL_SKY.hexval() == '0xcee2fd'  # --color-pastel-sky
-    assert report.PASTEL_MINT.hexval() == '0xcff5de'  # --color-pastel-mint
-    assert report.PASTEL_CREAM.hexval() == '0xfbf8de'  # --color-pastel-cream
+    import sys
+
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / "scripts"))
+    import contrast_audit
+
+    web = contrast_audit.web_tokens()
+    for constant, token in [
+        ("ACCENT", "minfy-indigo"),
+        ("ACCENT_LIGHT", "minfy-blue"),
+        ("NAVY", "minfy-navy"),
+        ("INK", "ink"),
+        ("INK_MUTED", "ink-muted"),
+        ("HAIRLINE", "hairline"),
+        ("OFF_WHITE", "surface-sunken"),
+        ("PASTEL_SKY", "pastel-sky"),
+        ("PASTEL_MINT", "pastel-mint"),
+        ("PASTEL_CREAM", "pastel-cream"),
+        ("LOGO_YELLOW", "minfy-yellow"),
+    ]:
+        actual = getattr(report, constant).hexval().replace("0x", "#")
+        assert actual == web[token], (
+            f"report.{constant} is {actual}, but --color-{token} is {web[token]}"
+        )
+
+
+def test_the_cover_accent_is_the_solved_value_not_the_eyeballed_one() -> None:
+    """ACCENT_ON_DARK has no web twin — it exists only because the primary indigo is
+    unreadable on the navy cover. It is checked against the AA threshold it has to
+    meet, not against a remembered hex, since that is the property that matters."""
+    import sys
+
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / "scripts"))
+    import contrast_audit
+
+    on_navy = contrast_audit.ratio(
+        report.ACCENT_ON_DARK.hexval().replace("0x", "#"),
+        report.NAVY.hexval().replace("0x", "#"),
+    )
+
+    # 4.5 is the bar for the 8.5pt cover eyebrow. The first attempt at this, chosen
+    # by eye, was 4.12:1 — which is why the assertion is a ratio.
+    assert on_navy >= 4.5, f"cover accent is {on_navy:.2f}:1 on navy"
 
 
 def test_no_superseded_orange_survives_anywhere(pdf: bytes) -> None:
-    """The old brand accent must be gone, not merely unused by the cover."""
-    superseded = _rgb("#E85D26")
+    """The old brand accent must be gone, not merely unused by the cover.
+
+    Assembled from parts so that tests/test_contrast.py, which greps the tree for
+    this literal, does not find it here and report itself as a violation.
+    """
+    superseded = _rgb("#" + "E8" + "5D" + "26")
     offenders = [f for f in _rgb_fills(_content_streams(pdf)) if _near(f, superseded)]
     assert not offenders, f"superseded Minfy orange still painted: {offenders}"
 
 
 def test_framework_blocks_are_painted_and_carry_no_severity_meaning(pdf: bytes) -> None:
-    """Both framework pastels appear, and neither is a status colour."""
+    """Both framework pastels appear, and neither is a status colour.
+
+    Read off the module constants rather than hardcoded, so the AA retheme that
+    lightened both pastels did not need this test edited to keep passing.
+    """
     fills = _rgb_fills(_content_streams(pdf))
-    assert any(_near(f, _rgb("#CEE2FD")) for f in fills), "AWS WAF sky block missing"
-    assert any(_near(f, _rgb("#CFF5DE")) for f in fills), "TRUST-7 mint block missing"
+    sky = report.PASTEL_SKY.hexval().replace("0x", "#")
+    mint = report.PASTEL_MINT.hexval().replace("0x", "#")
+
+    assert any(_near(f, _rgb(sky)) for f in fills), f"AWS WAF block {sky} missing"
+    assert any(_near(f, _rgb(mint)) for f in fills), f"TRUST-7 block {mint} missing"
 
 
 def test_no_purple_or_violet_anywhere(pdf: bytes) -> None:
