@@ -294,6 +294,9 @@ DIAGRAM = b"""<mxfile host="app.diagrams.net">
 </mxfile>
 """
 
+_FONT_WARNED: list[bool] = []  # warn once per run, not once per text call
+
+
 def _diagram_png() -> bytes:
     """A synthetic architecture diagram as a raster image, with legible labels.
 
@@ -310,8 +313,45 @@ def _diagram_png() -> bytes:
     d = ImageDraw.Draw(img)
 
     def font(size: int, bold: bool = False):
-        name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
-        return ImageFont.truetype(f"/usr/share/fonts/truetype/dejavu/{name}", size)
+        """A scalable font, wherever this happens to run.
+
+        The candidates are tried in order and the first that loads wins. The
+        DejaVu path is first because it is what this container and most Linux
+        boxes have; then the macOS system fonts, which live somewhere else
+        entirely; then a bare family name, which lets fontconfig resolve it on
+        distros that place DejaVu elsewhere.
+
+        `load_default()` is the last resort so the script degrades instead of
+        crashing. It is a bitmap font that ignores `size`, so the diagram comes
+        out with uniformly tiny text — legible enough to keep the run going, but
+        a poor vision fixture, hence the warning.
+        """
+        candidates = (
+            # Linux (this container, Debian/Ubuntu/Fedora)
+            f"/usr/share/fonts/truetype/dejavu/DejaVu{'Sans-Bold' if bold else 'Sans'}.ttf",
+            # macOS
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold
+            else "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/System/Library/Fonts/HelveticaNeue.ttc",
+            "/Library/Fonts/Arial.ttf",
+            # Let fontconfig find it by family name if the paths above all miss.
+            "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
+            "Arial Bold.ttf" if bold else "Arial.ttf",
+        )
+        for candidate in candidates:
+            try:
+                return ImageFont.truetype(candidate, size)
+            except OSError:
+                continue
+
+        if not _FONT_WARNED:
+            _FONT_WARNED.append(True)
+            print(
+                "  WARNING: no scalable font found on this system, falling back to "
+                "PIL's default bitmap font. The diagram will render with very small "
+                "text, which weakens it as a vision fixture."
+            )
+        return ImageFont.load_default()
 
     d.text((40, 30), "Internal Expense Claim Portal — architecture", font=font(30, True), fill=NAVY)
     d.text((40, 72), "AWS ap-south-1  ·  single account  ·  no staging environment",
