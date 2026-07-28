@@ -15,12 +15,20 @@ Verifies the four conditions:
   4. returned payloads validate against their schemas with
      additionalProperties: false enforced
 
-Run:  python real_api_e2e.py
+Run:  python scripts/real_api_e2e.py                  # draw.io diagram (no vision call)
+      python scripts/real_api_e2e.py --diagram image # PNG diagram, exercises vision
+
+The diagram path matters and is easy to get wrong: a .drawio upload is parsed
+deterministically and never reaches a model, so the default run proves nothing
+about vision. `--diagram image` uploads a generated PNG instead, which is the only
+way this script exercises `ingestion/vision.py` against a real model.
+
 Exit: 0 all confirmed | 2 no credential | 1 a real failure (raw error shown)
 """
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import pathlib
@@ -286,11 +294,93 @@ DIAGRAM = b"""<mxfile host="app.diagrams.net">
 </mxfile>
 """
 
+def _diagram_png() -> bytes:
+    """A synthetic architecture diagram as a raster image, with legible labels.
+
+    Drawn rather than screenshotted so the run is reproducible, and deliberately
+    contains one element the SoW does not mention — the WAF in front of the load
+    balancer — so the transcription can be judged on what it read from the image
+    rather than what it could have inferred from the document.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    W, H = 1400, 820
+    NAVY, ORANGE, INK, BG = (10, 37, 64), (232, 93, 38), (51, 51, 51), (250, 250, 250)
+    img = Image.new("RGB", (W, H), BG)
+    d = ImageDraw.Draw(img)
+
+    def font(size: int, bold: bool = False):
+        name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+        return ImageFont.truetype(f"/usr/share/fonts/truetype/dejavu/{name}", size)
+
+    d.text((40, 30), "Internal Expense Claim Portal — architecture", font=font(30, True), fill=NAVY)
+    d.text((40, 72), "AWS ap-south-1  ·  single account  ·  no staging environment",
+           font=font(18), fill=INK)
+
+    # (x, y, w, h, title, subtitle)
+    boxes = [
+        (60, 150, 230, 96, "CloudFront", "static React SPA"),
+        (60, 330, 230, 96, "AWS WAF", "rate limiting only"),
+        (350, 330, 250, 96, "Application Load\nBalancer", "public, HTTPS"),
+        (660, 330, 250, 96, "EC2 t3.small", "Expense API (single instance)"),
+        (1000, 150, 340, 96, "RDS PostgreSQL", "claims: name, employee ID, bank a/c"),
+        (1000, 330, 340, 96, "S3 receipts-bucket", "account-readable"),
+        (1000, 510, 340, 96, "CloudWatch Logs", "full request bodies"),
+        (660, 640, 250, 96, "Cognito", "NOT USED — passwords in DB"),
+    ]
+    for x, y, w, h, title, sub in boxes:
+        d.rounded_rectangle([x, y, x + w, y + h], radius=8, fill=NAVY)
+        ty = y + 16
+        for line in title.split("\n"):
+            d.text((x + 14, ty), line, font=font(19, True), fill=(255, 255, 255))
+            ty += 24
+        d.text((x + 14, y + h - 26), sub, font=font(14), fill=(174, 186, 199))
+
+    def arrow(x1, y1, x2, y2, label):
+        d.line([x1, y1, x2, y2], fill=ORANGE, width=4)
+        d.polygon([(x2, y2), (x2 - 12, y2 - 6), (x2 - 12, y2 + 6)], fill=ORANGE)
+        if not label:
+            return
+        # A backdrop behind the label: an edge label that crosses a navy box would
+        # otherwise be dark-on-dark and unreadable, which would make the vision
+        # result a test of contrast rather than of transcription.
+        f = font(15)
+        lx, ly = (x1 + x2) / 2 - 40, min(y1, y2) - 26
+        x0, y0, x1b, y1b = d.textbbox((lx, ly), label, font=f)
+        d.rectangle([x0 - 5, y0 - 3, x1b + 5, y1b + 3], fill=BG)
+        d.text((lx, ly), label, font=f, fill=INK)
+
+    arrow(290, 198, 1000, 198, "HTTPS")
+    arrow(290, 378, 350, 378, "")
+    arrow(600, 378, 660, 378, "HTTP (plaintext)")
+    arrow(910, 360, 1000, 300, "SQL — bank details")
+    arrow(910, 378, 1000, 378, "PUT receipt")
+    arrow(910, 420, 1000, 540, "request logs")
+
+    d.text((40, 700), "Note: database backups are taken manually before each release.",
+           font=font(17), fill=INK)
+    d.text((40, 730), "No autoscaling. No second AZ. Costs are not tagged per team.",
+           font=font(17), fill=INK)
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+USE_IMAGE = "--diagram" in sys.argv and "image" in sys.argv
+if USE_IMAGE:
+    DIAGRAM = _diagram_png()
+    DIAGRAM_NAME = "synthetic-expense-portal.png"
+    DIAGRAM_PATH = "Kimi VISION (this is the path under test)"
+else:
+    DIAGRAM_NAME = "synthetic-expense-portal.drawio"
+    DIAGRAM_PATH = "draw.io deterministic parser (NO model call — vision NOT tested)"
+
 document_key = storage.save_upload("synthetic-expense-portal-sow.md", SOW)
-diagram_key = storage.save_upload("synthetic-expense-portal.drawio", DIAGRAM)
+diagram_key = storage.save_upload(DIAGRAM_NAME, DIAGRAM)
 print(f"SoW      {len(SOW):>6} bytes  -> {document_key}")
-print(f"diagram  {len(DIAGRAM):>6} bytes  -> {diagram_key}")
-print("diagram path: draw.io XML (parsed deterministically, no vision call)")
+print(f"diagram  {len(DIAGRAM):>6} bytes  -> {diagram_key}  ({DIAGRAM_NAME})")
+print(f"diagram path: {DIAGRAM_PATH}")
 
 # --------------------------------------------------------------------------- #
 # 5. Run all six stages for real
