@@ -5,6 +5,7 @@
  * result on error, so views can't silently render nothing.
  */
 
+import { clearToken, getToken } from './token'
 import type {
   ReviewAccepted,
   ReviewResult,
@@ -16,6 +17,28 @@ import type {
 const BASE_URL = (
   import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
 ).replace(/\/+$/, '')
+
+/** Header carrying the shared demo token. Mirrors config.DEMO_TOKEN_HEADER. */
+export const TOKEN_HEADER = 'X-Demo-Token'
+
+/**
+ * The token header, or nothing if we have no token yet.
+ *
+ * Every request goes through this, so there is no path that forgets it.
+ */
+function authHeaders(): Record<string, string> {
+  const token = getToken()
+  return token ? { [TOKEN_HEADER]: token } : {}
+}
+
+/**
+ * A 401 means the token is missing, wrong, or the server has none configured.
+ * Dropping it here is what makes the app re-prompt instead of looping on a
+ * credential that will never work.
+ */
+function forgetTokenOn401(status: number): void {
+  if (status === 401) clearToken()
+}
 
 export class ApiError extends Error {
   readonly status: number
@@ -48,7 +71,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(`${BASE_URL}${path}`, {
       ...init,
-      headers: { 'Content-Type': 'application/json', ...init?.headers },
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders(),
+        ...init?.headers,
+      },
     })
   } catch (cause) {
     throw new ApiError(
@@ -67,6 +94,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // Non-JSON error body; the status line is the best message available.
     }
+    forgetTokenOn401(response.status)
     throw new ApiError(message, response.status)
   }
 
@@ -82,7 +110,11 @@ export async function uploadFile(file: File): Promise<string> {
   try {
     // No Content-Type header: the browser sets it, including the multipart
     // boundary, which cannot be written by hand.
-    response = await fetch(`${BASE_URL}/uploads`, { method: 'POST', body })
+    response = await fetch(`${BASE_URL}/uploads`, {
+      method: 'POST',
+      body,
+      headers: authHeaders(),
+    })
   } catch {
     throw new ApiError(`Upload of ${file.name} failed: the request never completed.`, 0)
   }
@@ -97,6 +129,7 @@ export async function uploadFile(file: File): Promise<string> {
     } catch {
       // Non-JSON error body; the status line is the best message available.
     }
+    forgetTokenOn401(response.status)
     throw new ApiError(message, response.status)
   }
 
@@ -155,7 +188,7 @@ export async function downloadReport(reviewId: string): Promise<ReportDownload> 
 
   let response: Response
   try {
-    response = await fetch(`${BASE_URL}${path}`)
+    response = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() })
   } catch {
     throw new ApiError(
       `Cannot reach the API at ${BASE_URL}. Is the backend running?`,
@@ -173,6 +206,7 @@ export async function downloadReport(reviewId: string): Promise<ReportDownload> 
     } catch {
       // A non-JSON error body; the status line is the best available message.
     }
+    forgetTokenOn401(response.status)
     throw new ApiError(message, response.status)
   }
 

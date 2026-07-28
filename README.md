@@ -69,7 +69,7 @@ backend/
   maturity.py     score -> band; mirrors frontend/src/maturity.ts
   ingestion/      document, draw.io, and vision parsing; normalization
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          196 tests
+  tests/          224 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -95,7 +95,33 @@ frontend/vercel.json  SPA routing
 | `GET` | `/reviews` | Past reviews, newest first, with pillar scores for the history heatmap. |
 | `GET` | `/reviews/{id}` | The finished review as structured JSON. |
 | `GET` | `/reviews/{id}/report.pdf` | The review as a formatted PDF, rendered on demand. |
-| `GET` | `/health` | Liveness probe, and Render's health check path. |
+| `GET` | `/health` | Liveness probe, and Render's health check path. The only ungated route. |
+
+## Demo access gate
+
+Every route except `/health` requires a shared token in an `X-Demo-Token` header,
+set as `DEMO_ACCESS_TOKEN`. This is a one-day gate for demo day, not an auth
+system: one static token, no users, no sessions, no roles. It exists so the public
+Render URL cannot be used by whoever finds it to read past reviews or spend our
+API budget.
+
+It **fails closed**. With `DEMO_ACCESS_TOKEN` unset every gated route returns 401,
+which is loud and fixable in seconds; failing open would mean a forgotten
+dashboard variable silently leaves the API wide open, which is the exact thing the
+gate is for. `/health` stays reachable regardless, or Render would mark the
+service unhealthy and restart it forever.
+
+Two details that decide whether a gate works or quietly breaks the app. The
+middleware is registered **before** CORS, so CORS ends up outermost and a 401 still
+carries `Access-Control-Allow-Origin` — otherwise the browser reports an opaque
+CORS failure and the user never learns the token was wrong. And comparison uses
+`secrets.compare_digest`, so a wrong token does not leak its length or prefix
+through timing.
+
+The frontend prompts for the token on first load and holds it in `sessionStorage`,
+so it dies with the tab rather than persisting on a shared machine. Any 401 drops
+the stored token and returns to the prompt, so a stale token re-prompts instead of
+looping.
 
 ## LLM provider
 
@@ -272,8 +298,8 @@ points there.
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 196 tests
-cd frontend && npm test                                                          # 26 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 224 tests
+cd frontend && npm test                                                          # 37 tests
 ```
 
 `requirements.txt` is runtime-only, so Render's build installs no test tooling;

@@ -24,9 +24,14 @@ RUNNING_ID = "9c8d7e6f-1a2b-3c4d-5e6f-708192a3b4c5"
 def client(tmp_path, monkeypatch) -> TestClient:
     """A client backed by a scratch data directory, not the developer's."""
     monkeypatch.setattr(storage.config, "DATA_DIR", tmp_path)
+    # The demo gate fronts every route; tests/test_demo_gate.py covers the gate.
+    monkeypatch.setattr(storage.config, "DEMO_ACCESS_TOKEN", "route-demo-token")
     import main
 
-    return TestClient(main.app)
+    return TestClient(
+        main.app,
+        headers={storage.config.DEMO_TOKEN_HEADER: "route-demo-token"},
+    )
 
 
 def test_downloads_a_pdf_with_an_attachment_filename(client: TestClient) -> None:

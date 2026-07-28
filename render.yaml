@@ -20,6 +20,9 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+      # Shared demo gate. Unset means every gated route 401s, by design.
+      - key: DEMO_ACCESS_TOKEN
+        sync: false
       # The Vercel frontend's exact origin — no wildcard. Set after the
       # frontend is deployed; see the two-step order in README.md.
       - key: CORS_ALLOWED_ORIGIN

@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { StepTracker, type Step } from './components/StepTracker'
+import { TokenGate } from './components/TokenGate'
+import { getToken, onTokenCleared } from './token'
 import { AnalyzingView } from './views/AnalyzingView'
 import { HistoryView } from './views/HistoryView'
 import { ResultsView } from './views/ResultsView'
@@ -28,6 +30,30 @@ const STEP_FOR: Record<Exclude<Phase['name'], 'history'>, Step> = {
 export default function App() {
   const [phase, setPhase] = useState<Phase>({ name: 'history' })
   const goHistory = () => setPhase({ name: 'history' })
+
+  // The demo gate. `rejected` distinguishes "you have not entered it yet" from
+  // "what you entered was refused", which is the only feedback the user gets —
+  // the server is the only thing that can judge the token.
+  const [gate, setGate] = useState({ locked: getToken() === null, rejected: false })
+
+  // api.ts drops the token on any 401, so this is how a stale or wrong token
+  // brings the gate back rather than leaving every view showing its own error.
+  useEffect(
+    () => onTokenCleared(() => setGate({ locked: true, rejected: true })),
+    [],
+  )
+
+  if (gate.locked) {
+    return (
+      <TokenGate
+        rejected={gate.rejected}
+        onUnlocked={() => {
+          setGate({ locked: false, rejected: false })
+          goHistory()
+        }}
+      />
+    )
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-surface text-ink">

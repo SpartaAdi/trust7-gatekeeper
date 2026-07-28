@@ -93,6 +93,25 @@ CORS_ORIGIN_FROM_ENV = bool(_CORS_ORIGIN_ENV)
 # Uploads are read fully into memory before being written, so cap them.
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
 
+# --------------------------------------------------------------------------- #
+# Demo access gate
+#
+# A single shared token, deliberately not an auth system: it exists so the public
+# Render URL cannot be used by anyone who finds it to read past reviews or spend
+# our tokens. One day's worth of gate, no users, no sessions, no roles.
+#
+# It FAILS CLOSED. With no token configured every gated route returns 401, which
+# is loud and fixable in seconds. Failing open would mean a forgotten dashboard
+# variable silently leaves the API wide open — the exact failure this gate exists
+# to prevent, and the same silent-misconfiguration trap as an unset CORS origin.
+# --------------------------------------------------------------------------- #
+DEMO_ACCESS_TOKEN = os.environ.get("DEMO_ACCESS_TOKEN", "").strip()
+DEMO_TOKEN_HEADER = "X-Demo-Token"
+
+# Never gated: Render polls this to decide whether the service is alive, and it
+# has no credentials to send.
+UNGATED_PATHS = frozenset({"/health"})
+
 
 def _required_key(name: str) -> str:
     """Read a credential from the environment, or explain how to supply it.

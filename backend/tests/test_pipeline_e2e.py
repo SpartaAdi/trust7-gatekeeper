@@ -40,6 +40,10 @@ DRAWIO = b"""<mxfile><diagram><mxGraphModel><root><mxCell id="0"/>
 
 ENCRYPTION_CHECK = "sec_encryption_at_rest"
 
+# The demo gate sits in front of every route, so these tests carry a token. The
+# gate itself is covered by tests/test_demo_gate.py.
+DEMO_TOKEN = "e2e-demo-token"
+
 
 def _stub_complete_json(state: dict[str, int]):
     """Stand in for the model, keyed off which schema the calling stage asked for.
@@ -164,9 +168,10 @@ def journey(tmp_path_factory) -> Any:
     state = {"run": 0}
     patch = pytest.MonkeyPatch()
     patch.setattr(config, "DATA_DIR", data_dir)
+    patch.setattr(config, "DEMO_ACCESS_TOKEN", DEMO_TOKEN)
     patch.setattr(llm, "complete_json", _stub_complete_json(state))
 
-    client = TestClient(main.app)
+    client = TestClient(main.app, headers={config.DEMO_TOKEN_HEADER: DEMO_TOKEN})
     out: dict[str, Any] = {"data_dir": data_dir, "client": client}
 
     out["health"] = client.get("/health")
@@ -231,7 +236,7 @@ def journey(tmp_path_factory) -> Any:
     # equivalent of restarting uvicorn.
     importlib.reload(storage)
     importlib.reload(main)
-    fresh = TestClient(main.app)
+    fresh = TestClient(main.app, headers={config.DEMO_TOKEN_HEADER: DEMO_TOKEN})
     out["restart_history"] = fresh.get("/reviews").json()
     out["restart_result"] = fresh.get(f"/reviews/{review_id}")
 
@@ -335,8 +340,9 @@ def test_status_is_pollable_immediately_after_202(tmp_path, monkeypatch) -> None
     from agent import pipeline
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEMO_ACCESS_TOKEN", DEMO_TOKEN)
     monkeypatch.setattr(pipeline, "run", lambda **kwargs: None)
-    client = TestClient(main.app)
+    client = TestClient(main.app, headers={config.DEMO_TOKEN_HEADER: DEMO_TOKEN})
 
     diagram_key = client.post(
         "/uploads", files={"file": ("design.drawio", DRAWIO, "application/xml")}
