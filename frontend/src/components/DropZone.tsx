@@ -63,11 +63,11 @@ export function DropZone({ files, onAdd, onRemove, onReclassify, disabled }: Pro
         </svg>
 
         <p className="t-body mt-3 font-medium">
-          Drop your solution document and architecture diagram here
+          Drop your solution document, architecture diagram, or both here
         </p>
         <p className="t-caption mt-1 max-w-md text-ink-muted">
-          Both at once is fine — each file is sorted by type. PDF, DOCX, or text
-          for the SoW; draw.io or an image for the diagram.
+          Either one is enough, and both at once is fine — each file is sorted by
+          type. PDF, DOCX, or text for the SoW; draw.io or an image for the diagram.
         </p>
 
         <label htmlFor={inputId} className="mt-4">

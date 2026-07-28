@@ -21,19 +21,29 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
   const diagrams = staged.filter((s) => s.kind === 'diagram')
   const unresolved = staged.filter((s) => s.kind === 'unknown')
 
+  /**
+   * Either input is sufficient, matching the backend: `normalize.ingest` only
+   * rejects a submission when the document *and* the diagram are both empty. The
+   * UI used to demand both, which refused submissions the API would have accepted.
+   */
   const blocker = useMemo(() => {
     if (unresolved.length > 0) return 'Set a type for every file above.'
-    if (documents.length === 0 && diagrams.length === 0) return 'Add your two files.'
-    if (documents.length === 0) return 'Add a solution document.'
-    if (diagrams.length === 0) return 'Add an architecture diagram.'
+    if (documents.length === 0 && diagrams.length === 0) {
+      return 'Add a solution document, an architecture diagram, or both.'
+    }
     if (documents.length > 1) return 'Only one solution document per review.'
     if (diagrams.length > 1) return 'Only one diagram per review.'
     return ''
   }, [documents.length, diagrams.length, unresolved.length])
 
   const canSubmit = blocker === '' && busy === ''
-  // Falls back to the SoW filename, which is what the reviewer would have typed.
-  const effectiveName = name.trim() || documents[0]?.file.name || ''
+  // Whichever file was supplied; a diagram-only review still needs a name.
+  const primaryFile = documents[0]?.file ?? diagrams[0]?.file
+  const effectiveName = name.trim() || primaryFile?.name || ''
+
+  // A diagram alone is a valid review, but it cannot show process or governance
+  // material, so the note below says what a document would add.
+  const diagramOnly = diagrams.length > 0 && documents.length === 0
 
   function addFiles(incoming: File[]) {
     setError('')
@@ -67,13 +77,20 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
 
     const documentFile = documents[0]?.file
     const diagramFile = diagrams[0]?.file
-    if (!documentFile || !diagramFile) return
+    // One is enough; only an empty submission is refused.
+    if (!documentFile && !diagramFile) return
 
     try {
-      setBusy(`Uploading ${documentFile.name}…`)
-      const documentKey = await uploadFile(documentFile)
-      setBusy(`Uploading ${diagramFile.name}…`)
-      const diagramKey = await uploadFile(diagramFile)
+      let documentKey = ''
+      let diagramKey = ''
+      if (documentFile) {
+        setBusy(`Uploading ${documentFile.name}…`)
+        documentKey = await uploadFile(documentFile)
+      }
+      if (diagramFile) {
+        setBusy(`Uploading ${diagramFile.name}…`)
+        diagramKey = await uploadFile(diagramFile)
+      }
 
       setBusy('Submitting for review…')
       const accepted = await submitReview({
@@ -108,8 +125,9 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
             </>
           ) : (
             <>
-              A review needs one solution document and one architecture diagram.
-              draw.io files are parsed directly; images are read with Claude vision.
+              A review needs a solution document, an architecture diagram, or
+              both. draw.io files are parsed directly; images are read using AI
+              vision.
             </>
           )}
         </p>
@@ -124,6 +142,25 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
           disabled={busy !== ''}
         />
 
+        {/*
+          Informational, not a warning: diagram-only is fully supported, so this
+          uses the navy accent and no severity colour. It says what a document
+          would add rather than implying anything is missing.
+        */}
+        {diagramOnly && (
+          <p
+            className="animate-enter t-caption border-l-2 border-minfy-navy bg-surface-sunken px-4 py-3 text-ink-muted"
+            data-testid="diagram-only-note"
+          >
+            <span className="font-medium text-ink">
+              Architecture diagram received.
+            </span>{' '}
+            Adding a solution document (SoW) as well will let the review also
+            assess process, operational, and compliance aspects that aren’t
+            visible in a diagram alone.
+          </p>
+        )}
+
         <div>
           <label htmlFor="review-name" className="t-heading block">
             Review name{' '}
@@ -135,12 +172,12 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
             value={name}
             onChange={(event) => setName(event.target.value)}
             disabled={busy !== ''}
-            placeholder={documents[0]?.file.name ?? 'Defaults to the document filename'}
+            placeholder={primaryFile?.name ?? 'Defaults to the uploaded filename'}
             className="t-body mt-2 w-full border border-hairline bg-surface px-3 py-2 transition-colors duration-150 placeholder:text-ink-faint hover:border-ink-faint focus:border-minfy-orange disabled:opacity-60"
           />
-          {name.trim() === '' && documents[0] && (
+          {name.trim() === '' && primaryFile && (
             <p className="t-caption mt-1.5 text-ink-faint">
-              Will be saved as “{documents[0].file.name}”.
+              Will be saved as “{primaryFile.name}”.
             </p>
           )}
         </div>

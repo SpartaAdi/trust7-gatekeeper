@@ -68,7 +68,7 @@ def parse_diagram(data: bytes, filename: str) -> tuple[DesignGraph, dict[str, in
     raise UnsupportedDiagram(
         f"Cannot parse diagram {filename!r}. Supported: "
         f"{', '.join(_DRAWIO_SUFFIXES)} (parsed directly) or "
-        f"{', '.join(sorted(_IMAGE_MEDIA_TYPES))} (parsed via Claude vision)."
+        f"{', '.join(sorted(_IMAGE_MEDIA_TYPES))} (read using AI vision)."
     )
 
 

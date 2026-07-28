@@ -3,7 +3,7 @@
 classify components -> evaluate against rubric -> prioritize findings
 -> generate remediation
 
-Calls the Anthropic API directly (not Bedrock), pay-per-token only.
+Model calls go through llm.py, which selects a provider from LLM_PROVIDER;
+pay-per-token only, no provisioned throughput.
 
-Not yet implemented.
 """

@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { submitReview, uploadFile } from '../api'
 import { UploadView } from './UploadView'
@@ -21,12 +21,19 @@ function fileInput(): HTMLInputElement {
 }
 
 describe('UploadView', () => {
+  // Call counts are asserted below, so they must not accumulate across tests.
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('renders the dropzone and a disabled submit', () => {
     render(<UploadView onStarted={vi.fn()} />)
 
     expect(screen.getByText(/drop your solution document/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /start review/i })).toBeDisabled()
-    expect(screen.getByText(/add your two files/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/add a solution document, an architecture diagram, or both/i),
+    ).toBeInTheDocument()
   })
 
   it('auto-classifies dropped files and tags each with its detected type', async () => {
@@ -57,16 +64,130 @@ describe('UploadView', () => {
     expect(screen.getByText('SoW')).toBeInTheDocument()
   })
 
-  it('requires one document and one diagram before submit is enabled', async () => {
+  it('enables submit on a document alone — either input is sufficient', async () => {
     const user = userEvent.setup()
     render(<UploadView onStarted={vi.fn()} />)
 
     await user.upload(fileInput(), [sow()])
-    expect(screen.getByText(/add an architecture diagram/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /start review/i })).toBeDisabled()
+
+    expect(screen.getByRole('button', { name: /start review/i })).toBeEnabled()
+    // The old copy demanded a diagram too; the backend never did.
+    expect(screen.queryByText(/add an architecture diagram/i)).toBeNull()
+  })
+
+  it('enables submit on a diagram alone', async () => {
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
 
     await user.upload(fileInput(), [diagram()])
+
     expect(screen.getByRole('button', { name: /start review/i })).toBeEnabled()
+    expect(screen.queryByText(/add a solution document/i)).toBeNull()
+  })
+
+  it('submits a document-only review with an empty diagram key', async () => {
+    vi.mocked(uploadFile).mockResolvedValueOnce('uploads/a/payments-sow.pdf')
+    vi.mocked(submitReview).mockResolvedValue({
+      review_id: 'rev-doc',
+      status_url: '',
+      result_url: '',
+    })
+    const onStarted = vi.fn()
+    const user = userEvent.setup()
+
+    render(<UploadView onStarted={onStarted} />)
+    await user.upload(fileInput(), [sow()])
+    await user.click(screen.getByRole('button', { name: /start review/i }))
+
+    await waitFor(() => expect(onStarted).toHaveBeenCalledWith('rev-doc'))
+    // Only the file that exists is uploaded.
+    expect(uploadFile).toHaveBeenCalledTimes(1)
+    expect(submitReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentKey: 'uploads/a/payments-sow.pdf',
+        diagramKey: '',
+      }),
+    )
+  })
+
+  it('submits a diagram-only review with an empty document key', async () => {
+    vi.mocked(uploadFile).mockResolvedValueOnce('uploads/b/architecture.drawio')
+    vi.mocked(submitReview).mockResolvedValue({
+      review_id: 'rev-dia',
+      status_url: '',
+      result_url: '',
+    })
+    const onStarted = vi.fn()
+    const user = userEvent.setup()
+
+    render(<UploadView onStarted={onStarted} />)
+    await user.upload(fileInput(), [diagram()])
+    await user.click(screen.getByRole('button', { name: /start review/i }))
+
+    await waitFor(() => expect(onStarted).toHaveBeenCalledWith('rev-dia'))
+    expect(uploadFile).toHaveBeenCalledTimes(1)
+    expect(submitReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentKey: '',
+        diagramKey: 'uploads/b/architecture.drawio',
+        // Falls back to the only filename there is.
+        title: 'architecture.drawio',
+      }),
+    )
+  })
+
+  it('names no vendor when describing how a diagram is read', () => {
+    render(<UploadView onStarted={vi.fn()} />)
+
+    const intro = screen.getByText(/read using AI vision/i)
+    expect(intro).toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/claude|anthropic|openrouter|kimi/i)
+  })
+
+  describe('diagram-only note', () => {
+    it('appears when a diagram is present with no document', async () => {
+      const user = userEvent.setup()
+      render(<UploadView onStarted={vi.fn()} />)
+
+      await user.upload(fileInput(), [diagram()])
+
+      const note = screen.getByTestId('diagram-only-note')
+      expect(note).toHaveTextContent(/architecture diagram received/i)
+      expect(note).toHaveTextContent(/process, operational, and compliance/i)
+    })
+
+    it('is informational, not an error', async () => {
+      const user = userEvent.setup()
+      render(<UploadView onStarted={vi.fn()} />)
+
+      await user.upload(fileInput(), [diagram()])
+
+      const note = screen.getByTestId('diagram-only-note')
+      // No alert role and no severity colour: diagram-only is valid, not degraded.
+      expect(note).not.toHaveAttribute('role', 'alert')
+      expect(note.className).toContain('border-minfy-navy')
+      expect(note.className).not.toMatch(/sev-high|sev-medium/)
+    })
+
+    it('disappears once a document is added', async () => {
+      const user = userEvent.setup()
+      render(<UploadView onStarted={vi.fn()} />)
+
+      await user.upload(fileInput(), [diagram()])
+      expect(screen.getByTestId('diagram-only-note')).toBeInTheDocument()
+
+      await user.upload(fileInput(), [sow()])
+      expect(screen.queryByTestId('diagram-only-note')).toBeNull()
+    })
+
+    it('is absent for a document-only submission', async () => {
+      const user = userEvent.setup()
+      render(<UploadView onStarted={vi.fn()} />)
+
+      await user.upload(fileInput(), [sow()])
+
+      expect(screen.queryByTestId('diagram-only-note')).toBeNull()
+    })
   })
 
   it('rejects a second file of the same kind', async () => {

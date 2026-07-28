@@ -2,7 +2,6 @@
 
 Two diagram paths converge on one common schema:
   - draw.io XML  -> parsed deterministically, no LLM call
-  - image upload -> parsed via Claude vision
+  - image upload -> parsed by the configured vision model
 
-Not yet implemented.
 """

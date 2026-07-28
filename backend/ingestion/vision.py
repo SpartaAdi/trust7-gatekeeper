@@ -1,4 +1,4 @@
-"""Image diagram parsing via Claude vision.
+"""Image diagram parsing via the configured vision model.
 
 Produces exactly the `DesignGraph` that the deterministic draw.io parser
 produces, so the two input paths converge before anything downstream runs.
