@@ -69,7 +69,7 @@ backend/
   maturity.py     score -> band; mirrors frontend/src/maturity.ts
   ingestion/      document, draw.io, and vision parsing; normalization
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          231 tests
+  tests/          245 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -123,6 +123,45 @@ The frontend prompts for the token on first load and holds it in `sessionStorage
 so it dies with the tab rather than persisting on a shared machine. Any 401 drops
 the stored token and returns to the prompt, so a stale token re-prompts instead of
 looping.
+
+## Provider routing
+
+Requests carry an explicit, ordered allow-list rather than OpenRouter's default
+routing:
+
+```json
+"provider": {
+  "order": ["coreweave", "decart", "inceptron"],
+  "allow_fallbacks": false,
+  "require_parameters": true
+}
+```
+
+Every slug was read from `/api/v1/providers` and cross-checked against
+`/api/v1/models/moonshotai/kimi-k2.6/endpoints` — not inferred from a display name.
+All three serve kimi-k2.6, all three advertise `response_format` **and**
+`structured_outputs`, and all three advertise 262,144 max completion tokens, which
+clears the evaluate stage's 64,000 with room to spare.
+
+`allow_fallbacks: false` means a request none of the three can serve **fails** rather
+than routing elsewhere. That is deliberate — it is the only way to know the
+allow-list is honoured, and it stops a review silently paying Moonshot-direct prices
+or landing on a 16k-output endpoint. All three being down is an outage for us;
+`OPENROUTER_ALLOW_FALLBACKS=1` trades that back without a code change.
+
+Requesting a route is not the same as getting one, so `llm._record_route` reads the
+serving provider off every response (OpenRouter returns it on the body) and logs it:
+
+```
+route call=evaluate:aws_waf provider=CoreWeave model=moonshotai/kimi-k2.6 finish=stop out_tokens=8811 21.4s
+```
+
+A provider outside the order is logged at ERROR — with fallbacks off it should be
+impossible, so it means the directive is not being honoured and every cost and
+output-ceiling assumption built on it is void. It is recorded, not raised: the
+response is already paid for, and failing the review would bury the diagnosis. The
+label identifies which of the six pipeline calls a line belongs to;
+`tests/test_pipeline_e2e.py` asserts every call site passes one.
 
 ## LLM provider
 
@@ -393,7 +432,7 @@ real asset, replace those two — nothing else references the shape.
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 231 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 245 tests
 cd frontend && npm test                                                          # 76 tests
 ```
 

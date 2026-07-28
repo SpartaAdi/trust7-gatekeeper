@@ -86,9 +86,15 @@ class _Usage:
 
 class _Response:
     def __init__(self, content: str, finish_reason: str = "stop",
-                 refusal: str | None = None, cached: int = 0) -> None:
+                 refusal: str | None = None, cached: int = 0,
+                 provider: str | None = "CoreWeave", model: str = "moonshotai/kimi-k2.6") -> None:
         self.choices = [_Choice(content, finish_reason, refusal)]
         self.usage = _Usage(cached)
+        self.model = model
+        # OpenRouter reports the serving provider here. `None` models the field
+        # being absent, which is how a non-OpenRouter-shaped response looks.
+        if provider is not None:
+            self.provider = provider
 
 
 @pytest.fixture(autouse=True)
@@ -583,3 +589,162 @@ def test_enforce_schema_is_applied_on_the_anthropic_path_too(monkeypatch) -> Non
     parsed, _ = _run(SCHEMA)
 
     assert parsed == {"findings": []}
+
+
+# --------------------------------------------------------------------------- #
+# 8. Provider routing — an ordered allow-list, and proof it was honoured
+# --------------------------------------------------------------------------- #
+
+def _respond(monkeypatch, response: _Response, *, label: str = "call") -> None:
+    """Run one call against a canned response."""
+    class FakeCompletions:
+        def create(self, **request: Any) -> _Response:
+            return response
+
+    fake = type(
+        "FakeClient", (), {"chat": type("Chat", (), {"completions": FakeCompletions()})()}
+    )()
+    monkeypatch.setattr(llm, "_openrouter_client", lambda: fake)
+    llm.complete_json(
+        system=[{"type": "text", "text": "s"}],
+        content=[{"type": "text", "text": "u"}],
+        schema=MINIMAL_SCHEMA,
+        label=label,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _clean_route_log() -> None:
+    """The route log is module state; a leaked entry would cross tests."""
+    llm.reset_route_log()
+
+
+def test_the_provider_order_is_sent_as_configured(monkeypatch) -> None:
+    monkeypatch.setattr(
+        config, "OPENROUTER_PROVIDER_ORDER", ["coreweave", "decart", "inceptron"]
+    )
+
+    provider = sent_request(monkeypatch)["extra_body"]["provider"]
+
+    # Order is meaningful — it is preference order, not a set.
+    assert provider["order"] == ["coreweave", "decart", "inceptron"]
+
+
+def test_fallbacks_are_off_by_default(monkeypatch) -> None:
+    """The whole point: an unlisted provider must never quietly serve a call."""
+    monkeypatch.setattr(config, "OPENROUTER_ALLOW_FALLBACKS", False)
+
+    assert sent_request(monkeypatch)["extra_body"]["provider"]["allow_fallbacks"] is False
+
+
+def test_fallbacks_can_be_turned_back_on_without_a_code_change(monkeypatch) -> None:
+    monkeypatch.setattr(config, "OPENROUTER_ALLOW_FALLBACKS", True)
+
+    assert sent_request(monkeypatch)["extra_body"]["provider"]["allow_fallbacks"] is True
+
+
+def test_the_order_does_not_displace_require_parameters(monkeypatch) -> None:
+    """Both matter: `order` picks the endpoint, `require_parameters` vets it."""
+    provider = sent_request(monkeypatch)["extra_body"]["provider"]
+
+    assert provider["require_parameters"] is True
+    assert set(provider) >= {"order", "allow_fallbacks", "require_parameters"}
+
+
+def test_every_configured_provider_slug_is_lowercase_and_hyphenated() -> None:
+    """Slugs, not display names. `CoreWeave` is not a routing token."""
+    for slug in config.OPENROUTER_PROVIDER_ORDER:
+        assert slug == slug.lower(), f"{slug!r} is not a slug"
+        assert " " not in slug, f"{slug!r} looks like a display name"
+
+
+def test_the_served_provider_is_recorded(monkeypatch) -> None:
+    _respond(monkeypatch, _Response('{"ok": true}', provider="Decart"), label="evaluate:aws_waf")
+
+    served = llm.route_log()
+    assert len(served) == 1
+    assert served[0].provider == "Decart"
+    assert served[0].label == "evaluate:aws_waf"
+    assert served[0].allowed is True
+    assert served[0].output_tokens == 340
+
+
+def test_a_provider_outside_the_allow_list_is_flagged(monkeypatch, caplog) -> None:
+    """With fallbacks off this should be impossible, so it is logged at ERROR."""
+    monkeypatch.setattr(config, "OPENROUTER_PROVIDER_ORDER", ["coreweave", "decart"])
+    monkeypatch.setattr(config, "OPENROUTER_ALLOW_FALLBACKS", False)
+
+    with caplog.at_level("ERROR"):
+        _respond(monkeypatch, _Response('{"ok": true}', provider="Moonshot AI"))
+
+    assert llm.route_log()[0].allowed is False
+    assert "VIOLATION" in caplog.text
+    assert "Moonshot AI" in caplog.text
+
+
+def test_a_violation_does_not_fail_the_call(monkeypatch) -> None:
+    """The response is already paid for; failing would hide the diagnosis."""
+    monkeypatch.setattr(config, "OPENROUTER_PROVIDER_ORDER", ["coreweave"])
+
+    _respond(monkeypatch, _Response('{"ok": true}', provider="Moonshot AI"))
+
+    assert llm.route_log()[0].provider == "Moonshot AI"
+
+
+def test_display_names_are_matched_against_slugs(monkeypatch) -> None:
+    """The request takes `sail-research`; the response says `Sail Research`.
+
+    Comparing them raw would report a violation on every single call.
+    """
+    monkeypatch.setattr(config, "OPENROUTER_PROVIDER_ORDER", ["sail-research"])
+
+    _respond(monkeypatch, _Response('{"ok": true}', provider="Sail Research"))
+
+    assert llm.route_log()[0].allowed is True
+
+
+def test_an_absent_provider_field_is_reported_as_unknown_not_guessed(monkeypatch) -> None:
+    _respond(monkeypatch, _Response('{"ok": true}', provider=None))
+
+    assert llm.route_log()[0].provider == "unreported"
+
+
+def test_a_truncated_call_is_still_attributed_before_it_raises(monkeypatch) -> None:
+    """Knowing which endpoint truncated is the whole point of the record."""
+    with pytest.raises(llm.TruncatedResponse):
+        _respond(
+            monkeypatch,
+            _Response('{"ok": tr', finish_reason="length", provider="Inceptron"),
+        )
+
+    assert llm.route_log()[0].provider == "Inceptron"
+    assert llm.route_log()[0].finish_reason == "length"
+
+
+def test_a_refused_call_is_still_attributed_before_it_raises(monkeypatch) -> None:
+    with pytest.raises(llm.ModelRefusal):
+        _respond(monkeypatch, _Response("", refusal="no", provider="Decart"))
+
+    assert llm.route_log()[0].provider == "Decart"
+
+
+def test_the_route_log_is_bounded(monkeypatch) -> None:
+    """It is a diagnostic tail on a long-running process, not an audit trail."""
+    for _ in range(llm.ROUTE_LOG_LIMIT + 5):
+        _respond(monkeypatch, _Response('{"ok": true}'))
+
+    assert len(llm.route_log()) == llm.ROUTE_LOG_LIMIT
+
+
+def test_every_pipeline_call_site_passes_a_label() -> None:
+    """An unlabelled call cannot be attributed to a stage in the route log."""
+    sources = [
+        pathlib.Path("agent/stages.py").read_text(),
+        pathlib.Path("ingestion/vision.py").read_text(),
+    ]
+    calls = sum(source.count("llm.complete_json(") for source in sources)
+    labels = sum(source.count("label=") for source in sources)
+
+    # stages.py has one unrelated `label=` (component label), hence >= not ==.
+    assert calls == 5, f"expected 5 call sites, found {calls}"
+    assert labels >= calls

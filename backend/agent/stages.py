@@ -129,6 +129,7 @@ def classify(design: NormalizedDesign) -> tuple[dict[str, Any], dict[str, int]]:
         schema=_CLASSIFY_SCHEMA,
         effort="medium",
         max_tokens=16000,
+        label="classify",
     )
 
 
@@ -283,6 +284,8 @@ def evaluate(
         # excludes is DeepInfra at 16,384, which could not have served the old
         # 32000 either.
         max_tokens=64000,
+        # One call per framework, so the framework is part of the label.
+        label=f"evaluate:{framework_key}",
     )
 
     return _to_findings(payload.get("findings", []), framework_key), usage
@@ -456,6 +459,7 @@ def prioritize(
         schema=_PRIORITIZE_SCHEMA,
         effort="medium",
         max_tokens=16000,
+        label="prioritize",
     )
 
 
@@ -557,6 +561,7 @@ def remediate(
         schema=_REMEDIATE_SCHEMA,
         effort="medium",
         max_tokens=32000,
+        label="remediate",
     )
 
     text: dict[str, str] = {}

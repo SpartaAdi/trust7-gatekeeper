@@ -50,9 +50,16 @@ def _stub_complete_json(state: dict[str, int]):
 
     `state["run"]` flips on the second review so the re-review resolves one
     high-severity check — which is what gives the delta something to report.
+
+    Every call must carry a `label`: it is what names the call in the route log, so
+    an unlabelled one logs as "unlabelled" and cannot be attributed to a stage.
+    Asserting it here is the only thing that keeps a new call site from shipping
+    without one, since the label has no effect on the response.
     """
 
-    def fake(*, system, content, schema, effort, max_tokens):
+    def fake(*, system, content, schema, effort, max_tokens, label=""):
+        assert label, "every complete_json call must pass a label for the route log"
+        state.setdefault("labels", []).append(label)  # type: ignore[arg-type]
         required = set(schema.get("required", []))
 
         if "design_summary" in required:

@@ -106,6 +106,7 @@ def parse(data: bytes, media_type: str) -> tuple[DesignGraph, dict[str, int]]:
         # diagram reliably.
         effort="medium",
         max_tokens=16000,
+        label="vision",
     )
 
     graph = DesignGraph.model_validate({**parsed, "source": DiagramSource.IMAGE.value})

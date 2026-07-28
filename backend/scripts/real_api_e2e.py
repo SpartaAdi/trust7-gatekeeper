@@ -127,6 +127,8 @@ if PROVIDER == "openrouter":
             "schema_additional_properties": (json_schema.get("schema") or {}).get(
                 "additionalProperties", "<absent>"),
             "require_parameters": (extra.get("provider") or {}).get("require_parameters"),
+            "provider_order": (extra.get("provider") or {}).get("order"),
+            "allow_fallbacks": (extra.get("provider") or {}).get("allow_fallbacks"),
             "reasoning_effort": (extra.get("reasoning") or {}).get("effort"),
             "content_parts": [p.get("type") for p in request["messages"][1]["content"]],
         })
@@ -454,6 +456,7 @@ for i, call in enumerate(CALLS, 1):
     print(f"\ncall {i}:")
     for field in (
         "model", "max_tokens", "structured_output", "strict", "require_parameters",
+        "provider_order", "allow_fallbacks",
         "reasoning_effort", "thinking", "betas", "schema_additional_properties",
         "content_parts", "finish_reason", "provider_served_by", "request_id",
         "elapsed", "usage",
@@ -462,6 +465,42 @@ for i, call in enumerate(CALLS, 1):
             print(f"  {field:<28} {call[field]}")
     if "error" in call:
         print(f"  error                        {call['error']}")
+
+# --------------------------------------------------------------------------- #
+# 6b. Which provider actually served each call
+#
+# The request is a preference; the response is the fact. This table is the only
+# evidence that `order` + `allow_fallbacks: false` was honoured rather than merely
+# asked for — a silent fall-through to Moonshot direct is indistinguishable from a
+# pinned route in every other output.
+# --------------------------------------------------------------------------- #
+rule("4b. PROVIDER SERVED (from llm.ROUTE_LOG)")
+print(f"configured order:      {config.OPENROUTER_PROVIDER_ORDER}")
+print(f"allow_fallbacks:       {config.OPENROUTER_ALLOW_FALLBACKS}")
+print(f"total wall clock:      {time.time() - T0:.1f}s")
+served = llm.route_log()
+print(f"\ncalls recorded:        {len(served)}\n")
+print(f"  {'#':<3} {'call':<20} {'served by':<16} {'finish':<10} "
+      f"{'out tok':>8} {'secs':>7}  ok")
+for i, call in enumerate(served, 1):
+    print(f"  {i:<3} {call.label:<20} {call.provider:<16} {call.finish_reason:<10} "
+          f"{call.output_tokens:>8} {call.seconds:>6.1f}s  "
+          f"{'yes' if call.allowed else 'NO — OUTSIDE ALLOW-LIST'}")
+
+if served:
+    unlisted = [c for c in served if not c.allowed]
+    distinct = sorted({c.provider for c in served})
+    print(f"\ndistinct providers:    {distinct}")
+    if unlisted:
+        print(f"!! {len(unlisted)} call(s) served from OUTSIDE the allow-list — "
+              f"allow_fallbacks:false is NOT being enforced")
+    elif any(c.provider == "unreported" for c in served):
+        print("!! at least one call reported no provider — cannot confirm enforcement")
+    else:
+        print("OK: every call was served from the configured order; "
+              "nothing fell through to moonshotai")
+else:
+    print("no calls recorded — the run failed before any model call completed")
 
 if RETRIES:
     print("\n!! FALLBACK RETRIES (first request rejected):")

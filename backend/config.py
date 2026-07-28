@@ -81,6 +81,40 @@ OPENROUTER_IGNORE_PROVIDERS = [
     if name.strip()
 ]
 
+# --------------------------------------------------------------------------- #
+# Provider routing
+#
+# An explicit, ordered allow-list instead of OpenRouter's default routing.
+#
+# Every slug below was read from https://openrouter.ai/api/v1/providers and
+# cross-checked against .../models/moonshotai/kimi-k2.6/endpoints — not inferred
+# from a display name. As verified there, all three serve kimi-k2.6, all three
+# advertise `response_format` AND `structured_outputs`, and all three advertise
+# 262,144 max completion tokens, which clears the evaluate stage's 64,000 with
+# room to spare.
+#
+# The lowercase slug is the routing token; the endpoint's `tag` adds the
+# quantization it serves at (coreweave/fp4, decart/fp4, inceptron/int4). Order
+# here is preference order.
+# --------------------------------------------------------------------------- #
+OPENROUTER_PROVIDER_ORDER = [
+    name.strip()
+    for name in os.environ.get(
+        "OPENROUTER_PROVIDER_ORDER", "coreweave,decart,inceptron"
+    ).split(",")
+    if name.strip()
+]
+
+# With fallbacks off, a request that cannot be served by one of the providers
+# above FAILS rather than quietly routing elsewhere. That is the point: it is the
+# only way to know the allow-list is actually being honoured, and it means a
+# review never silently costs Moonshot-direct prices or lands on a 16k-output
+# endpoint. The accepted trade-off is that all three being unavailable is an
+# outage for us. Set OPENROUTER_ALLOW_FALLBACKS=1 to trade that back.
+OPENROUTER_ALLOW_FALLBACKS = os.environ.get(
+    "OPENROUTER_ALLOW_FALLBACKS", ""
+).strip().lower() in ("1", "true", "yes")
+
 # The model string in force for this process, whichever provider is selected.
 MODEL = OPENROUTER_MODEL if LLM_PROVIDER == "openrouter" else ANTHROPIC_MODEL
 

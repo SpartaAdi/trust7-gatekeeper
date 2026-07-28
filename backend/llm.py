@@ -25,10 +25,13 @@ back rather than trusting what was asked for.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import json
 import logging
 import re
+import time
+from collections import deque
 from typing import Any, Iterable
 
 import config
@@ -45,6 +48,19 @@ Effort = str
 _STRUCTURED_OUTPUTS_BETA = "structured-outputs-2025-11-13"
 
 
+@dataclasses.dataclass(frozen=True)
+class ServedCall:
+    """One completed model call and who served it."""
+
+    label: str
+    provider: str
+    model: str
+    finish_reason: str
+    output_tokens: int
+    seconds: float
+    allowed: bool
+
+
 class ModelRefusal(RuntimeError):
     """The request was declined by the model's safety classifiers."""
 
@@ -55,6 +71,61 @@ class SchemaViolation(RuntimeError):
 
 class TruncatedResponse(RuntimeError):
     """The model hit its output limit before finishing the JSON."""
+
+
+class ProviderNotAllowed(RuntimeError):
+    """A response came back from a provider outside the configured allow-list."""
+
+
+# --------------------------------------------------------------------------- #
+# Which provider actually served each call
+#
+# OpenRouter returns the serving provider on the response body. Recording it is
+# the only way to know that `order` + `allow_fallbacks: false` is being honoured
+# rather than merely requested — the request is a preference, the response is the
+# fact. Without this, a silent fall-through to Moonshot direct looks identical to
+# a successful pinned route, at 1.5x the prompt price.
+#
+# The log line is the durable record. `ROUTE_LOG` is a bounded in-process tail for
+# diagnostics and for the e2e script to print; it is deliberately NOT per-review
+# attribution — two concurrent reviews interleave in it.
+# --------------------------------------------------------------------------- #
+
+ROUTE_LOG_LIMIT = 64
+ROUTE_LOG: deque[ServedCall] = deque(maxlen=ROUTE_LOG_LIMIT)
+
+
+def route_log() -> list[ServedCall]:
+    """The recent tail of served calls, oldest first."""
+    return list(ROUTE_LOG)
+
+
+def reset_route_log() -> None:
+    ROUTE_LOG.clear()
+
+
+def _slug(name: str) -> str:
+    """Normalise a provider name or slug for comparison.
+
+    The request takes slugs (`sail-research`); the response returns display names
+    (`Sail Research`). Comparing them raw reports a violation on every call.
+    """
+    return "".join(ch for ch in name.lower() if ch.isalnum())
+
+
+def _served_provider(response: Any) -> str:
+    """The provider OpenRouter says served this call.
+
+    `provider` is an OpenRouter extension, so it is absent from the OpenAI SDK's
+    declared model; pydantic keeps it in `model_extra`. Returns "" when the field
+    is missing rather than guessing, so an unknown route is visibly unknown.
+    """
+    direct = getattr(response, "provider", None)
+    if isinstance(direct, str) and direct:
+        return direct
+    extra = getattr(response, "model_extra", None) or {}
+    value = extra.get("provider")
+    return value if isinstance(value, str) else ""
 
 
 # --------------------------------------------------------------------------- #
@@ -68,8 +139,12 @@ def complete_json(
     schema: dict[str, Any],
     effort: Effort = "high",
     max_tokens: int = 16000,
+    label: str = "",
 ) -> tuple[dict[str, Any], dict[str, int]]:
     """Run one structured-output request and return (parsed JSON, token usage).
+
+    `label` names the call in the route log — it identifies which of the pipeline's
+    calls a log line belongs to and is otherwise unused.
 
     `system` blocks are passed through verbatim on the Anthropic path so callers
     can place their own `cache_control` breakpoint on the stable prefix. On the
@@ -80,7 +155,7 @@ def complete_json(
     if config.LLM_PROVIDER == "openrouter":
         parsed, usage = _openrouter_complete(
             system=system, content=content, schema=schema,
-            effort=effort, max_tokens=max_tokens,
+            effort=effort, max_tokens=max_tokens, label=label,
         )
     else:
         parsed, usage = _anthropic_complete(
@@ -263,6 +338,12 @@ def _openrouter_request(
         )
 
     provider: dict[str, Any] = {
+        # Ordered allow-list. Slugs are verified against OpenRouter's provider and
+        # endpoint APIs in config.py — see the note there.
+        "order": list(config.OPENROUTER_PROVIDER_ORDER),
+        # Off by default: a request that none of the ordered providers can serve
+        # must FAIL rather than route somewhere unlisted. See config.py.
+        "allow_fallbacks": config.OPENROUTER_ALLOW_FALLBACKS,
         # MANDATORY. Structured output support is per endpoint, not per model: of
         # the 22 providers serving kimi-k2.6, at least one reports no
         # structured_outputs and another no response_format. Without this,
@@ -301,6 +382,53 @@ def _openrouter_request(
     }
 
 
+def _record_route(response: Any, label: str, seconds: float) -> ServedCall:
+    """Log, and record, which provider served a call.
+
+    A served provider outside the allow-list is logged at ERROR: with
+    `allow_fallbacks: false` it should be impossible, so seeing one means the
+    routing directive is not being honoured and every assumption about cost and
+    output ceiling built on it is void. It is recorded rather than raised — the
+    response is already paid for and usable, and failing the review would hide the
+    diagnosis behind a pipeline error.
+    """
+    provider = _served_provider(response)
+    allow_list = {_slug(name) for name in config.OPENROUTER_PROVIDER_ORDER}
+    # No allow-list, or fallbacks deliberately on, means anything is permitted.
+    allowed = (
+        True
+        if not allow_list or config.OPENROUTER_ALLOW_FALLBACKS
+        else _slug(provider) in allow_list
+    )
+
+    choice = response.choices[0] if response.choices else None
+    usage = getattr(response, "usage", None)
+    served = ServedCall(
+        label=label or "unlabelled",
+        provider=provider or "unreported",
+        model=getattr(response, "model", "") or "",
+        finish_reason=getattr(choice, "finish_reason", "") or "",
+        output_tokens=getattr(usage, "completion_tokens", 0) or 0,
+        seconds=seconds,
+        allowed=allowed,
+    )
+    ROUTE_LOG.append(served)
+
+    log.info(
+        "route call=%s provider=%s model=%s finish=%s out_tokens=%d %.1fs",
+        served.label, served.provider, served.model,
+        served.finish_reason, served.output_tokens, served.seconds,
+    )
+    if not allowed:
+        log.error(
+            "route VIOLATION call=%s served by %r, which is not in the configured "
+            "order %s with allow_fallbacks=false. The routing directive is not "
+            "being honoured; cost and output-ceiling assumptions no longer hold.",
+            served.label, served.provider, config.OPENROUTER_PROVIDER_ORDER,
+        )
+    return served
+
+
 def _openrouter_complete(
     *,
     system: list[dict[str, Any]],
@@ -308,12 +436,18 @@ def _openrouter_complete(
     schema: dict[str, Any],
     effort: Effort,
     max_tokens: int,
+    label: str = "",
 ) -> tuple[dict[str, Any], dict[str, int]]:
     request = _openrouter_request(
         system=system, content=content, schema=schema,
         effort=effort, max_tokens=max_tokens,
     )
+    started = time.monotonic()
     response = _openrouter_create_with_retry(request)
+    # Recorded before the checks below, so a refusal or a truncation is still
+    # attributed to the provider that produced it — those are exactly the cases
+    # where knowing the endpoint matters most.
+    _record_route(response, label, time.monotonic() - started)
     choice = response.choices[0]
 
     if getattr(choice.message, "refusal", None):
