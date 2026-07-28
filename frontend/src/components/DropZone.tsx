@@ -45,7 +45,7 @@ export function DropZone({ files, onAdd, onRemove, onReclassify, disabled }: Pro
         className={[
           'flex flex-col items-center justify-center border border-dashed px-6 py-10 text-center transition-colors duration-150',
           dragging
-            ? 'border-minfy-orange bg-minfy-orange/5'
+            ? 'border-minfy-indigo bg-minfy-indigo/5'
             : 'border-hairline hover:border-ink-faint',
           disabled ? 'opacity-60' : '',
         ].join(' ')}
@@ -169,7 +169,7 @@ function StagedRow({
           className={`t-eyebrow shrink-0 border px-2 py-0.5 text-[10px] tracking-wider ${
             staged.kind === 'document'
               ? 'border-minfy-navy/30 bg-minfy-navy/5 text-minfy-navy'
-              : 'border-minfy-orange/40 bg-minfy-orange/8 text-minfy-orange'
+              : 'border-minfy-indigo/40 bg-minfy-indigo/8 text-minfy-indigo'
           }`}
         >
           {KIND_LABEL[staged.kind]}

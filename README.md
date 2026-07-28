@@ -355,11 +355,35 @@ permanent arrangement, so turn the pinger off afterwards. And warming prevents
 idle spin-down, not redeploys or platform restarts; if either happens,
 `local-data/` is still lost.
 
+## Brand and theming
+
+Every colour and both type families live in `frontend/src/index.css` under
+`@theme`; no component hardcodes a hex value. The palette is **sampled from the
+live minfytech.com stylesheet**, not from the older orange/navy brand document:
+
+| Token | Value | Role |
+| --- | --- | --- |
+| `minfy-indigo` | `#1420be` | primary accent — buttons, active states, focus ring |
+| `minfy-blue` | `#1c55bb` | hover state for primary actions |
+| `minfy-navy` | `#1b263b` | header bar, dark sections, ink |
+| `pastel-sky` / `mint` / `tan` / `cream` / `teal` | `#cee2fd` … | flat accent blocks behind cards |
+
+Type is a serif display face over a sans body, matching the site's Financier
+Display / Lato pairing. Financier is commercially licensed, so it is named first
+in the stack and a system serif renders in practice — **no webfont is fetched**,
+by design. The two largest steps of the type scale (`.t-display`, `.t-title`) are
+the serif ones; everything else is sans. `.t-tab` is the small-caps treatment used
+by the header nav and the step tracker.
+
+Two things deliberately still use the old orange/navy: the **PDF report**
+(`backend/report.py`) and nothing else. The PDF and the web UI therefore do not
+match — see the note at the end of the PDF section.
+
 ## Tests
 
 ```bash
 cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 228 tests
-cd frontend && npm test                                                          # 37 tests
+cd frontend && npm test                                                          # 61 tests
 ```
 
 `requirements.txt` is runtime-only, so Render's build installs no test tooling;

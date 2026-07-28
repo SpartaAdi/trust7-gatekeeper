@@ -149,7 +149,7 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
         */}
         {diagramOnly && (
           <p
-            className="animate-enter t-caption border-l-2 border-minfy-navy bg-surface-sunken px-4 py-3 text-ink-muted"
+            className="animate-enter t-caption border-l-2 border-minfy-navy bg-pastel-sky px-4 py-3 text-ink-muted"
             data-testid="diagram-only-note"
           >
             <span className="font-medium text-ink">
@@ -173,7 +173,7 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
             onChange={(event) => setName(event.target.value)}
             disabled={busy !== ''}
             placeholder={primaryFile?.name ?? 'Defaults to the uploaded filename'}
-            className="t-body mt-2 w-full border border-hairline bg-surface px-3 py-2 transition-colors duration-150 placeholder:text-ink-faint hover:border-ink-faint focus:border-minfy-orange disabled:opacity-60"
+            className="t-body mt-2 w-full border border-hairline bg-surface px-3 py-2 transition-colors duration-150 placeholder:text-ink-faint hover:border-ink-faint focus:border-minfy-indigo disabled:opacity-60"
           />
           {name.trim() === '' && primaryFile && (
             <p className="t-caption mt-1.5 text-ink-faint">
@@ -205,7 +205,7 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
           <button
             type="submit"
             disabled={!canSubmit}
-            className="t-body inline-flex items-center gap-2 bg-minfy-orange px-5 py-2.5 font-semibold text-white transition-colors duration-150 hover:bg-minfy-navy disabled:cursor-not-allowed disabled:bg-hairline disabled:text-ink-faint"
+            className="t-body inline-flex items-center gap-2 bg-minfy-indigo px-5 py-2.5 font-semibold text-white transition-colors duration-150 hover:bg-minfy-blue disabled:cursor-not-allowed disabled:bg-hairline disabled:text-ink-faint"
           >
             {busy !== '' && (
               <span

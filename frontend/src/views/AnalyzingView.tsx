@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { ApiError, getStatus } from '../api'
+import { estimateRemainingSeconds, formatRemaining } from '../eta'
 import { STAGE_LABELS, type ReviewStatus, type StageProgress } from '../types'
 
 const POLL_INTERVAL_MS = 1500
@@ -68,6 +69,19 @@ export function AnalyzingView({ reviewId, onComplete, onStartOver }: Props) {
   const failed = status?.state === 'error'
   const percent = stages.length > 0 ? Math.round((doneCount / stages.length) * 100) : 0
 
+  // The estimate has to count down between polls, so it gets its own one-second
+  // tick. It stops as soon as the run settles or we stop polling — an interval
+  // still running on a finished screen is a leak, not a detail.
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  const settling = failed || gaveUp || status?.state === 'complete'
+  useEffect(() => {
+    if (settling) return
+    const ticker = window.setInterval(() => setNowMs(Date.now()), 1000)
+    return () => window.clearInterval(ticker)
+  }, [settling])
+
+  const remainingSeconds = failed ? null : estimateRemainingSeconds(stages, nowMs)
+
   return (
     <div className="mx-auto max-w-2xl px-6 py-12 lg:py-16">
       <header>
@@ -87,10 +101,24 @@ export function AnalyzingView({ reviewId, onComplete, onStartOver }: Props) {
 
       {stages.length > 0 && !failed && (
         <div className="mt-8">
-          <div className="flex items-baseline justify-between">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
             <span className="t-eyebrow text-ink-muted">Progress</span>
             <span className="tnum t-caption text-ink-muted">
               {doneCount} of {stages.length} stages
+              {remainingSeconds !== null && (
+                <>
+                  <span aria-hidden="true"> · </span>
+                  {/*
+                    Polite, not assertive: this text changes every second, and an
+                    assertive region would have a screen reader interrupt itself
+                    continuously. `data-testid` because the wording is an
+                    approximation the tests should not have to spell out.
+                  */}
+                  <span aria-live="polite" data-testid="eta">
+                    {formatRemaining(remainingSeconds)}
+                  </span>
+                </>
+              )}
             </span>
           </div>
           <div
@@ -102,7 +130,7 @@ export function AnalyzingView({ reviewId, onComplete, onStartOver }: Props) {
             aria-label="Analysis progress"
           >
             <div
-              className="h-full bg-minfy-orange transition-[width] duration-500 ease-out"
+              className="h-full bg-minfy-indigo transition-[width] duration-500 ease-out"
               style={{ width: `${percent}%` }}
             />
           </div>
@@ -247,8 +275,8 @@ function StageMarker({ state }: { state: StageProgress['state'] }) {
   if (state === 'running') {
     return (
       <span aria-label="In progress" role="img" className={`${base} relative`}>
-        <span className="absolute size-5 animate-ping rounded-full bg-minfy-orange/25" />
-        <span className="size-2.5 rounded-full bg-minfy-orange" />
+        <span className="absolute size-5 animate-ping rounded-full bg-minfy-indigo/25" />
+        <span className="size-2.5 rounded-full bg-minfy-indigo" />
       </span>
     )
   }

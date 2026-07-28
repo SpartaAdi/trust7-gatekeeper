@@ -27,6 +27,14 @@ const STEP_FOR: Record<Exclude<Phase['name'], 'history'>, Step> = {
   results: 3,
 }
 
+/** Header tabs, in flow order. Labels are set in small caps by `.t-tab`. */
+const SECTIONS: readonly { phase: Phase['name']; label: string }[] = [
+  { phase: 'history', label: 'Reviews' },
+  { phase: 'upload', label: 'Submit' },
+  { phase: 'analyzing', label: 'Analysis' },
+  { phase: 'results', label: 'Findings' },
+]
+
 export default function App() {
   const [phase, setPhase] = useState<Phase>({ name: 'history' })
   const goHistory = () => setPhase({ name: 'history' })
@@ -57,8 +65,14 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen flex-col bg-surface text-ink">
-      <header className="border-b border-hairline">
-        <div className="mx-auto flex max-w-5xl items-center gap-3 px-6 py-4">
+      {/*
+        Dark navy bar, as on the live site. The wordmark is type, not an image:
+        the supplied logo file never reached this environment (see the note in
+        the commit message), and a placeholder graphic would be worse than a
+        clean wordmark.
+      */}
+      <header className="bg-minfy-navy text-white">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-8 gap-y-3 px-6 py-4">
           <button
             type="button"
             onClick={goHistory}
@@ -67,15 +81,55 @@ export default function App() {
           >
             <span
               aria-hidden="true"
-              className="h-7 w-1 shrink-0 rounded-full bg-minfy-orange"
+              className="h-7 w-1 shrink-0 rounded-full bg-white/70"
             />
             <span className="min-w-0">
-              <span className="t-heading block truncate">Trust7 Gatekeeper</span>
-              <span className="t-caption block truncate text-ink-muted">
+              <span className="t-title block truncate leading-tight">
+                Trust7 Gatekeeper
+              </span>
+              <span className="t-caption block truncate text-white/60">
                 Solution design review — AWS Well-Architected and Minfy TRUST-7
               </span>
             </span>
           </button>
+
+          {/*
+            Small-caps section tabs, as on the live site's nav. These describe
+            where you are; they add no navigation the header did not already
+            have. Only "Reviews" is interactive, because going home is what the
+            wordmark already does — the rest are marks, not dead buttons.
+          */}
+          <nav aria-label="Sections" className="ml-auto flex items-center gap-6">
+            {SECTIONS.map(({ phase: name, label }) => {
+              const current = name === phase.name
+              const tab = [
+                't-tab border-b-2 pb-0.5 transition-colors duration-150',
+                current
+                  ? 'border-white text-white'
+                  : 'border-transparent text-white/50',
+              ].join(' ')
+
+              return name === 'history' ? (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={goHistory}
+                  aria-current={current ? 'page' : undefined}
+                  className={`${tab} hover:border-white/40 hover:text-white/85`}
+                >
+                  {label}
+                </button>
+              ) : (
+                <span
+                  key={name}
+                  aria-current={current ? 'page' : undefined}
+                  className={`${tab} hidden sm:block`}
+                >
+                  {label}
+                </span>
+              )
+            })}
+          </nav>
         </div>
       </header>
 
@@ -132,6 +186,14 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Fine print, treated as the live site treats secondary info: small,
+          muted, on a hairline, taking up no visual weight. */}
+      <footer className="border-t border-hairline">
+        <p className="t-caption mx-auto max-w-5xl px-6 py-5 text-[0.75rem] text-ink-faint">
+          Built for the Minfy Buildathon — July 2026
+        </p>
+      </footer>
     </div>
   )
 }

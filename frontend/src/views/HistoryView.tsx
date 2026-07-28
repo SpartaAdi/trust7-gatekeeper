@@ -46,7 +46,7 @@ export function HistoryView({ onOpen, onNewReview }: Props) {
         <button
           type="button"
           onClick={onNewReview}
-          className="t-body bg-minfy-orange px-5 py-2.5 font-semibold text-white transition-colors duration-150 hover:bg-minfy-navy"
+          className="t-body bg-minfy-indigo px-5 py-2.5 font-semibold text-white transition-colors duration-150 hover:bg-minfy-blue"
         >
           New review
         </button>
@@ -83,7 +83,7 @@ export function HistoryView({ onOpen, onNewReview }: Props) {
       )}
 
       {reviews !== null && reviews.length === 0 && !error && (
-        <div className="mt-10 border border-dashed border-hairline px-6 py-14 text-center">
+        <div className="mt-10 bg-pastel-tan px-6 py-14 text-center">
           <h3 className="t-title">Nothing reviewed yet</h3>
           <p className="t-body mx-auto mt-2 max-w-sm text-ink-muted">
             Submit a solution document and an architecture diagram, and the review
@@ -92,7 +92,7 @@ export function HistoryView({ onOpen, onNewReview }: Props) {
           <button
             type="button"
             onClick={onNewReview}
-            className="t-body mt-6 bg-minfy-orange px-5 py-2.5 font-semibold text-white transition-colors duration-150 hover:bg-minfy-navy"
+            className="t-body mt-6 bg-minfy-indigo px-5 py-2.5 font-semibold text-white transition-colors duration-150 hover:bg-minfy-blue"
           >
             Start the first review
           </button>
@@ -113,7 +113,7 @@ export function HistoryView({ onOpen, onNewReview }: Props) {
                 className="group flex w-full items-center gap-6 py-5 text-left transition-colors hover:bg-surface-sunken"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="t-heading block truncate group-hover:text-minfy-orange">
+                  <span className="t-heading block truncate group-hover:text-minfy-indigo">
                     {review.title || 'Untitled review'}
                   </span>
                   <span className="t-caption mt-1 block text-ink-muted">

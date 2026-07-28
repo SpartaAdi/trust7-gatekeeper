@@ -42,6 +42,34 @@ describe('AnalyzingView', () => {
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
   })
 
+  it('shows an estimated time remaining alongside the progress bar', async () => {
+    getStatus.mockResolvedValue(statusFixture())
+
+    render(
+      <AnalyzingView reviewId="rev-1" onComplete={vi.fn()} onStartOver={vi.fn()} />,
+    )
+
+    const eta = await screen.findByTestId('eta')
+    expect(eta).toHaveTextContent(/about .* remaining/)
+    // It belongs to the progress block, not to some unrelated corner of the page:
+    // the same element states how many stages are done.
+    expect(eta.parentElement).toHaveTextContent('2 of 6 stages')
+    expect(screen.getByRole('progressbar')).toBeInTheDocument()
+  })
+
+  it('shows no estimate once the run has failed', async () => {
+    getStatus.mockResolvedValue(
+      statusFixture({ state: 'error', error: 'ModelRefusal: declined' }),
+    )
+
+    render(
+      <AnalyzingView reviewId="rev-1" onComplete={vi.fn()} onStartOver={vi.fn()} />,
+    )
+
+    await screen.findByRole('alert')
+    expect(screen.queryByTestId('eta')).not.toBeInTheDocument()
+  })
+
   it('surfaces a pipeline error instead of polling silently', async () => {
     getStatus.mockResolvedValue(
       statusFixture({ state: 'error', error: 'ModelRefusal: declined' }),

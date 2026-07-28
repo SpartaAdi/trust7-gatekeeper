@@ -35,7 +35,7 @@ export function TokenGate({ rejected, onUnlocked }: Props) {
       >
         <span
           aria-hidden="true"
-          className="mb-6 block h-1 w-12 rounded-full bg-minfy-orange"
+          className="mb-6 block h-1 w-12 rounded-full bg-minfy-indigo"
         />
         <h1 className="t-title">Trust7 Gatekeeper</h1>
         <p className="t-body mt-2 text-ink-muted">
@@ -61,13 +61,13 @@ export function TokenGate({ rejected, onUnlocked }: Props) {
           onChange={(event) => setValue(event.target.value)}
           autoFocus
           autoComplete="off"
-          className="t-body mt-1.5 w-full border border-hairline bg-surface px-3 py-2.5 focus:border-minfy-orange focus:outline-none"
+          className="t-body mt-1.5 w-full border border-hairline bg-surface px-3 py-2.5 focus:border-minfy-indigo focus:outline-none"
         />
 
         <button
           type="submit"
           disabled={!value.trim()}
-          className="t-body mt-5 w-full bg-minfy-orange px-5 py-2.5 font-semibold text-white transition-colors duration-150 hover:bg-minfy-navy disabled:cursor-not-allowed disabled:opacity-50"
+          className="t-body mt-5 w-full bg-minfy-indigo px-5 py-2.5 font-semibold text-white transition-colors duration-150 hover:bg-minfy-blue disabled:cursor-not-allowed disabled:bg-hairline disabled:text-ink-faint"
         >
           Continue
         </button>

@@ -33,7 +33,7 @@ export function maturityFor(score: number): MaturityLabel {
 /** Bar fill colour. Deliberately one accent plus neutrals — no rainbow. */
 export function scoreToneClass(score: number): string {
   if (score >= 75) return 'bg-verdict-pass'
-  if (score >= 40) return 'bg-minfy-orange'
+  if (score >= 40) return 'bg-minfy-indigo'
   return 'bg-sev-high'
 }
 

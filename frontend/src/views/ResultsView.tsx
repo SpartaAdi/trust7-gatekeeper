@@ -123,7 +123,7 @@ export function ResultsView({
       {result.delta && <DeltaSummary delta={result.delta} />}
 
       {result.executive_summary && (
-        <section className="mt-12 border-l-2 border-minfy-navy bg-surface-sunken px-5 py-5">
+        <section className="mt-12 bg-pastel-cream px-5 py-5">
           <h3 className="t-eyebrow text-ink-muted">Executive summary</h3>
           <p className="t-body mt-2.5 max-w-prose text-pretty text-[0.9375rem] leading-relaxed">
             {result.executive_summary}
@@ -153,7 +153,7 @@ export function ResultsView({
         <button
           type="button"
           onClick={onReReview}
-          className="t-body bg-minfy-orange px-5 py-2.5 font-semibold text-white transition-colors duration-150 hover:bg-minfy-navy"
+          className="t-body bg-minfy-indigo px-5 py-2.5 font-semibold text-white transition-colors duration-150 hover:bg-minfy-blue"
         >
           Re-review a revised design
         </button>
@@ -252,8 +252,11 @@ function DownloadReportButton({ reviewId }: { reviewId: string }) {
 function DeltaSummary({ delta }: { delta: ScoreDelta }) {
   const moved = delta.pillars.filter((pillar) => pillar.change !== 0)
 
+  // Border and sunken surface rather than a pastel block: this sits directly
+  // above the pastel executive summary, and two filled blocks in a row fight
+  // each other for the top of the page.
   return (
-    <section className="mt-10 border-l-2 border-minfy-orange bg-surface-sunken px-5 py-4.5">
+    <section className="mt-10 border-l-2 border-minfy-indigo bg-surface-sunken px-5 py-4.5">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h3 className="t-heading">Change since the previous review</h3>
         <p className="tnum t-caption text-ink-muted">
@@ -318,9 +321,22 @@ function ChangeBadge({ change, compact }: { change: number; compact?: boolean })
   )
 }
 
+/**
+ * Flat pastel block per framework, as the live site does for feature cards.
+ *
+ * Presentation only — it separates the two frameworks at a glance and carries no
+ * score or severity meaning. An unrecognised framework falls back to the teal
+ * block rather than to no block, so a third framework would still read as a card.
+ */
+const FRAMEWORK_BLOCK: Record<string, string> = {
+  aws_waf: 'bg-pastel-sky',
+  trust7: 'bg-pastel-mint',
+}
+
 function FrameworkSection({ framework }: { framework: FrameworkScore }) {
+  const block = FRAMEWORK_BLOCK[framework.framework] ?? 'bg-pastel-teal'
   return (
-    <section>
+    <section className={`${block} px-5 py-5 sm:px-6 sm:py-6`}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-ink/15 pb-2">
         <h4 className="t-title">{framework.framework_name}</h4>
         <p className="t-caption text-ink-muted">
@@ -352,8 +368,10 @@ function PillarCell({ pillar }: { pillar: PillarScore }) {
           {unevaluated ? '—' : pillar.score.toFixed(0)}
         </p>
       </div>
+      {/* Track is ink at low alpha, not the hairline grey: these bars now sit on
+          a pastel block, where a light grey track all but disappears. */}
       <div
-        className="mt-2 h-1.5 w-full bg-hairline"
+        className="mt-2 h-1.5 w-full bg-ink/15"
         role="img"
         aria-label={`${pillar.pillar_name}: ${
           unevaluated ? 'not evaluated' : `${pillar.score} out of 100, ${maturityFor(pillar.score)}`
@@ -506,7 +524,7 @@ function FindingRow({ finding }: { finding: Finding }) {
           )}
 
           {finding.remediation && (
-            <div className="mt-4 max-w-prose border-l-2 border-minfy-orange/40 bg-surface-sunken px-4 py-3">
+            <div className="mt-4 max-w-prose border-l-2 border-minfy-indigo/40 bg-surface-sunken px-4 py-3">
               <p className="t-eyebrow text-ink-muted">
                 Remediation
                 {finding.remediation_effort && (

@@ -27,7 +27,7 @@ export function StepTracker({ current }: Props) {
                     done
                       ? 'bg-minfy-navy text-white'
                       : active
-                        ? 'bg-minfy-orange text-white ring-4 ring-minfy-orange/15'
+                        ? 'bg-minfy-indigo text-white ring-4 ring-minfy-indigo/15'
                         : 'border border-hairline bg-surface text-ink-faint',
                   ].join(' ')}
                 >
@@ -43,7 +43,7 @@ export function StepTracker({ current }: Props) {
                 <span className="min-w-0">
                   <span
                     className={[
-                      't-caption block truncate font-medium transition-colors duration-200',
+                      't-tab block truncate transition-colors duration-200',
                       active ? 'text-ink' : done ? 'text-ink-muted' : 'text-ink-faint',
                     ].join(' ')}
                   >
