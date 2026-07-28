@@ -16,6 +16,7 @@ function finding(over: Partial<Finding> = {}): Finding {
     remediation: 'Do the thing.',
     remediation_effort: 'low',
     priority: 1,
+    confidence: 'high',
     ...over,
   }
 }

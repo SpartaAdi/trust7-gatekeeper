@@ -9,6 +9,12 @@
 export type CheckStatus = 'pass' | 'partial' | 'fail' | 'not_applicable'
 export type Severity = 'high' | 'medium' | 'low'
 export type Effort = 'low' | 'medium' | 'high' | ''
+/**
+ * The model's confidence in its own observation — display only, never arithmetic.
+ * `''` means it was not reported: an older stored review, or a check the model
+ * skipped and the pipeline backfilled.
+ */
+export type Confidence = 'high' | 'medium' | 'low' | ''
 
 export interface Component {
   id: string
@@ -31,6 +37,7 @@ export interface Finding {
   remediation: string
   remediation_effort: Effort
   priority: number
+  confidence: Confidence
 }
 
 export interface PillarScore {

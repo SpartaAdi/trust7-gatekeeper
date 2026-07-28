@@ -94,6 +94,8 @@ export function resultFixture(overrides: Partial<ReviewResult> = {}): ReviewResu
         remediation: 'Enable SSE-KMS on the table with a customer-managed key.',
         remediation_effort: 'low',
         priority: 1,
+        // Stated explicitly in the design, so the model is sure of its reading.
+        confidence: 'high',
       },
       {
         framework: 'trust7',
@@ -107,6 +109,7 @@ export function resultFixture(overrides: Partial<ReviewResult> = {}): ReviewResu
         remediation: '',
         remediation_effort: '',
         priority: 0,
+        confidence: 'medium',
       },
     ],
     ...overrides,

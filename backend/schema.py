@@ -100,6 +100,11 @@ class NormalizedDesign(BaseModel):
 Severity = Literal["high", "medium", "low"]
 CheckStatus = Literal["pass", "partial", "fail", "not_applicable"]
 
+# How sure the model is that its own observation is right, given what it was shown.
+# DISPLAY ONLY. See the field note on `Finding.confidence` — this must never reach
+# `scoring.py`, and `tests/test_scoring.py` asserts that it does not.
+Confidence = Literal["high", "medium", "low"]
+
 
 class Finding(BaseModel):
     """One rubric check evaluated against the design."""
@@ -118,6 +123,21 @@ class Finding(BaseModel):
     remediation: str = ""
     remediation_effort: Literal["low", "medium", "high", ""] = ""
     priority: int = 0
+
+    # The model's confidence in its OWN observation, not a property of the design:
+    # "low" means the input was ambiguous (a diagram with unlabelled edges), not
+    # that the gap is minor. Severity already carries how much the gap matters.
+    #
+    # DISPLAY ONLY, and deliberately so. Weighting a score by the model's
+    # self-reported certainty would make the arithmetic non-deterministic in the
+    # one place the tool has to be defensible: two runs over an identical design
+    # could then produce different scores, and a reviewer could not reproduce a
+    # number from the rubric. `scoring.py` does not read this field, and a test
+    # asserts that perturbing it leaves every score byte-identical.
+    #
+    # Defaults to "" rather than "high" — an older stored review has no confidence
+    # recorded, and inventing "high" for it would be a claim the model never made.
+    confidence: Confidence | Literal[""] = ""
 
 
 class PillarScore(BaseModel):

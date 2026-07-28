@@ -182,3 +182,54 @@ def test_scoreboard_counts_only_open_high_severity_findings() -> None:
     assert "High-severity findings still open: 1" in scoring.scoreboard(
         overall, frameworks, findings
     )
+
+
+# --------------------------------------------------------------------------- #
+# `confidence` is display only
+#
+# It is the model's self-report about its own certainty. Letting it touch the
+# arithmetic would make the score non-deterministic in the one place this tool has
+# to be defensible: two runs over an identical design could produce different
+# numbers, and a reviewer could not reproduce a score from the rubric. These tests
+# exist so that wiring it in fails loudly rather than looking like a refinement.
+# --------------------------------------------------------------------------- #
+
+def test_confidence_does_not_change_any_score() -> None:
+    """Same verdicts, every confidence level: byte-identical scores."""
+    baseline = _all("fail")
+    scores = []
+    for level in ("high", "medium", "low", ""):
+        perturbed = [f.model_copy(update={"confidence": level}) for f in baseline]
+        overall, frameworks = scoring.score(perturbed)
+        scores.append((overall, [(fw.framework, fw.score,
+                                 tuple((p.pillar_id, p.score) for p in fw.pillars))
+                                for fw in frameworks]))
+
+    assert len(set(map(repr, scores))) == 1, (
+        "confidence changed a score — it must never reach the arithmetic"
+    )
+
+
+def test_confidence_does_not_change_a_delta() -> None:
+    before = _result("prev", _all("fail"))
+
+    resolved = _all("pass")
+    plain = scoring.delta(before, _result("curr", resolved))
+
+    # The same improvement, but every finding now reports low confidence.
+    hedged = [f.model_copy(update={"confidence": "low"}) for f in resolved]
+    with_confidence = scoring.delta(before, _result("curr", hedged))
+
+    assert plain.change == with_confidence.change
+    assert plain.resolved_checks == with_confidence.resolved_checks
+
+
+def test_scoring_never_reads_the_field_at_all() -> None:
+    """A grep, deliberately: the tests above pass if the read is a no-op today,
+    and this fails the moment someone references the field at all."""
+    import pathlib
+
+    source = pathlib.Path("scoring.py").read_text()
+    assert "confidence" not in source, (
+        "scoring.py references `confidence`; it must stay out of the arithmetic"
+    )

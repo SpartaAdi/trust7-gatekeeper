@@ -111,6 +111,8 @@ def _stub_complete_json(state: dict[str, int]):
                         "title": "Encryption at rest on the orders table",
                         "evidence": "Now specified." if fixed else "Not specified.",
                         "affected_components": ["db"],
+                        # An explicit statement either way, so the model is sure.
+                        "confidence": "high",
                     })
                 else:
                     out.append({
@@ -121,6 +123,8 @@ def _stub_complete_json(state: dict[str, int]):
                         "title": check.description[:60],
                         "evidence": "Partially addressed by the design.",
                         "affected_components": [],
+                        # The mixed case: a verdict read off an ambiguous input.
+                        "confidence": "low",
                     })
             return {"findings": out}, {
                 "input_tokens": 8000,
@@ -518,3 +522,24 @@ def test_the_report_carries_the_reviews_own_content(journey) -> None:
     assert "Findings and remediation" in text
     assert "Enable SSE-KMS" in text
     assert "design.drawio" in text
+
+
+def test_confidence_survives_the_pipeline_onto_the_stored_review(journey) -> None:
+    """The model reports it, so it has to reach the client that displays it."""
+    findings = journey["result"]["findings"]
+    by_id = {f["check_id"]: f for f in findings}
+
+    assert by_id[ENCRYPTION_CHECK]["confidence"] == "high"
+    assert {f["confidence"] for f in findings} == {"high", "low"}
+
+
+def test_confidence_did_not_move_the_score(journey) -> None:
+    """Belt and braces on top of tests/test_scoring.py: the stub reports `low`
+    confidence on all but one check, and the score is still the rubric's."""
+    import scoring
+    from schema import Finding
+
+    body = journey["result"]
+    recomputed, _ = scoring.score([Finding(**f) for f in body["findings"]])
+
+    assert body["overall_score"] == recomputed

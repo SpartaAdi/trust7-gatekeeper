@@ -184,6 +184,12 @@ irreversibility); lower it when they make it less so. Justify any change in \
 `severity_rationale`.
 - `affected_components` lists the component ids the finding concerns, where \
 identifiable.
+- `confidence` is how sure you are of YOUR OWN reading, not how bad the gap is. \
+An explicit statement either way is `high`. An answer that follows from the design \
+but is never stated is `medium`. An ambiguous input — an unlabelled diagram edge, a \
+component whose configuration is never described, wording that reads both ways — is \
+`low`. Report `low` honestly; a confident-sounding guess is worse than a flagged \
+uncertainty, and low confidence does not soften the verdict or the severity.
 
 Judge the design that was submitted, on the rubric's terms. Do not reward or \
 penalise a design for resembling any particular reference architecture.
@@ -209,6 +215,20 @@ _EVALUATE_SCHEMA: dict[str, Any] = {
                     },
                     "severity": {"type": "string", "enum": ["high", "medium", "low"]},
                     "severity_rationale": {"type": "string"},
+                    "confidence": {
+                        "type": "string",
+                        "enum": ["high", "medium", "low"],
+                        "description": (
+                            "How sure you are that THIS OBSERVATION is correct, "
+                            "given what you were shown — not how serious the gap "
+                            "is, which is `severity`. high: the design states the "
+                            "answer explicitly, either way. medium: the answer "
+                            "follows from what is shown but is not stated. low: "
+                            "the input is ambiguous — an unlabelled diagram edge, "
+                            "a component whose configuration is not described, or "
+                            "wording that could be read either way."
+                        ),
+                    },
                     "title": {
                         "type": "string",
                         "description": "Short, specific statement of the finding.",
@@ -221,6 +241,7 @@ _EVALUATE_SCHEMA: dict[str, Any] = {
                     "status",
                     "severity",
                     "severity_rationale",
+                    "confidence",
                     "title",
                     "evidence",
                     "affected_components",
@@ -303,6 +324,20 @@ def _framework_block(framework: rubric.Framework) -> str:
     return "\n".join(lines)
 
 
+_CONFIDENCE_VALUES = frozenset({"high", "medium", "low"})
+
+
+def _confidence_of(raw: dict[str, Any]) -> str:
+    """Read the model's self-reported confidence, or "" if it is not usable.
+
+    "" is the honest reading of a missing or off-enum value: it means "the model
+    did not tell us", which is different from any of the three levels. A backfilled
+    check gets "" for the same reason — the model never saw it.
+    """
+    value = raw.get("confidence", "")
+    return value if value in _CONFIDENCE_VALUES else ""
+
+
 def _to_findings(raw_findings: list[dict[str, Any]], framework_key: str) -> list[Finding]:
     """Map raw verdicts onto the rubric, dropping anything unrecognized."""
     by_id = rubric.checks_by_id()
@@ -327,6 +362,10 @@ def _to_findings(raw_findings: list[dict[str, Any]], framework_key: str) -> list
                 title=raw.get("title", "") or check.description,
                 evidence=raw.get("evidence", ""),
                 affected_components=raw.get("affected_components", []),
+                # Enum-constrained by the schema, but `_to_findings` is the
+                # structural defence: an unrecognised value must not raise here and
+                # lose an otherwise-good finding, so anything off-enum becomes "".
+                confidence=_confidence_of(raw),
             )
         )
 
