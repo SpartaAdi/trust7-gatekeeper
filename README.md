@@ -69,7 +69,7 @@ backend/
   maturity.py     score -> band; mirrors frontend/src/maturity.ts
   ingestion/      document, draw.io, and vision parsing; normalization
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          183 tests
+  tests/          196 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -272,7 +272,7 @@ points there.
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 183 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 196 tests
 cd frontend && npm test                                                          # 26 tests
 ```
 

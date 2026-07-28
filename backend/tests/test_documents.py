@@ -5,24 +5,20 @@ against — and it had no coverage at all. PDFs and DOCX files are built for rea
 here rather than mocked: the point is to exercise pypdf and python-docx, so
 stubbing them would test nothing.
 
-Two tests below pin behaviour that is arguably wrong rather than asserting what
-we would prefer. They are named and commented as such:
+Two defects these tests originally pinned are now fixed, and the tests assert the
+fixed behaviour:
 
-* raw pypdf / zipfile exceptions escape to the caller, and the pipeline puts
-  `type(exc).__name__` straight into the status file the UI displays;
-* a scanned, image-only PDF extracts to an empty string with no signal, so a
-  review can score a design against a document the model never read.
-
-Both are flagged rather than silently fixed, because changing them changes
-user-visible error text and the pipeline's failure contract.
+* every library failure is wrapped in `UnsupportedDocument` with a user-facing
+  message, because the pipeline writes `type(exc).__name__` and the message into
+  the status the UI displays;
+* an extraction that yields no text raises instead of returning "", so a scanned
+  SoW cannot be silently scored against nothing.
 """
 
 from __future__ import annotations
 
 import io
-import zipfile
 
-import pypdf.errors
 import pytest
 
 from ingestion import documents
@@ -121,54 +117,129 @@ def test_pdf_extension_matching_is_case_insensitive() -> None:
 # PDF — malformed, empty, and scanned
 # --------------------------------------------------------------------------- #
 
-def test_an_empty_file_uploaded_as_a_pdf_raises() -> None:
-    """Raw pypdf error, see the module docstring — pinned, not endorsed."""
-    with pytest.raises(pypdf.errors.EmptyFileError):
+def test_an_empty_file_uploaded_as_a_pdf_raises_a_readable_error() -> None:
+    with pytest.raises(documents.UnsupportedDocument, match="could not be read"):
         documents.extract_text(b"", "sow.pdf")
 
 
 def test_a_corrupt_pdf_raises_rather_than_returning_partial_text() -> None:
     """Silently returning "" here would score a design against nothing."""
-    with pytest.raises(pypdf.errors.PdfStreamError):
+    with pytest.raises(documents.UnsupportedDocument, match="corrupt"):
         documents.extract_text(b"%PDF-1.4\nnot really a pdf", "sow.pdf")
 
 
 def test_a_truncated_pdf_raises() -> None:
     whole = make_pdf(["Statement of Work", "Second page"])
 
-    with pytest.raises(pypdf.errors.PdfStreamError):
+    with pytest.raises(documents.UnsupportedDocument, match="truncated"):
         documents.extract_text(whole[: len(whole) // 2], "sow.pdf")
 
 
 def test_a_non_pdf_renamed_to_pdf_raises() -> None:
-    with pytest.raises(pypdf.errors.PdfStreamError):
+    with pytest.raises(documents.UnsupportedDocument, match="not a PDF"):
         documents.extract_text(b"just plain text, not a pdf", "sow.pdf")
 
 
-def test_pdf_failures_are_raw_library_errors_not_a_domain_error() -> None:
-    """DEFECT PIN: these escape as pypdf types, so callers cannot catch them as
-    ValueError alongside UnsupportedDocument, and pipeline.run writes
-    "PdfStreamError: Stream has ended unexpectedly" into the status the UI shows.
-    Change this and this test should be updated deliberately."""
-    with pytest.raises(Exception) as caught:
-        documents.extract_text(b"%PDF-1.4 broken", "sow.pdf")
-
-    assert not isinstance(caught.value, documents.UnsupportedDocument)
-    assert not isinstance(caught.value, ValueError)
-    assert type(caught.value).__module__.startswith("pypdf")
+# The messages the UI will show verbatim. Kept in one place so a test failure
+# points at the wording rather than at a scattered string literal.
+LIBRARY_LEAKS = ("PdfStreamError", "EmptyFileError", "BadZipFile", "PdfReadError",
+                 "Stream has ended", "not a zip file", "EOF marker", "pypdf",
+                 "zipfile", "Traceback")
 
 
-def test_a_scanned_image_only_pdf_extracts_to_nothing_silently() -> None:
-    """DEFECT PIN: a scanned SoW yields "" with no error and no warning.
+@pytest.mark.parametrize(
+    ("data", "filename"),
+    [
+        (b"", "sow.pdf"),
+        (b"%PDF-1.4 broken", "sow.pdf"),
+        (b"just plain text", "sow.pdf"),
+        (b"", "sow.docx"),
+        (b"PK\x03\x04 garbage", "sow.docx"),
+    ],
+)
+def test_library_failures_are_wrapped_in_a_catchable_domain_error(data, filename) -> None:
+    """Was a pinned defect: pypdf and zipfile exceptions used to escape as-is.
 
-    normalize.ingest only rejects the upload when the document *and* the diagram
-    are both empty, so with a diagram attached the review proceeds and is scored
-    against a document nothing ever read. There is no OCR step. This is the most
-    likely way a real user gets a confidently wrong review.
+    They must arrive as UnsupportedDocument so a caller can catch them as
+    ValueError alongside the unsupported-extension case.
     """
-    text = documents.extract_text(make_scanned_pdf(), "scanned-sow.pdf")
+    with pytest.raises(documents.UnsupportedDocument) as caught:
+        documents.extract_text(data, filename)
 
-    assert text == ""
+    assert isinstance(caught.value, ValueError)
+
+
+@pytest.mark.parametrize(
+    ("data", "filename"),
+    [
+        (b"", "sow.pdf"),
+        (b"%PDF-1.4 broken", "sow.pdf"),
+        (b"just plain text", "sow.pdf"),
+        (b"", "sow.docx"),
+        (b"PK\x03\x04 garbage", "sow.docx"),
+    ],
+)
+def test_no_library_internals_reach_the_user_facing_message(data, filename) -> None:
+    """pipeline.run puts `type(exc).__name__: exc` straight into the status the UI
+    renders, so the class name and the message both have to be presentable."""
+    with pytest.raises(documents.UnsupportedDocument) as caught:
+        documents.extract_text(data, filename)
+
+    surfaced = f"{type(caught.value).__name__}: {caught.value}"
+    for leak in LIBRARY_LEAKS:
+        assert leak not in surfaced, f"{leak!r} leaked into: {surfaced}"
+
+
+def test_the_cause_is_preserved_for_the_logs() -> None:
+    """Wrapping is for the UI; the original traceback still has to be diagnosable."""
+    with pytest.raises(documents.UnsupportedDocument) as caught:
+        documents.extract_text(b"", "sow.pdf")
+
+    assert caught.value.__cause__ is not None
+    assert type(caught.value.__cause__).__module__.startswith("pypdf")
+
+
+def test_a_password_protected_pdf_says_so_specifically() -> None:
+    """Distinct from "corrupt": the user can act on this one."""
+    from pypdf import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    writer.append(PdfReader(io.BytesIO(make_pdf(["Confidential SoW"]))))
+    writer.encrypt("secret")
+    encrypted = io.BytesIO()
+    writer.write(encrypted)
+
+    with pytest.raises(documents.UnsupportedDocument, match="password-protected"):
+        documents.extract_text(encrypted.getvalue(), "sow.pdf")
+
+
+def test_a_scanned_image_only_pdf_is_rejected_with_a_clear_message() -> None:
+    """Was a pinned defect: this used to return "" silently.
+
+    normalize.ingest only rejects an upload when the document *and* the diagram
+    are both empty, so with a diagram attached the review used to proceed and be
+    scored against a document nothing ever read. There is still no OCR; the point
+    is that the user is told rather than misled.
+    """
+    with pytest.raises(documents.UnsupportedDocument) as caught:
+        documents.extract_text(make_scanned_pdf(), "scanned-sow.pdf")
+
+    message = str(caught.value)
+    assert "No selectable text found" in message
+    assert "scanned image" in message
+    assert "OCR is not currently supported" in message
+
+
+def test_a_pdf_whose_pages_are_all_blank_is_rejected_too() -> None:
+    """Same failure mode without an image: nothing to review, so do not pretend."""
+    with pytest.raises(documents.UnsupportedDocument, match="No selectable text"):
+        documents.extract_text(make_pdf(["", "", ""]), "blank.pdf")
+
+
+def test_a_docx_with_no_text_is_rejected_rather_than_returning_empty() -> None:
+    """The .docx analogue of the scanned PDF — an images-only Word document."""
+    with pytest.raises(documents.UnsupportedDocument, match="No text found"):
+        documents.extract_text(make_docx([]), "images-only.docx")
 
 
 # --------------------------------------------------------------------------- #
@@ -206,14 +277,15 @@ def test_docx_table_rows_are_flattened_into_pipe_separated_lines() -> None:
     assert "Encryption at rest | Not specified" in text
 
 
-def test_an_empty_file_uploaded_as_a_docx_raises() -> None:
-    with pytest.raises(zipfile.BadZipFile):
+def test_an_empty_file_uploaded_as_a_docx_raises_a_readable_error() -> None:
+    with pytest.raises(documents.UnsupportedDocument, match="could not be read"):
         documents.extract_text(b"", "sow.docx")
 
 
 def test_a_corrupt_docx_raises() -> None:
-    """A .docx is a zip; a broken one fails at the zip layer, not the docx layer."""
-    with pytest.raises(zipfile.BadZipFile):
+    """A .docx is a zip; a broken one fails at the zip layer, but the caller must
+    not have to know that."""
+    with pytest.raises(documents.UnsupportedDocument, match="Re-save it as .docx"):
         documents.extract_text(b"PK\x03\x04 truncated garbage", "sow.docx")
 
 
