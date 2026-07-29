@@ -766,3 +766,154 @@ describe('ResultsView — roadmap vs detailed findings', () => {
     expect(findings).not.toMatch(/prioritized next actions/i)
   })
 })
+
+/**
+ * Pillar "Explain more".
+ *
+ * A regroup of data the review already carries, not a synthesis: `evidence` is a
+ * required field on every finding the evaluate stage returns, so the reasoning
+ * behind a pillar score already exists and only needs collecting. These tests
+ * pin that it stays a regroup — no request, and nothing invented for a check
+ * whose evidence came back empty.
+ */
+describe('ResultsView — pillar explain', () => {
+  const pillarFindings = () => {
+    const base = resultFixture().findings[0]!
+    return [
+      { ...base, check_id: 'sec_a', pillar_id: 'security', framework: 'aws_waf',
+        status: 'fail' as const, title: 'No encryption at rest',
+        evidence: 'The orders table is described without any encryption setting.' },
+      { ...base, check_id: 'sec_b', pillar_id: 'security', framework: 'aws_waf',
+        status: 'pass' as const, title: 'TLS in transit',
+        evidence: 'All edges are labelled HTTPS.' },
+      // Same pillar id, other framework — must not leak into the AWS pillar.
+      { ...base, check_id: 't7_shadow', pillar_id: 'security', framework: 'trust7',
+        status: 'fail' as const, title: 'TRUST-7 only check',
+        evidence: 'Belongs to the other framework.' },
+      // A real TRUST-7 pillar, so the control is exercised on both frameworks.
+      { ...base, check_id: 't7_ai', pillar_id: 'ai_governance', framework: 'trust7',
+        status: 'fail' as const, title: 'No model governance stated',
+        evidence: 'The design names a model but no oversight process.' },
+    ]
+  }
+
+  function mountPillars() {
+    getReview.mockResolvedValue(resultFixture({ findings: pillarFindings() }))
+    return render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+  }
+
+  it('starts collapsed and makes no request to expand', async () => {
+    mountPillars()
+    const user = userEvent.setup()
+
+    await screen.findByTestId('assessment')
+    const toggle = screen.getAllByRole('button', { name: /explain more/i })[0]!
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    getReview.mockClear()
+    await user.click(toggle)
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    // The reasoning is already in the review; expanding must not fetch anything.
+    expect(getReview).not.toHaveBeenCalled()
+  })
+
+  it('shows a verdict and a line of reasoning for every check in the pillar', async () => {
+    mountPillars()
+    const user = userEvent.setup()
+
+    await screen.findByTestId('assessment')
+    await user.click(screen.getAllByRole('button', { name: /explain more/i })[0]!)
+
+    const panel = screen.getByTestId('pillar-explain-aws_waf-security')
+    expect(panel).toHaveTextContent('No encryption at rest')
+    expect(panel).toHaveTextContent(/orders table is described without any encryption/i)
+    expect(panel).toHaveTextContent('TLS in transit')
+    expect(panel).toHaveTextContent(/all edges are labelled https/i)
+  })
+
+  it('includes passing and not-applicable checks, since they explain the score', async () => {
+    mountPillars()
+    const user = userEvent.setup()
+
+    await screen.findByTestId('assessment')
+    await user.click(screen.getAllByRole('button', { name: /explain more/i })[0]!)
+
+    const panel = screen.getByTestId('pillar-explain-aws_waf-security')
+    expect(within(panel).getByText('Met')).toBeInTheDocument()
+    expect(within(panel).getByText('Not met')).toBeInTheDocument()
+  })
+
+  it('does not mix a pillar id shared across the two frameworks', async () => {
+    mountPillars()
+    const user = userEvent.setup()
+
+    await screen.findByTestId('assessment')
+    await user.click(screen.getAllByRole('button', { name: /explain more/i })[0]!)
+
+    const panel = screen.getByTestId('pillar-explain-aws_waf-security')
+    expect(panel).not.toHaveTextContent('TRUST-7 only check')
+  })
+
+  it('says so rather than inventing text when a check has no evidence', async () => {
+    const base = resultFixture().findings[0]!
+    getReview.mockResolvedValue(
+      resultFixture({
+        findings: [
+          { ...base, check_id: 'sec_a', pillar_id: 'security', framework: 'aws_waf',
+            status: 'fail' as const, title: 'Nothing recorded', evidence: '' },
+        ],
+      }),
+    )
+    const user = userEvent.setup()
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+
+    await screen.findByTestId('assessment')
+    await user.click(screen.getAllByRole('button', { name: /explain more/i })[0]!)
+
+    expect(screen.getByTestId('pillar-explain-aws_waf-security')).toHaveTextContent(
+      /no reasoning was recorded for this check/i,
+    )
+  })
+
+  it('explains what the number is, on the info icon, without expanding', async () => {
+    mountPillars()
+    const user = userEvent.setup()
+
+    await screen.findByTestId('assessment')
+    await user.click(
+      screen.getAllByRole('button', { name: /how the security score was reached/i })[0]!,
+    )
+
+    const tip = screen.getByRole('tooltip')
+    expect(tip).toHaveTextContent(/weighted by severity/i)
+    expect(tip).toHaveTextContent(/partial verdict earns half credit/i)
+    expect(tip).toHaveTextContent(/not-applicable checks are left out/i)
+  })
+
+  it('offers the control on both frameworks, not just the first', async () => {
+    mountPillars()
+
+    await screen.findByTestId('assessment')
+    // One pillar carries findings in each framework, so the control must appear
+    // in both blocks — it is not an AWS-only affordance.
+    const controls = screen.getAllByRole('button', { name: /explain more/i })
+    expect(controls).toHaveLength(2)
+
+    const user = userEvent.setup()
+    await user.click(controls[1]!)
+    expect(
+      screen.getByTestId('pillar-explain-trust7-ai_governance'),
+    ).toHaveTextContent(/no model governance stated/i)
+  })
+})

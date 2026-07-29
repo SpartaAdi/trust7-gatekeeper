@@ -168,7 +168,11 @@ export function ResultsView({
         )}
         <div className="mt-6 space-y-10">
           {result.frameworks.map((framework) => (
-            <FrameworkSection key={framework.framework} framework={framework} />
+            <FrameworkSection
+              key={framework.framework}
+              framework={framework}
+              findings={result.findings}
+            />
           ))}
         </div>
       </section>
@@ -707,7 +711,41 @@ const FRAMEWORK_BLOCK: Record<string, string> = {
   trust7: 'bg-pastel-mint',
 }
 
-function FrameworkSection({ framework }: { framework: FrameworkScore }) {
+/**
+ * The checks behind one pillar's score, in the order the findings list uses.
+ *
+ * A pure regroup of data the review already carries — no request, no new field,
+ * and deliberately no model call: `evidence` is written for every check by the
+ * evaluate stage, whose schema requires it, so the reasoning for a pillar score
+ * already exists and only needs collecting.
+ *
+ * Matched on framework AND pillar_id: `sustainability` exists in both frameworks,
+ * and keying on pillar_id alone would show TRUST-7's checks under the AWS pillar.
+ */
+export function checksForPillar(
+  findings: readonly Finding[],
+  framework: string,
+  pillarId: string,
+): Finding[] {
+  const rank: Record<Finding['status'], number> = {
+    fail: 0,
+    partial: 1,
+    pass: 2,
+    not_applicable: 3,
+  }
+  return findings
+    .filter((f) => f.framework === framework && f.pillar_id === pillarId)
+    .slice()
+    .sort((a, b) => rank[a.status] - rank[b.status] || a.check_id.localeCompare(b.check_id))
+}
+
+function FrameworkSection({
+  framework,
+  findings,
+}: {
+  framework: FrameworkScore
+  findings: Finding[]
+}) {
   const block = FRAMEWORK_BLOCK[framework.framework] ?? 'bg-pastel-teal'
   return (
     <section className={`${block} px-5 py-5 sm:px-6 sm:py-6`}>
@@ -721,22 +759,32 @@ function FrameworkSection({ framework }: { framework: FrameworkScore }) {
           {framework.pillars.length} pillars
         </p>
       </div>
-      <div className="grid gap-x-10 gap-y-6 pt-6 sm:grid-cols-2 lg:grid-cols-3">
+      {/* items-start so an expanded pillar grows on its own rather than
+          stretching every sibling cell in its row to match. */}
+      <div className="grid items-start gap-x-10 gap-y-6 pt-6 sm:grid-cols-2 lg:grid-cols-3">
         {framework.pillars.map((pillar) => (
-          <PillarCell key={pillar.pillar_id} pillar={pillar} />
+          <PillarCell
+            key={pillar.pillar_id}
+            pillar={pillar}
+            checks={checksForPillar(findings, framework.framework, pillar.pillar_id)}
+          />
         ))}
       </div>
     </section>
   )
 }
 
-function PillarCell({ pillar }: { pillar: PillarScore }) {
+function PillarCell({ pillar, checks }: { pillar: PillarScore; checks: Finding[] }) {
+  const [open, setOpen] = useState(false)
   const unevaluated = pillar.checks_evaluated === 0
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3">
-        <p className="t-body truncate font-medium" title={pillar.pillar_name}>
-          {pillar.pillar_name}
+        <p className="t-body flex min-w-0 items-baseline gap-1.5 font-medium">
+          <span className="truncate" title={pillar.pillar_name}>
+            {pillar.pillar_name}
+          </span>
+          <PillarScoreHint pillar={pillar} />
         </p>
         <p className="tnum t-body shrink-0 font-semibold">
           {unevaluated ? '—' : pillar.score.toFixed(0)}
@@ -777,7 +825,106 @@ function PillarCell({ pillar }: { pillar: PillarScore }) {
           </>
         )}
       </p>
+
+      {/*
+        The reasoning behind the number, from data the review already carries.
+        Every check has `evidence` — the evaluate stage's schema requires it — so
+        this is a regroup, not a synthesis, and costs no model call.
+      */}
+      {checks.length > 0 && (
+        <>
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            aria-expanded={open}
+            className="t-caption mt-2 flex items-center gap-1 text-minfy-indigo underline underline-offset-2 transition-colors hover:text-minfy-blue"
+          >
+            <Chevron open={open} />
+            {open ? 'Hide detail' : 'Explain more'}
+          </button>
+
+          {open && (
+            <ul
+              className="animate-enter mt-2 space-y-2.5 border-t border-ink/15 pt-2.5"
+              data-testid={`pillar-explain-${pillar.framework}-${pillar.pillar_id}`}
+            >
+              {checks.map((check) => (
+                <li key={check.check_id}>
+                  <div className="flex items-baseline gap-2">
+                    <StatusTag status={check.status} />
+                    <span className="t-caption font-medium text-ink">{check.title}</span>
+                  </div>
+                  {/*
+                    One line of reasoning per check, the model's own words. A check
+                    whose evidence came back empty says so rather than being given
+                    text it never produced — the schema requires the field, but
+                    OpenRouter documents that enforcement varies by provider.
+                  */}
+                  <p className="t-caption mt-0.5 text-pretty text-ink-muted">
+                    {check.evidence || 'No reasoning was recorded for this check.'}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
     </div>
+  )
+}
+
+/**
+ * What the pillar number is and how it was reached — hover or tap.
+ *
+ * Same shape as `MaturityScaleHint`, including the separate hover and pin flags:
+ * sharing one would let a mouse click close the panel a hover had just opened.
+ */
+function PillarScoreHint({ pillar }: { pillar: PillarScore }) {
+  const [pinned, setPinned] = useState(false)
+  const [hovered, setHovered] = useState(false)
+  const shown = pinned || hovered
+  const unevaluated = pillar.checks_evaluated === 0
+
+  return (
+    <span
+      className="relative inline-flex shrink-0"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <button
+        type="button"
+        onClick={() => setPinned((value) => !value)}
+        aria-expanded={shown}
+        aria-label={`How the ${pillar.pillar_name} score was reached`}
+        className="flex size-4 items-center justify-center rounded-full border border-ink-faint text-[9px] font-bold text-ink-faint transition-colors hover:border-minfy-indigo hover:text-minfy-indigo"
+      >
+        i
+      </button>
+
+      {shown && (
+        <span
+          role="tooltip"
+          className="animate-enter absolute left-0 top-6 z-10 w-56 border border-hairline bg-surface p-3 text-left font-normal shadow-sm"
+        >
+          <span className="t-caption block text-ink-muted">
+            {unevaluated ? (
+              'No check in this pillar applied to this design, so it is not scored.'
+            ) : (
+              <>
+                Weighted by severity across the{' '}
+                <span className="tnum">{pillar.checks_evaluated}</span> applicable{' '}
+                {pillar.checks_evaluated === 1 ? 'check' : 'checks'} in this pillar.
+                A partial verdict earns half credit; not-applicable checks are left
+                out of the total rather than counted as failures.
+              </>
+            )}
+          </span>
+          <span className="t-caption mt-2 block text-ink-faint">
+            Open “Explain more” for the verdict and reasoning on each check.
+          </span>
+        </span>
+      )}
+    </span>
   )
 }
 
