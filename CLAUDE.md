@@ -27,9 +27,12 @@ Do not deviate from these without asking.
 
 ### LLM
 
-- Claude API **direct** via the Anthropic API — not AWS Bedrock.
-- `ANTHROPIC_API_KEY` is required, set as a dashboard environment variable and
-  never committed.
+- **OpenRouter → `moonshotai/kimi-k2.6`** is the current, locked provider, pinned
+  to `coreweave,decart,inceptron` with `allow_fallbacks: false`. Not AWS Bedrock.
+- `OPENROUTER_API_KEY` is required, set as a dashboard environment variable and
+  never committed. `ANTHROPIC_API_KEY` is **not used by the live pipeline** — the
+  Anthropic-direct code is vestigial, not an active alternative; do not build
+  against it.
 - Cost control is a top priority: no provisioned throughput, pay-per-token only.
 
 ### Storage

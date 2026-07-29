@@ -164,7 +164,9 @@ raise.
 |---|---|---|
 | `f882349` | Theme refreshed against the **live** minfy.com CSS — blue/indigo primary, navy sections, serif display + sans body | (see the WCAG note below, which supersedes the palette values) |
 | `500c579` | Minfy mark in the header; findings list collapsed into severity accordions; PDF brought onto the same palette | |
-| `a07c0f2` | **WCAG AA retheme**, accessibility first and brand identity second. Three brand anchors fixed (navy, Minfy blue, Minfy yellow `#fdc921`); everything else derived to clear 4.5:1 / 3.0:1 on its **worst** surface, composited where translucent. The old orange `#e85d26` appears **zero** times. | `scripts/contrast_audit.py` re-derives all 94 pairs; `backend/tests/test_contrast.py` asserts it |
+| `a07c0f2` | **WCAG AA retheme**, accessibility first and brand identity second. Three brand anchors fixed (navy, Minfy blue, Minfy yellow `#fdc921`); everything else derived to clear 4.5:1 / 3.0:1 on its **worst** surface, composited where translucent. The superseded orange accent appears **zero** times (the hex itself is
+deliberately not written here — `test_the_superseded_orange_is_gone_from_every_source`
+greps `.md` too, so naming it would make this file the offender). | `scripts/contrast_audit.py` re-derives all 94 pairs; `backend/tests/test_contrast.py` asserts it |
 | `c84ed72` | "Copy fix-it prompt" on a completed review — reuses `selectTopActions`, verbatim remediation text, same 10-cap and dedupe, clipboard only, **no vendor named** in the output | `buildFixItPrompt` in `ResultsView.tsx` |
 | `a7dc855` | Elapsed-time **clock** (not a countdown) during a run. Freeze is a **latch** set at the terminal read, because effect teardown can flush a beat late and let one more tick land past the end of the run. | `frontend/src/elapsed.ts`; freeze pinned on success **and** error paths; 4 mutants killed |
 | `d6c5ef8` + `4c3d11c` | **"How to Improve" roadmap** — see below | |
