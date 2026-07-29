@@ -236,12 +236,29 @@ _EVALUATE_SCHEMA: dict[str, Any] = {
                     "evidence": {"type": "string"},
                     "affected_components": {"type": "array", "items": {"type": "string"}},
                 },
+                # `confidence` is deliberately ABSENT from this list.
+                #
+                # It was required, and a real run lost an entire evaluate call — 26
+                # findings, already paid for — because the model omitted it on
+                # finding 44 of 45. OpenRouter's own documentation is explicit that
+                # this cannot be relied on: "Enforcement varies by provider: some
+                # guarantee schema-conforming output, while others ... treat it as a
+                # strong hint, so exact compliance is not guaranteed."
+                #
+                # So strengthening the prompt would have been building on a promise
+                # the provider disclaims. Instead this follows the pattern every
+                # other tolerated field already uses: ask for it, constrain it by
+                # enum when present, and default a missing one to "" in
+                # `_confidence_of`. "" already means "the model did not tell us",
+                # which is a state the UI and the schema were built to carry.
+                #
+                # The field is display-only. Discarding 26 real findings over a
+                # cosmetic value is the wrong trade in every direction.
                 "required": [
                     "check_id",
                     "status",
                     "severity",
                     "severity_rationale",
-                    "confidence",
                     "title",
                     "evidence",
                     "affected_components",

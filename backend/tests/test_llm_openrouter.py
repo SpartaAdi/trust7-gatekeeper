@@ -884,3 +884,218 @@ def test_the_vision_stage_asks_for_the_capacity_we_verified(monkeypatch) -> None
     ).read_text()
 
     assert re.search(r"max_tokens=64000,", source), "vision stage is not at 64000"
+
+
+# --------------------------------------------------------------------------- #
+# 10. A real wall-clock deadline, and a bounded retry when it fires
+#
+# The 120s transport timeout did not stop a 603s call. httpx's `timeout` bounds each
+# socket operation — the gap between reads — so a response that trickles bytes
+# forever resets it forever. These tests pin the difference.
+# --------------------------------------------------------------------------- #
+
+def test_a_trickling_response_is_aborted_by_the_wall_clock(monkeypatch) -> None:
+    """The regression. Data keeps arriving, so no socket read ever times out, and
+    the old transport-level timeout never fired."""
+    import time as _time
+
+    monkeypatch.setattr(config, "OPENROUTER_TIMEOUT_SECONDS", 0.3)
+
+    class TricklingCompletions:
+        def create(self, **_request: Any) -> _Response:
+            # Never idle: a byte every 10ms, well inside any read timeout.
+            for _ in range(200):
+                _time.sleep(0.01)
+            return _Response('{"ok": true}')
+
+    fake = type("FakeClient", (), {
+        "chat": type("Chat", (), {"completions": TricklingCompletions()})()
+    })()
+    monkeypatch.setattr(llm, "_openrouter_client", lambda: fake)
+    monkeypatch.setattr(llm, "_abort_transport", lambda: None)
+
+    started = _time.monotonic()
+    with pytest.raises(llm.CallDeadlineExceeded) as caught:
+        llm._openrouter_create({"model": "m"})
+    elapsed = _time.monotonic() - started
+
+    assert elapsed < 1.5, f"deadline did not fire promptly ({elapsed:.1f}s)"
+    assert "wall-clock deadline" in str(caught.value)
+
+
+def test_the_deadline_aborts_the_transport_rather_than_abandoning_it(monkeypatch) -> None:
+    """Cancelling the future is not enough: a thread blocked in a read is not
+    interruptible, so it would keep receiving — and keep billing — until the
+    provider finished on its own. Closing the socket is what actually stops it."""
+    import time as _time
+
+    monkeypatch.setattr(config, "OPENROUTER_TIMEOUT_SECONDS", 0.2)
+    aborted: list[bool] = []
+
+    class SlowCompletions:
+        def create(self, **_request: Any) -> _Response:
+            _time.sleep(2)
+            return _Response('{"ok": true}')
+
+    fake = type("FakeClient", (), {
+        "chat": type("Chat", (), {"completions": SlowCompletions()})()
+    })()
+    monkeypatch.setattr(llm, "_openrouter_client", lambda: fake)
+    monkeypatch.setattr(llm, "_abort_transport", lambda: aborted.append(True))
+
+    with pytest.raises(llm.CallDeadlineExceeded):
+        llm._openrouter_create({"model": "m"})
+
+    assert aborted == [True]
+
+
+def test_a_deadline_abort_retries_once_at_lower_effort(monkeypatch) -> None:
+    """Bounding runaway generation rather than eliminating it: reasoning tokens come
+    out of the same budget, so turning the reasoning down is the lever."""
+    efforts: list[str] = []
+
+    def attempt(**kwargs: Any) -> Any:
+        efforts.append(kwargs["effort"])
+        if len(efforts) == 1:
+            raise llm.CallDeadlineExceeded("too slow")
+        return {"ok": True}, {}
+
+    monkeypatch.setattr(llm, "_openrouter_attempt", attempt)
+
+    llm.complete_json(
+        system=[{"type": "text", "text": "s"}],
+        content=[{"type": "text", "text": "u"}],
+        schema=MINIMAL_SCHEMA,
+        effort="high",
+        label="evaluate:aws_waf",
+    )
+
+    assert efforts == ["high", "medium"]
+
+
+def test_a_truncation_also_retries_once_at_lower_effort(monkeypatch) -> None:
+    efforts: list[str] = []
+
+    def attempt(**kwargs: Any) -> Any:
+        efforts.append(kwargs["effort"])
+        if len(efforts) == 1:
+            raise llm.TruncatedResponse("hit the ceiling")
+        return {"ok": True}, {}
+
+    monkeypatch.setattr(llm, "_openrouter_attempt", attempt)
+
+    llm.complete_json(
+        system=[{"type": "text", "text": "s"}],
+        content=[{"type": "text", "text": "u"}],
+        schema=MINIMAL_SCHEMA,
+        effort="medium",
+    )
+
+    assert efforts == ["medium", "low"]
+
+
+def test_the_retry_happens_at_most_once(monkeypatch) -> None:
+    """Worst case is deadline + one lower-effort call. Not unbounded."""
+    efforts: list[str] = []
+
+    def attempt(**kwargs: Any) -> Any:
+        efforts.append(kwargs["effort"])
+        raise llm.CallDeadlineExceeded("still too slow")
+
+    monkeypatch.setattr(llm, "_openrouter_attempt", attempt)
+
+    with pytest.raises(llm.CallDeadlineExceeded):
+        llm.complete_json(
+            system=[{"type": "text", "text": "s"}],
+            content=[{"type": "text", "text": "u"}],
+            schema=MINIMAL_SCHEMA,
+            effort="high",
+        )
+
+    assert efforts == ["high", "medium"], "retried more than once"
+
+
+def test_a_failure_at_the_lowest_effort_is_not_retried(monkeypatch) -> None:
+    """`low` has nowhere to step down to, so it is a real failure."""
+    calls: list[str] = []
+
+    def attempt(**kwargs: Any) -> Any:
+        calls.append(kwargs["effort"])
+        raise llm.CallDeadlineExceeded("too slow")
+
+    monkeypatch.setattr(llm, "_openrouter_attempt", attempt)
+
+    with pytest.raises(llm.CallDeadlineExceeded):
+        llm.complete_json(
+            system=[{"type": "text", "text": "s"}],
+            content=[{"type": "text", "text": "u"}],
+            schema=MINIMAL_SCHEMA,
+            effort="low",
+        )
+
+    assert calls == ["low"]
+
+
+def test_the_retry_is_labelled_so_the_route_log_shows_it(monkeypatch) -> None:
+    """Otherwise the log shows one call that mysteriously took twice as long."""
+    labels: list[str] = []
+
+    def attempt(**kwargs: Any) -> Any:
+        labels.append(kwargs["label"])
+        if len(labels) == 1:
+            raise llm.TruncatedResponse("hit the ceiling")
+        return {"ok": True}, {}
+
+    monkeypatch.setattr(llm, "_openrouter_attempt", attempt)
+
+    llm.complete_json(
+        system=[{"type": "text", "text": "s"}],
+        content=[{"type": "text", "text": "u"}],
+        schema=MINIMAL_SCHEMA,
+        effort="high",
+        label="evaluate:aws_waf",
+    )
+
+    assert labels == ["evaluate:aws_waf", "evaluate:aws_waf:retry@medium"]
+
+
+def test_a_deadline_abort_is_not_treated_as_a_transient_error(monkeypatch) -> None:
+    """Retrying a runaway at the SAME effort would just spend the deadline twice on
+    the way to the same place."""
+    calls = {"n": 0}
+
+    def create(_request: dict) -> Any:
+        calls["n"] += 1
+        raise llm.CallDeadlineExceeded("too slow")
+
+    monkeypatch.setattr(llm, "_openrouter_create", create)
+
+    with pytest.raises(llm.CallDeadlineExceeded):
+        llm._openrouter_create_with_retry({"model": "m"})
+
+    assert calls["n"] == 1, "the deadline error was caught by the transient retry"
+
+
+def test_confidence_is_not_required_by_the_evaluate_schema() -> None:
+    """One omission on finding 44 of 45 discarded a whole paid evaluate call."""
+    from agent import stages
+
+    item = stages._EVALUATE_SCHEMA["properties"]["findings"]["items"]
+
+    assert "confidence" not in item["required"]
+    assert "confidence" in item["properties"], "still asked for, just not demanded"
+
+
+def test_a_finding_without_confidence_survives_enforcement() -> None:
+    from agent import stages
+
+    payload = {"findings": [{
+        "check_id": "sec_a", "status": "fail", "severity": "high",
+        "severity_rationale": "r", "title": "t", "evidence": "e",
+        "affected_components": [],
+    }]}
+
+    enforced = llm.enforce_schema(payload, stages._EVALUATE_SCHEMA)
+
+    assert enforced["findings"][0].get("confidence", "") == ""
+    assert stages._confidence_of(enforced["findings"][0]) == ""

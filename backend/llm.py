@@ -25,6 +25,7 @@ back rather than trusting what was asked for.
 
 from __future__ import annotations
 
+import concurrent.futures
 import dataclasses
 import functools
 import json
@@ -75,6 +76,10 @@ class TruncatedResponse(RuntimeError):
 
 class ProviderNotAllowed(RuntimeError):
     """A response came back from a provider outside the configured allow-list."""
+
+
+class CallDeadlineExceeded(RuntimeError):
+    """A single call ran past the wall-clock deadline and was aborted."""
 
 
 # --------------------------------------------------------------------------- #
@@ -256,15 +261,31 @@ def _prune_unknown(
 # OpenRouter adapter
 # --------------------------------------------------------------------------- #
 
+# The httpx client behind the SDK, kept so a call past its deadline can be aborted
+# for real. Closing the transport is what unblocks a thread sitting in a read.
+_transport: Any = None
+
+# One small pool, reused. Each call runs on a worker so the calling thread can stop
+# waiting on it; the worker itself is freed by closing the transport.
+_deadline_pool = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="llm-deadline"
+)
+
+
 @functools.lru_cache(maxsize=1)
 def _openrouter_client() -> Any:
+    import httpx
     import openai
 
+    global _transport
+    # httpx's `timeout` is per socket operation, NOT per call — see the note on
+    # `_openrouter_create`. It is still set, because it is the cheap way to catch a
+    # genuinely dead connection; the wall-clock bound is enforced separately.
+    _transport = httpx.Client(timeout=httpx.Timeout(config.OPENROUTER_TIMEOUT_SECONDS))
     return openai.OpenAI(
         api_key=config.openrouter_api_key(),
         base_url=config.OPENROUTER_BASE_URL,
-        # A stalled call must fail fast rather than hang. Without this the SDK waits
-        # on its default 600s per attempt, and a hung upstream looks like a slow one.
+        http_client=_transport,
         timeout=config.OPENROUTER_TIMEOUT_SECONDS,
         # The SDK retries twice by default, and `_openrouter_create_with_retry`
         # already retries once itself. Left at the default, one stalled call could
@@ -272,6 +293,22 @@ def _openrouter_client() -> Any:
         # 120s ceiling back into an hour. One retry, ours, deliberately placed.
         max_retries=0,
     )
+
+
+def _abort_transport() -> None:
+    """Close the socket out from under a call that has run past its deadline.
+
+    Cancelling the future alone would not help: a thread blocked in a read is not
+    interruptible, so it would keep receiving and keep billing until the provider
+    finished. Closing the transport makes that read raise, and dropping the cached
+    client means the next call builds a fresh one.
+    """
+    try:
+        if _transport is not None:
+            _transport.close()
+    except Exception:  # noqa: BLE001 — best effort; the deadline error is the signal
+        log.debug("Transport close during abort failed", exc_info=True)
+    _openrouter_client.cache_clear()
 
 
 def _system_text(system: list[dict[str, Any]]) -> str:
@@ -461,7 +498,56 @@ def _record_route(response: Any, label: str, seconds: float) -> ServedCall:
     return served
 
 
+# One step down the effort ladder. `low` has nowhere further to go, so a call that
+# blows its deadline at `low` is a genuine failure rather than something to soften.
+_EFFORT_STEP_DOWN = {"high": "medium", "medium": "low"}
+
+
 def _openrouter_complete(
+    *,
+    system: list[dict[str, Any]],
+    content: list[dict[str, Any]],
+    schema: dict[str, Any],
+    effort: Effort,
+    max_tokens: int,
+    label: str = "",
+) -> tuple[dict[str, Any], dict[str, int]]:
+    """One attempt, then at most one more at lower effort.
+
+    Runaway generation is not being eliminated here, it is being BOUNDED. A call
+    that blows its wall-clock deadline or truncates mid-JSON is, in both cases,
+    generating more than the budget allows — and on OpenRouter reasoning tokens are
+    drawn from the same budget, so turning the reasoning down is the lever that
+    directly addresses both. It is tried once and then the failure stands.
+
+    Worst case is therefore deadline + one lower-effort call, not unbounded. The
+    deadline error is deliberately NOT in the transient-retry path in
+    `_openrouter_create_with_retry`: retrying a runaway at the same effort would
+    just spend the deadline twice on its way to the same place.
+    """
+    try:
+        return _openrouter_attempt(
+            system=system, content=content, schema=schema,
+            effort=effort, max_tokens=max_tokens, label=label,
+        )
+    except (CallDeadlineExceeded, TruncatedResponse) as exc:
+        lower = _EFFORT_STEP_DOWN.get(effort)
+        if lower is None:
+            raise
+        log.warning(
+            "Call %s failed at effort=%s (%s); retrying once at effort=%s.",
+            label or "unlabelled", effort, type(exc).__name__, lower,
+        )
+        return _openrouter_attempt(
+            system=system, content=content, schema=schema,
+            effort=lower, max_tokens=max_tokens,
+            # The retry is labelled so the route log shows it happened rather than
+            # showing one call that mysteriously took twice as long.
+            label=f"{label or 'unlabelled'}:retry@{lower}",
+        )
+
+
+def _openrouter_attempt(
     *,
     system: list[dict[str, Any]],
     content: list[dict[str, Any]],
@@ -522,8 +608,32 @@ def _openrouter_usage(response: Any) -> dict[str, int]:
 
 
 def _openrouter_create(request: dict[str, Any]) -> Any:
-    """The single point where this codebase calls the OpenAI-compatible SDK."""
-    return _openrouter_client().chat.completions.create(**request)
+    """The single point where this codebase calls the OpenAI-compatible SDK.
+
+    Wrapped in a real wall-clock deadline, because the transport timeout is not one.
+    httpx's `timeout` bounds each individual socket operation — connect, then the
+    gap between reads — so a response that trickles bytes indefinitely resets it
+    forever and never trips. That is exactly what happened: a 603-second evaluate
+    call sailed past a 120-second "timeout" while continuously sending data.
+
+    So the call runs on a worker thread and the caller waits at most
+    OPENROUTER_TIMEOUT_SECONDS for it. On expiry the transport is closed, which
+    aborts the transfer rather than merely abandoning it — a detached thread would
+    otherwise keep reading, and keep costing, for as long as the provider talked.
+    """
+    client = _openrouter_client()
+    started = time.monotonic()
+    future = _deadline_pool.submit(lambda: client.chat.completions.create(**request))
+    try:
+        return future.result(timeout=config.OPENROUTER_TIMEOUT_SECONDS)
+    except concurrent.futures.TimeoutError:
+        _abort_transport()
+        raise CallDeadlineExceeded(
+            f"Call exceeded the {config.OPENROUTER_TIMEOUT_SECONDS:.0f}s wall-clock "
+            f"deadline after {time.monotonic() - started:.0f}s and was aborted. The "
+            f"provider was still sending, so this is runaway generation rather than "
+            f"a stall."
+        ) from None
 
 
 def _openrouter_create_with_retry(request: dict[str, Any]) -> Any:

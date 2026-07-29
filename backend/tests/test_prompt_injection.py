@@ -275,7 +275,32 @@ def test_status_and_severity_are_constrained_by_the_output_schema() -> None:
     ]
     assert finding_schema["properties"]["severity"]["enum"] == ["high", "medium", "low"]
     assert finding_schema["additionalProperties"] is False
-    assert set(finding_schema["required"]) == set(finding_schema["properties"])
+
+    # Every field a verdict or a score depends on stays required, so a response
+    # cannot drop one and have the gap read as benign.
+    required = set(finding_schema["required"])
+    assert required >= {
+        "check_id",
+        "status",
+        "severity",
+        "severity_rationale",
+        "title",
+        "evidence",
+        "affected_components",
+    }
+
+    # `confidence` is the one deliberate exception, and only because it is
+    # DISPLAY-ONLY and cannot reach the arithmetic (tests/test_scoring.py pins
+    # that). It was required, and one omission on finding 44 of 45 discarded a
+    # whole paid evaluate call; OpenRouter documents that schema compliance is not
+    # guaranteed across providers, so requiring it bought nothing it could keep.
+    # Absent or off-enum now defaults to "" in `stages._confidence_of`.
+    assert set(finding_schema["properties"]) - required == {"confidence"}
+    assert finding_schema["properties"]["confidence"]["enum"] == [
+        "high",
+        "medium",
+        "low",
+    ]
 
 
 def test_every_stage_that_reads_untrusted_input_carries_the_guard() -> None:
