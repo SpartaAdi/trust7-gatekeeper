@@ -795,7 +795,13 @@ def test_every_pipeline_call_site_passes_a_label() -> None:
     labels = sum(source.count("label=") for source in sources)
 
     # stages.py has one unrelated `label=` (component label), hence >= not ==.
-    assert calls == 5, f"expected 5 call sites, found {calls}"
+    #
+    # Six, not five: `remediate` gained a completion retry ("remediate-missing")
+    # that fires only when the first answer covers fewer findings than were asked
+    # for. It is a conditional sixth call, not a sixth stage — the pipeline is
+    # still ingest -> classify -> evaluate -> prioritize -> remediate. Raising this
+    # number is a decision about cost, so it stays an exact assertion.
+    assert calls == 6, f"expected 6 call sites, found {calls}"
     assert labels >= calls
 
 

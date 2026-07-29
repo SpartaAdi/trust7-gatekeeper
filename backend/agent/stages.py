@@ -669,6 +669,13 @@ def apply_ranking(
 _REMEDIATE_SYSTEM = """\
 You are the remediation stage of a solution design review.
 
+Return EXACTLY ONE entry in `remediations` for EVERY finding you are given, once \
+each, copying its `check_id` verbatim from the list. Do not omit a finding, do \
+not merge two findings into one entry, and do not add an entry for a check_id \
+that is not in the list. If a finding is hard to act on, say what you can — an \
+entry you are unsure about is still better than a missing one, because a missing \
+one is shown to the reviewer as a gap with no guidance at all.
+
 For each finding, write what the delivery team should change. Be concrete and \
 specific to this design: name the component, the mechanism, and the outcome that \
 closes the gap. A remediation a team can act on without asking a follow-up \
@@ -718,6 +725,37 @@ _REMEDIATE_SCHEMA: dict[str, Any] = {
 }
 
 
+_REMEDIATE_RETRY_SYSTEM = """\
+You are the remediation stage of a solution design review, completing a partial \
+answer.
+
+The findings below were left without remediation guidance on the first pass. \
+Return exactly one entry for each of them, once each, copying the `check_id` \
+verbatim. Every one of these findings must receive an entry — they are shown to \
+the reviewer as gaps with no guidance until they do.
+
+Be concrete and specific to this design: name the component, the mechanism, and \
+the outcome that closes the gap. Do not restate the finding or pad with generic \
+best-practice prose.
+
+`effort` estimates the work to implement: low (a configuration or design-document \
+change), medium (a component or flow change), high (a structural change to the \
+architecture).
+
+{guard}""".format(guard=untrusted.GUARD)
+
+# The retry needs no executive summary — the first call already wrote it, and
+# asking again would produce a second one that nothing reads.
+_REMEDIATE_RETRY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "remediations": _REMEDIATE_SCHEMA["properties"]["remediations"],
+    },
+    "required": ["remediations"],
+    "additionalProperties": False,
+}
+
+
 def remediate(
     findings: list[Finding],
     classification: dict[str, Any],
@@ -763,21 +801,111 @@ def remediate(
         label="remediate",
     )
 
+    wanted = {f.check_id for f in open_findings}
+    text, effort = _collect_remediations(payload, wanted)
+
+    # The same shortfall the prioritize stage already had to defend against: a real
+    # run there returned 19 entries for 31 open findings. Nothing here noticed the
+    # equivalent, so every uncovered finding was written back as an empty string and
+    # surfaced to the reviewer as "No remediation text was generated for this
+    # check." It also blanked `remediation_effort`, and a blank effort on a
+    # high-severity finding is filed as Immediate by the roadmap — so a short
+    # response did not merely lose text, it inflated the Immediate phase with work
+    # nobody had judged to be cheap.
+    #
+    # One retry, asking ONLY for what is missing. Deliberately not a re-run of the
+    # whole stage: it is a fraction of the tokens, and the entries already returned
+    # are good. Bounded at one for the same reason every other retry here is —
+    # nothing may turn a per-call ceiling into an unbounded spend.
+    missing = sorted(wanted - set(text))
+    if missing:
+        log.warning(
+            "remediate returned %d of %d open findings; retrying once for the "
+            "missing %d: %s",
+            len(text), len(wanted), len(missing), ", ".join(missing),
+        )
+        retry_payload, retry_usage = llm.complete_json(
+            system=[{"type": "text", "text": _REMEDIATE_RETRY_SYSTEM}],
+            content=[
+                {
+                    "type": "text",
+                    "text": (
+                        f"## Design\n"
+                        f"{untrusted.wrap(_render_classification(classification))}\n\n"
+                        f"## Findings still needing remediation\n"
+                        f"{untrusted.wrap(_render_findings([f for f in open_findings if f.check_id in set(missing)]))}"
+                    ),
+                }
+            ],
+            schema=_REMEDIATE_RETRY_SCHEMA,
+            effort="medium",
+            max_tokens=32000,
+            label="remediate-missing",
+        )
+        retry_text, retry_effort = _collect_remediations(retry_payload, set(missing))
+        text.update(retry_text)
+        effort.update(retry_effort)
+        usage = _add_usage(usage, retry_usage)
+
+        still_missing = sorted(wanted - set(text))
+        if still_missing:
+            # Left empty rather than invented: a fabricated remediation is worse
+            # than an honest blank, and the UI says so plainly. The roadmap's own
+            # documented fallback handles the blank effort that comes with it.
+            log.error(
+                "remediate still missing %d of %d after retry: %s",
+                len(still_missing), len(wanted), ", ".join(still_missing),
+            )
+
+    return text, effort, payload.get("executive_summary", ""), usage
+
+
+def _collect_remediations(
+    payload: dict[str, Any], wanted: set[str]
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Read the remediation entries, keeping only those naming a real open finding.
+
+    An entry for a check that is not open — a passing check, or a check_id the
+    model invented — is discarded rather than stored, mirroring how `_to_findings`
+    drops unrecognised check_ids and how `apply_ranking` refuses ranks for checks
+    that are not open. An entry with no remediation text is treated as absent, so
+    an empty string from the model is retried rather than stored as an answer.
+    """
     text: dict[str, str] = {}
     effort: dict[str, str] = {}
     for item in payload.get("remediations", []):
         check_id = item.get("check_id", "")
-        if check_id:
-            text[check_id] = item.get("remediation", "")
+        remediation = (item.get("remediation") or "").strip()
+        if check_id in wanted and remediation:
+            text[check_id] = remediation
             effort[check_id] = item.get("effort", "")
-    return text, effort, payload.get("executive_summary", ""), usage
+    return text, effort
+
+
+def _add_usage(first: dict[str, int], second: dict[str, int]) -> dict[str, int]:
+    """Token usage across both calls, so the retry is visible in the total."""
+    return {
+        key: first.get(key, 0) + second.get(key, 0)
+        for key in set(first) | set(second)
+    }
 
 
 def _render_findings(findings: list[Finding]) -> str:
+    """One line per finding, with the fields the stage actually has to reason about.
+
+    `pillar` and `components` are included because the stage is asked for an
+    `effort` estimate whose own definition turns on blast radius — "a component or
+    flow change" against "a structural change to the architecture". Without the
+    component list the model was rating effort blind to the one signal in the data
+    that is not its own opinion, and the roadmap groups on that rating.
+    """
     lines: list[str] = []
     for finding in findings:
+        components = ", ".join(finding.affected_components) or "none recorded"
         lines.append(
-            f"- [{finding.check_id}] ({finding.severity}, {finding.status}) "
-            f"{finding.title}\n  evidence: {finding.evidence}"
+            f"- [{finding.check_id}] ({finding.severity}, {finding.status}, "
+            f"pillar: {finding.pillar_id}) {finding.title}\n"
+            f"  components: {components}\n"
+            f"  evidence: {finding.evidence}"
         )
     return "\n".join(lines)

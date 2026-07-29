@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib
 import io
 import pathlib
+import re
 from typing import Any
 
 import pytest
@@ -147,7 +148,28 @@ def _stub_complete_json(state: dict[str, int]):
         # Remediate. Scoring runs before this stage precisely so the summary can
         # quote the computed figures instead of recounting the findings.
         board = "".join(block.get("text", "") for block in content)
+        asked_for = re.findall(r"^- \[([^\]]+)\]", board, flags=re.MULTILINE)
+        assert asked_for, "remediate must be given the findings to remediate"
+
+        if label == "remediate-missing":
+            # The completion retry. It gets no scoreboard and writes no summary —
+            # only entries for the findings the first answer left uncovered.
+            assert "Scoreboard" not in board
+            return {
+                "remediations": [
+                    {
+                        "check_id": check_id,
+                        "remediation": f"Close the gap on {check_id}.",
+                        "effort": "medium",
+                    }
+                    for check_id in asked_for
+                ]
+            }, {"input_tokens": 200, "output_tokens": 80}
+
         assert "Scoreboard" in board, "remediate must receive the computed figures"
+        # One entry per open finding, as the prompt now demands. Answering only
+        # ENCRYPTION_CHECK here would leave every other open finding blank, which
+        # is the bug test_remediation_completeness.py covers.
         return {
             "executive_summary": (
                 "This design scores below the Certified band. Security is the "
@@ -156,10 +178,15 @@ def _stub_complete_json(state: dict[str, int]):
             ),
             "remediations": [
                 {
-                    "check_id": ENCRYPTION_CHECK,
-                    "remediation": "Enable SSE-KMS on the orders table.",
+                    "check_id": check_id,
+                    "remediation": (
+                        "Enable SSE-KMS on the orders table."
+                        if check_id == ENCRYPTION_CHECK
+                        else f"Address {check_id}."
+                    ),
                     "effort": "low",
                 }
+                for check_id in asked_for
             ],
         }, {"input_tokens": 900, "output_tokens": 400}
 
