@@ -152,6 +152,36 @@ describe('determinism', () => {
     expect(signature(groupByPhase(all))).toBe(signature(groupByPhase(all)))
   })
 
+  it('orders findings that share a priority by check_id, not by arrival', () => {
+    // The case the shared fixture cannot cover: it gives every finding a distinct
+    // priority, so a sort keyed on priority alone would look deterministic there.
+    // A real review leaves most findings at priority 0, and THAT is where input
+    // order leaks through without the tie-break.
+    const tied = ['SEC-9', 'SEC-2', 'OPS-4', 'SEC-1'].map((check_id) =>
+      finding({ check_id, remediation_effort: 'medium', priority: 0 }),
+    )
+    const expected = ['OPS-4', 'SEC-1', 'SEC-2', 'SEC-9']
+
+    expect(groupByPhase(tied).short_term.map((f) => f.check_id)).toEqual(expected)
+    expect(groupByPhase([...tied].reverse()).short_term.map((f) => f.check_id)).toEqual(
+      expected,
+    )
+  })
+
+  it('separates findings that share both priority and check_id by framework', () => {
+    // The same check_id exists under both frameworks in principle; the sort key is
+    // framework-qualified so the pair cannot swap between renders.
+    const pair = [
+      finding({ framework: 'trust7', check_id: 'X-1', remediation_effort: 'medium' }),
+      finding({ framework: 'aws_waf', check_id: 'X-1', remediation_effort: 'medium' }),
+    ]
+    const order = (input: Finding[]) =>
+      groupByPhase(input).short_term.map((f) => f.framework)
+
+    expect(order(pair)).toEqual(['aws_waf', 'trust7'])
+    expect(order([...pair].reverse())).toEqual(['aws_waf', 'trust7'])
+  })
+
   it('produces an identical grouping regardless of input order', () => {
     // The real guarantee. Findings arrive in whatever order the pipeline sorted them,
     // and most share priority 0 — without the check_id tie-break, the phases would

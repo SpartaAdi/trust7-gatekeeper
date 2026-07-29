@@ -154,6 +154,34 @@ def test_identical_grouping_when_run_twice() -> None:
     )
 
 
+def test_tied_priorities_are_ordered_by_check_id_not_by_arrival() -> None:
+    """The case the shared fixture cannot cover.
+
+    Every fixture finding has a distinct priority, so a sort keyed on priority alone
+    would look deterministic there. A real review leaves most findings at priority 0,
+    and that is where input order leaks through without the tie-break.
+    """
+    tied = [
+        finding(check_id=cid, remediation_effort="medium", priority=0)
+        for cid in ("SEC-9", "SEC-2", "OPS-4", "SEC-1")
+    ]
+    expected = ["OPS-4", "SEC-1", "SEC-2", "SEC-9"]
+
+    for order in itertools.permutations(tied):
+        grouped = roadmap.group_by_phase(list(order))
+        assert [f.check_id for f in grouped["short_term"]] == expected
+
+
+def test_same_check_id_under_two_frameworks_keeps_a_stable_order() -> None:
+    pair = [
+        finding(framework="trust7", check_id="X-1", remediation_effort="medium"),
+        finding(framework="aws_waf", check_id="X-1", remediation_effort="medium"),
+    ]
+    for order in (pair, pair[::-1]):
+        grouped = roadmap.group_by_phase(list(order))
+        assert [f.framework for f in grouped["short_term"]] == ["aws_waf", "trust7"]
+
+
 def test_identical_grouping_regardless_of_input_order() -> None:
     """The real guarantee.
 

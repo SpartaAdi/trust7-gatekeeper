@@ -49,6 +49,7 @@ from reportlab.platypus import (
 )
 
 import maturity
+import roadmap
 from schema import Finding, ReviewResult
 
 # --------------------------------------------------------------------------- #
@@ -645,6 +646,99 @@ def _finding_block(finding: Finding, width: float) -> Flowable:
     return KeepTogether(parts)
 
 
+def _roadmap(result: ReviewResult) -> list:
+    """How to improve — the open findings sequenced into three phases.
+
+    The same grouping the results view renders, from the same rule in `roadmap.py`,
+    so the report and the screen cannot disagree about a finding's phase.
+
+    Titles and remediation text are reproduced verbatim. This section restates the
+    findings in a different order rather than adding anything to them, so it stays
+    compact: one line of remediation per finding, with the full evidence left to the
+    findings section that follows.
+    """
+    width = PAGE_W - 2 * MARGIN
+    grouped = roadmap.group_by_phase(result.findings)
+    total = sum(len(grouped[phase]) for phase in roadmap.PHASE_ORDER)
+    if total == 0:
+        return []
+
+    story: list = [
+        PageBreak(),
+        Paragraph("How to improve", S["h1"]),
+        Paragraph(
+            f"{total} open {'finding' if total == 1 else 'findings'} sequenced by "
+            "implementation effort and blast radius. Phases are assigned from the "
+            "recorded remediation effort and the number of components each fix "
+            "touches — the same rule the dashboard applies.",
+            S["muted"],
+        ),
+        Spacer(1, 4 * mm),
+    ]
+
+    for phase in roadmap.PHASE_ORDER:
+        group = grouped[phase]
+        story.append(Spacer(1, 3 * mm))
+        # The heading is kept with the blurb and rule so a phase never opens a page
+        # on its own, and an empty phase still appears: "Structural (0)" is a result.
+        story.append(
+            KeepTogether(
+                [
+                    Paragraph(
+                        f"{_t(roadmap.PHASE_LABEL[phase])} "
+                        f'<font color="#47525E">({len(group)})</font>',
+                        S["h2"],
+                    ),
+                    Paragraph(_t(roadmap.PHASE_BLURB[phase]), S["small"]),
+                    HRule(width, NAVY, 0.8),
+                    # Without this the first title butts against the rule and reads as
+                    # part of the heading block rather than as the first entry.
+                    Spacer(1, 2.5 * mm),
+                ]
+            )
+        )
+        if not group:
+            story += [
+                Spacer(1, 2 * mm),
+                Paragraph("Nothing in this phase.", S["muted"]),
+            ]
+            continue
+        for finding in group:
+            story.append(_roadmap_row(finding, width))
+
+    return story
+
+
+def _roadmap_row(finding: Finding, width: float) -> Flowable:
+    """One phase entry: title, verbatim remediation, and the two phase inputs.
+
+    The effort and component count are shown because they are what put the finding in
+    this phase — a reviewer disagreeing with the placement can see why without
+    reading the rule.
+    """
+    facts = [_t(finding.severity) + " severity", _t(finding.pillar_id.replace("_", " "))]
+    if finding.remediation_effort:
+        facts.append(f"{_t(finding.remediation_effort)} effort")
+    if finding.affected_components:
+        count = len(finding.affected_components)
+        facts.append(f"{count} component" + ("s" if count != 1 else ""))
+
+    return KeepTogether(
+        [
+            Paragraph(f"<b>{_t(finding.title)}</b>", S["h3"]),
+            Paragraph(" · ".join(facts), S["small"]),
+            Spacer(1, 1.5 * mm),
+            Paragraph(
+                _t(finding.remediation)
+                if finding.remediation
+                else "No remediation text was generated for this check.",
+                S["body"],
+            ),
+            Spacer(1, 4 * mm),
+        ]
+    )
+
+
 def _summaries(result: ReviewResult) -> list:
     width = PAGE_W - 2 * MARGIN
     story: list = []
@@ -804,6 +898,7 @@ def build_pdf(
     story.append(PageBreak())
     story += _summaries(result)
     story += _scorecard(result)
+    story += _roadmap(result)
     story += _findings(result)
     story += _appendix(result, diagram)
 

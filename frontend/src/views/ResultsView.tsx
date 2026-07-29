@@ -17,6 +17,13 @@ import type {
   ScoreDelta,
   Severity,
 } from '../types'
+import {
+  PHASE_BLURB,
+  PHASE_LABEL,
+  PHASE_ORDER,
+  groupByPhase,
+  type Phase,
+} from './roadmap'
 
 interface Props {
   reviewId: string
@@ -134,6 +141,8 @@ export function ResultsView({
       {result.delta && <DeltaSummary delta={result.delta} />}
 
       <TopActionItems findings={result.findings} />
+
+      <ImprovementRoadmap findings={result.findings} />
 
       {result.executive_summary && (
         <section className="mt-12 bg-pastel-cream px-5 py-5">
@@ -383,6 +392,128 @@ function TopActionItems({ findings }: { findings: Finding[] }) {
         ))}
       </ol>
     </section>
+  )
+}
+
+/**
+ * "How to Improve" — the open findings sequenced into three phases.
+ *
+ * Where Top Action Items above is a shortlist (ten, one per pillar), this is the
+ * whole plan: every open finding appears exactly once. The two answer different
+ * questions — "what do I fix first" against "what does the work look like" — so the
+ * roadmap deliberately does not cap or dedupe.
+ *
+ * Grouping is `groupByPhase`, which is pure: no request, no new field, and the same
+ * findings always land in the same phases. The rule is documented in `roadmap.ts`.
+ *
+ * Collapsed by default, one level rather than the findings list's two: the phase
+ * counts are what a reader scans for, and the roadmap sits above the full findings
+ * list which already offers per-finding disclosure.
+ */
+function ImprovementRoadmap({ findings }: { findings: Finding[] }) {
+  const grouped = groupByPhase(findings)
+  const total = PHASE_ORDER.reduce((sum, phase) => sum + grouped[phase].length, 0)
+  if (total === 0) return null
+
+  return (
+    <section className="mt-12" data-testid="roadmap">
+      <h3 className="t-eyebrow text-ink-muted">
+        How to improve
+        <span className="tnum font-normal normal-case tracking-normal text-ink-faint">
+          {' '}
+          · {total} open {total === 1 ? 'finding' : 'findings'} in three phases
+        </span>
+      </h3>
+
+      {PHASE_ORDER.map((phase) => (
+        <PhaseGroup key={phase} phase={phase} findings={grouped[phase]} />
+      ))}
+    </section>
+  )
+}
+
+/**
+ * One collapsible phase. Same disclosure shape as `SeverityGroup`: a real button
+ * carrying `aria-expanded`, the count inside the accessible name, and the shared
+ * `Chevron` so every accordion on the page rotates alike.
+ *
+ * An empty phase still renders, greyed and not expandable. "Structural (0)" is a
+ * result — it says there is no architecture work — whereas an absent heading leaves
+ * the reader to wonder whether the phase was omitted or never considered.
+ */
+function PhaseGroup({ phase, findings }: { phase: Phase; findings: Finding[] }) {
+  const [open, setOpen] = useState(false)
+  const empty = findings.length === 0
+
+  return (
+    <div className="mt-8" data-testid={`phase-${phase}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        disabled={empty}
+        className="group flex w-full items-baseline gap-2.5 py-1 text-left disabled:cursor-default"
+      >
+        <Chevron open={open} className={empty ? 'invisible' : ''} />
+        <h4 className={`t-heading ${empty ? 'text-ink-faint' : ''}`}>
+          {PHASE_LABEL[phase]}
+        </h4>
+        <span className="tnum t-caption text-ink-muted">({findings.length})</span>
+        <span className="t-caption hidden text-ink-faint sm:block">
+          {PHASE_BLURB[phase]}
+        </span>
+        <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
+      </button>
+
+      {open && !empty && (
+        <ol className="animate-enter mt-1 divide-y divide-hairline border-y border-hairline">
+          {findings.map((finding) => (
+            <li
+              key={`${finding.framework}-${finding.check_id}`}
+              className="flex items-start gap-4 py-3"
+            >
+              {/*
+                Not decorative here: unlike the findings list, the phase rows do not
+                state the severity in text, so the mark is the only place it appears
+                and needs its accessible name.
+              */}
+              <span className="mt-1.5 shrink-0">
+                <SeverityMark severity={finding.severity} />
+              </span>
+              <div className="min-w-0">
+                <p className="t-body font-medium">{finding.title}</p>
+                {/*
+                  Verbatim, like everywhere else tonight: `remediation` is the model's
+                  own imperative text and is rendered unmodified. A finding with none
+                  says so rather than having something invented for it.
+                */}
+                <p className="t-body mt-1 max-w-prose text-pretty text-ink-muted">
+                  {finding.remediation || 'No remediation text was generated for this check.'}
+                </p>
+                <p className="t-caption mt-1 text-ink-faint">
+                  {finding.pillar_id.replace(/_/g, ' ')}
+                  {finding.remediation_effort && (
+                    <>
+                      <span aria-hidden="true"> · </span>
+                      {finding.remediation_effort} effort
+                    </>
+                  )}
+                  {finding.affected_components.length > 0 && (
+                    <>
+                      <span aria-hidden="true"> · </span>
+                      {finding.affected_components.length}{' '}
+                      {finding.affected_components.length === 1
+                        ? 'component'
+                        : 'components'}
+                    </>
+                  )}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   )
 }
 

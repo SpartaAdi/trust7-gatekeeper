@@ -19,6 +19,7 @@ from pypdf import PdfReader
 
 import maturity
 import report
+import roadmap
 import rubric
 import scoring
 from schema import Component, Finding, ReviewResult, ScoreDelta
@@ -497,6 +498,191 @@ def test_a_very_long_title_does_not_break_generation() -> None:
     findings[0].title = "overflow " * 200
     findings[0].priority = 1
     assert report.build_pdf(_review(findings=findings)).startswith(b"%PDF-")
+
+
+# --------------------------------------------------------------------------- #
+# How to improve — the three-phase roadmap
+# --------------------------------------------------------------------------- #
+
+def _spread_findings() -> list[Finding]:
+    """One failing finding per phase, so all three appear in the report."""
+    findings = _findings()
+    by_id = {f.check_id: f for f in findings}
+    checks = list(rubric.all_checks())
+
+    # Immediate: cheap, high severity, one component.
+    immediate = next(c for c in checks if c.severity == "high")
+    f = by_id[immediate.check_id]
+    f.status, f.severity = "fail", "high"
+    f.remediation_effort, f.priority = "low", 1
+    f.affected_components = ["claims-db"]
+    f.title = "Encryption at rest is not specified"
+    f.remediation = "Enable SSE-KMS on the table with a customer-managed key."
+
+    # Short-term: a component or flow change.
+    short = next(c for c in checks if c.check_id != immediate.check_id)
+    f = by_id[short.check_id]
+    f.status = "fail"
+    f.remediation_effort, f.priority = "medium", 2
+    f.affected_components = ["api-service"]
+    f.title = "Secrets are passed as environment variables"
+    f.remediation = "Read secrets from Secrets Manager at start-up."
+
+    # Structural: spans components.
+    structural = next(
+        c for c in checks if c.check_id not in (immediate.check_id, short.check_id)
+    )
+    f = by_id[structural.check_id]
+    f.status = "fail"
+    f.remediation_effort, f.priority = "high", 3
+    f.affected_components = ["claims-db", "api-service", "alb"]
+    f.title = "Single-AZ deployment for the claims pipeline"
+    f.remediation = "Move the claims pipeline to a multi-AZ deployment."
+
+    return findings
+
+
+def _roadmap_slice(pdf: bytes) -> str:
+    """Just the roadmap section's text.
+
+    Scoped deliberately: every title and remediation sentence in the roadmap also
+    appears in the findings section further on, so an unscoped search would pass on
+    that second copy and prove nothing about this section.
+    """
+    text = text_of(pdf)
+    start = text.find("How to improve")
+    assert start != -1, "roadmap section missing from the report"
+    end = text.find("Findings and remediation", start)
+    return text[start : end if end != -1 else len(text)]
+
+
+@pytest.fixture(scope="module")
+def roadmap_text() -> str:
+    return _roadmap_slice(report.build_pdf(_review(findings=_spread_findings())))
+
+
+def test_roadmap_section_names_all_three_phases(roadmap_text: str) -> None:
+    assert "How to improve" in roadmap_text
+    for label in ("Immediate", "Short-term", "Structural"):
+        assert label in roadmap_text, f"{label} phase missing from the report"
+
+
+def test_roadmap_reproduces_remediation_verbatim(roadmap_text: str) -> None:
+    # The same no-client-rephrase rule the dashboard follows: the model's own
+    # sentence reaches the page unchanged.
+    for sentence in (
+        "Enable SSE-KMS on the table with a customer-managed key.",
+        "Read secrets from Secrets Manager at start-up.",
+        "Move the claims pipeline to a multi-AZ deployment.",
+    ):
+        assert sentence in roadmap_text
+
+
+def test_roadmap_states_the_inputs_that_decided_each_phase(roadmap_text: str) -> None:
+    # Effort and component count are shown so a reviewer who disagrees with a
+    # placement can see what drove it without reading the rule.
+    assert "low effort" in roadmap_text
+    assert "medium effort" in roadmap_text
+    assert "high effort" in roadmap_text
+    assert "3 components" in roadmap_text
+
+
+def _phase_sections(slice_text: str) -> dict[str, str]:
+    """The roadmap slice split into one text block per phase heading.
+
+    Membership, not order, is what proves the report calls the shared rule: a second
+    copy of the logic inside report.py can produce the right sequence by accident,
+    but it cannot put a finding under the right heading by accident.
+    """
+    bounds = []
+    for phase in roadmap.PHASE_ORDER:
+        index = slice_text.find(roadmap.PHASE_LABEL[phase])
+        assert index != -1, f"{phase} heading missing"
+        bounds.append((phase, index))
+    bounds.sort(key=lambda pair: pair[1])
+
+    sections: dict[str, str] = {}
+    for position, (phase, start) in enumerate(bounds):
+        end = bounds[position + 1][1] if position + 1 < len(bounds) else len(slice_text)
+        sections[phase] = slice_text[start:end]
+    return sections
+
+
+def test_roadmap_agrees_with_the_shared_grouping_rule() -> None:
+    """The report must not re-derive phases; it calls the same function.
+
+    Every finding must appear under the heading the shared rule assigns it, and
+    under no other — so a drifting second implementation inside report.py fails
+    here even if it happens to render the findings in the same order.
+    """
+    findings = _spread_findings()
+    sections = _phase_sections(
+        _roadmap_slice(report.build_pdf(_review(findings=findings)))
+    )
+    grouped = roadmap.group_by_phase(findings)
+
+    for phase in roadmap.PHASE_ORDER:
+        for finding in grouped[phase]:
+            excerpt = finding.title[:40]
+            assert excerpt in sections[phase], (
+                f"{finding.check_id} should be under {phase}"
+            )
+            for other in roadmap.PHASE_ORDER:
+                if other != phase:
+                    assert excerpt not in sections[other], (
+                        f"{finding.check_id} also appears under {other}"
+                    )
+
+    # And the headings themselves run Immediate -> Short-term -> Structural.
+    order = sorted(
+        roadmap.PHASE_ORDER,
+        key=lambda phase: _roadmap_slice(
+            report.build_pdf(_review(findings=findings))
+        ).find(roadmap.PHASE_LABEL[phase]),
+    )
+    assert list(order) == list(roadmap.PHASE_ORDER)
+
+def test_roadmap_is_omitted_when_nothing_is_open() -> None:
+    text = text_of(report.build_pdf(_review(findings=_findings())))
+    assert "How to improve" not in text
+
+
+def test_roadmap_shows_an_empty_phase_rather_than_hiding_it() -> None:
+    # Only a cheap high-severity gap: Short-term and Structural are empty, and both
+    # still appear. "Structural (0)" is a result, not an omission.
+    findings = _findings()
+    high = next(c for c in rubric.all_checks() if c.severity == "high")
+    target = next(f for f in findings if f.check_id == high.check_id)
+    target.status, target.remediation_effort, target.priority = "fail", "low", 1
+    target.affected_components = ["claims-db"]
+
+    text = text_of(report.build_pdf(_review(findings=findings)))
+    assert "Structural" in text
+    assert "Nothing in this phase." in text
+
+
+def test_roadmap_uses_only_existing_theme_colours(pdf: bytes) -> None:
+    # The section introduces no new fill; the palette assertions elsewhere in this
+    # file cover the document as a whole, and this pins the roadmap specifically by
+    # rendering a review that has one.
+    spread = report.build_pdf(_review(findings=_spread_findings()))
+    test_no_purple_or_violet_anywhere(spread)
+    fills = _rgb_fills(_content_streams(spread))
+    known = [
+        _rgb(h)
+        for h in (
+            "#1B263B", "#1420BE", "#1C55BB", "#6896F4", "#FFFFFF", "#F6F7FD",
+            "#CCD2DC", "#47525E", "#EEF5FE", "#E5FAED", "#FBF8DE", "#AEBAC7",
+            "#8E9DAC", "#FDC921",
+        )
+    ]
+    for fill in fills:
+        # Navy at partial opacity is blended to a real RGB by the swatch ramp, so a
+        # fill is acceptable if it is a known token OR a grey-blue on that ramp.
+        if any(_near(fill, k) for k in known):
+            continue
+        r, g, b = fill
+        assert b >= r, f"unexpected fill {fill} is not on the navy ramp"
 
 
 # --------------------------------------------------------------------------- #

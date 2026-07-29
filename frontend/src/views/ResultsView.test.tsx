@@ -134,6 +134,181 @@ describe('ResultsView', () => {
     expect(screen.queryByTestId('top-actions')).not.toBeInTheDocument()
   })
 
+  describe('How to Improve roadmap', () => {
+    /** Enough shape to exercise all three phases from one review. */
+    const spread = () =>
+      resultFixture({
+        findings: [
+          // low effort + high severity + one component -> Immediate
+          {
+            ...resultFixture().findings[0]!,
+            check_id: 'sec_encryption_at_rest',
+          },
+          // medium effort -> Short-term
+          {
+            ...resultFixture().findings[0]!,
+            check_id: 'ops_runbook',
+            pillar_id: 'operational_excellence',
+            severity: 'medium' as const,
+            title: 'No runbook is referenced for the payment flow',
+            remediation: 'Reference the on-call runbook in the design document.',
+            remediation_effort: 'medium' as const,
+            priority: 2,
+          },
+          // spans components -> Structural
+          {
+            ...resultFixture().findings[0]!,
+            check_id: 'rel_multi_az',
+            pillar_id: 'reliability',
+            title: 'Single-AZ deployment for the order pipeline',
+            remediation: 'Move the order pipeline to a multi-AZ deployment.',
+            remediation_effort: 'high' as const,
+            affected_components: ['orders-db', 'orders-worker', 'alb'],
+            priority: 3,
+          },
+        ],
+      })
+
+    function mount(result = spread()) {
+      getReview.mockResolvedValue(result)
+      return render(<ResultsView
+          reviewId="rev-1"
+          onReReview={vi.fn()}
+          onStartOver={vi.fn()}
+          onBackToHistory={vi.fn()}
+        />)
+    }
+
+    async function renderRoadmap(result = spread()) {
+      mount(result)
+      return screen.findByTestId('roadmap')
+    }
+
+    /** Open all three phases, then read the section back. */
+    async function expandAll(user: ReturnType<typeof userEvent.setup>) {
+      for (const label of [/^Immediate/, /^Short-term/, /^Structural/]) {
+        const header = screen.getByRole('button', { name: label })
+        if (!(header as HTMLButtonElement).disabled) await user.click(header)
+      }
+      return screen.getByTestId('roadmap').textContent
+    }
+
+    it('sits below Top Action Items, not above it', async () => {
+      const roadmap = await renderRoadmap()
+      const actions = screen.getByTestId('top-actions')
+
+      expect(
+        actions.compareDocumentPosition(roadmap) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+    })
+
+    it('starts every phase collapsed, showing only the counts', async () => {
+      await renderRoadmap()
+
+      for (const label of [/^Immediate/, /^Short-term/, /^Structural/]) {
+        const header = screen.getByRole('button', { name: label })
+        expect(header).toHaveAttribute('aria-expanded', 'false')
+      }
+      // The count is in the header, so it is legible while shut.
+      expect(screen.getByTestId('phase-immediate')).toHaveTextContent('(1)')
+      expect(screen.getByTestId('phase-short_term')).toHaveTextContent('(1)')
+      expect(screen.getByTestId('phase-structural')).toHaveTextContent('(1)')
+
+      // And no remediation text is on the page from the roadmap yet.
+      expect(
+        screen.getByTestId('roadmap').textContent,
+      ).not.toMatch(/multi-AZ deployment/i)
+    })
+
+    it('expands one phase to the finding titles and verbatim remediation', async () => {
+      const user = userEvent.setup()
+      await renderRoadmap()
+
+      await user.click(screen.getByRole('button', { name: /^Structural/ }))
+
+      const phase = screen.getByTestId('phase-structural')
+      expect(phase).toHaveTextContent('Single-AZ deployment for the order pipeline')
+      // Verbatim — the exact string from the finding, not a rephrase.
+      expect(phase).toHaveTextContent('Move the order pipeline to a multi-AZ deployment.')
+      // Context a reviewer sequencing work needs.
+      expect(phase).toHaveTextContent(/high effort/)
+      expect(phase).toHaveTextContent(/3 components/)
+    })
+
+    it('expands independently — opening one phase does not open the others', async () => {
+      const user = userEvent.setup()
+      await renderRoadmap()
+
+      await user.click(screen.getByRole('button', { name: /^Immediate/ }))
+
+      expect(screen.getByRole('button', { name: /^Immediate/ })).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      )
+      expect(screen.getByRole('button', { name: /^Structural/ })).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      )
+    })
+
+    it('places each open finding in exactly one phase', async () => {
+      const user = userEvent.setup()
+      await renderRoadmap()
+      await expandAll(user)
+
+      // Three findings in, three rows out across all phases — nothing duplicated
+      // into two phases and nothing dropped.
+      const rows = screen.getByTestId('roadmap').querySelectorAll('li')
+      expect(rows).toHaveLength(3)
+    })
+
+    it('shows an empty phase rather than hiding it, and does not expand it', async () => {
+      // "Structural (0)" is a result: it says there is no architecture work. An
+      // absent heading would leave the reader unsure it was considered.
+      const user = userEvent.setup()
+      await renderRoadmap(
+        resultFixture({ findings: [resultFixture().findings[0]!] }),
+      )
+
+      const structural = screen.getByRole('button', { name: /^Structural/ })
+      expect(screen.getByTestId('phase-structural')).toHaveTextContent('(0)')
+      expect(structural).toBeDisabled()
+
+      await user.click(structural)
+      expect(structural).toHaveAttribute('aria-expanded', 'false')
+    })
+
+    it('is absent entirely when nothing is open', async () => {
+      mount(
+        resultFixture({
+          findings: resultFixture().findings.map((f) => ({ ...f, status: 'pass' as const })),
+        }),
+      )
+
+      await screen.findByRole('heading', { name: /payments platform/i })
+      expect(screen.queryByTestId('roadmap')).not.toBeInTheDocument()
+    })
+
+    it('groups the same review identically however the findings are ordered', async () => {
+      // The determinism guarantee, seen from the UI rather than the pure function:
+      // two fetches of one review may return its findings in any order, and the
+      // phases must read the same both times.
+      const user = userEvent.setup()
+      const result = spread()
+
+      const first = mount(result)
+      await screen.findByTestId('roadmap')
+      const before = await expandAll(user)
+      first.unmount()
+
+      mount({ ...result, findings: [...result.findings].reverse() })
+      await screen.findByTestId('roadmap')
+      const after = await expandAll(user)
+
+      expect(after).toBe(before)
+    })
+  })
+
   describe('findings accordion', () => {
     it('starts every severity group collapsed', async () => {
       getReview.mockResolvedValue(resultFixture())
