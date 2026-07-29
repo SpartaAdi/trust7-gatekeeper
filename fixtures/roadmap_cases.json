@@ -1,0 +1,222 @@
+{
+  "$comment": [
+    "Shared phase-grouping cases, read by BOTH frontend/src/views/roadmap.test.ts and",
+    "backend/tests/test_roadmap.py. The rule is implemented twice — once in TypeScript",
+    "for the results view, once in Python for the PDF — because the two runtimes cannot",
+    "share code. This file is what stops those two copies drifting: a case added here",
+    "must pass in both suites, so a change to one implementation and not the other is a",
+    "test failure rather than a report that quietly disagrees with the screen.",
+    "",
+    "`expect` is the phase each finding must land in."
+  ],
+  "cases": [
+    {
+      "name": "high effort is structural whatever else it says",
+      "expect": "structural",
+      "finding": {
+        "framework": "aws_waf",
+        "pillar_id": "reliability",
+        "check_id": "REL-2",
+        "status": "fail",
+        "severity": "high",
+        "title": "Single-AZ deployment",
+        "affected_components": ["rds-primary"],
+        "remediation": "Move the database to a multi-AZ deployment.",
+        "remediation_effort": "high",
+        "priority": 1
+      }
+    },
+    {
+      "name": "more than one affected component is structural even at low effort",
+      "expect": "structural",
+      "finding": {
+        "framework": "aws_waf",
+        "pillar_id": "security",
+        "check_id": "SEC-3",
+        "status": "fail",
+        "severity": "high",
+        "title": "Traffic between tiers is unencrypted",
+        "affected_components": ["alb", "api-service", "worker"],
+        "remediation": "Terminate TLS at the load balancer and require TLS on both hops.",
+        "remediation_effort": "low",
+        "priority": 2
+      }
+    },
+    {
+      "name": "low effort AND high severity on one component is immediate",
+      "expect": "immediate",
+      "finding": {
+        "framework": "trust7",
+        "pillar_id": "trust_foundations",
+        "check_id": "T7-1",
+        "status": "fail",
+        "severity": "high",
+        "title": "S3 bucket has no default encryption",
+        "affected_components": ["assets-bucket"],
+        "remediation": "Enable SSE-KMS as the bucket default.",
+        "remediation_effort": "low",
+        "priority": 3
+      }
+    },
+    {
+      "name": "low effort on a component-less finding is still immediate at high severity",
+      "expect": "immediate",
+      "finding": {
+        "framework": "trust7",
+        "pillar_id": "ai_governance",
+        "check_id": "T7-13",
+        "status": "partial",
+        "severity": "high",
+        "title": "No model-usage policy referenced",
+        "affected_components": [],
+        "remediation": "State the approved model list in the design document.",
+        "remediation_effort": "low",
+        "priority": 4
+      }
+    },
+    {
+      "name": "cheap but not urgent is short-term, not immediate",
+      "expect": "short_term",
+      "finding": {
+        "framework": "aws_waf",
+        "pillar_id": "cost_optimization",
+        "check_id": "COST-1",
+        "status": "partial",
+        "severity": "low",
+        "title": "No cost allocation tags",
+        "affected_components": ["api-service"],
+        "remediation": "Apply the standard cost allocation tag set.",
+        "remediation_effort": "low",
+        "priority": 9
+      }
+    },
+    {
+      "name": "medium effort is short-term even at high severity",
+      "expect": "short_term",
+      "finding": {
+        "framework": "aws_waf",
+        "pillar_id": "security",
+        "check_id": "SEC-5",
+        "status": "fail",
+        "severity": "high",
+        "title": "Secrets are passed as environment variables",
+        "affected_components": ["api-service"],
+        "remediation": "Read secrets from Secrets Manager at start-up.",
+        "remediation_effort": "medium",
+        "priority": 5
+      }
+    },
+    {
+      "name": "no effort recorded: high severity on one component falls back to immediate",
+      "expect": "immediate",
+      "finding": {
+        "framework": "trust7",
+        "pillar_id": "risk_resilience",
+        "check_id": "T7-5",
+        "status": "fail",
+        "severity": "high",
+        "title": "No documented RPO",
+        "affected_components": ["rds-primary"],
+        "remediation": "",
+        "remediation_effort": "",
+        "priority": 0
+      }
+    },
+    {
+      "name": "no effort recorded: medium severity falls back to short-term",
+      "expect": "short_term",
+      "finding": {
+        "framework": "aws_waf",
+        "pillar_id": "operational_excellence",
+        "check_id": "OPS-2",
+        "status": "partial",
+        "severity": "medium",
+        "title": "No runbook referenced",
+        "affected_components": [],
+        "remediation": "",
+        "remediation_effort": "",
+        "priority": 0
+      }
+    },
+    {
+      "name": "no effort recorded: several components is still structural",
+      "expect": "structural",
+      "finding": {
+        "framework": "aws_waf",
+        "pillar_id": "operational_excellence",
+        "check_id": "OPS-4",
+        "status": "fail",
+        "severity": "medium",
+        "title": "No centralised logging",
+        "affected_components": ["api-service", "worker", "alb", "rds-primary"],
+        "remediation": "",
+        "remediation_effort": "",
+        "priority": 0
+      }
+    },
+    {
+      "name": "an Operational Excellence document fix is NOT forced to structural by pillar",
+      "expect": "immediate",
+      "finding": {
+        "framework": "aws_waf",
+        "pillar_id": "operational_excellence",
+        "check_id": "OPS-1",
+        "status": "fail",
+        "severity": "high",
+        "title": "No deployment rollback procedure described",
+        "affected_components": ["api-service"],
+        "remediation": "Describe the rollback procedure in the design document.",
+        "remediation_effort": "low",
+        "priority": 6
+      }
+    },
+    {
+      "name": "a Reliability finding that is genuinely cheap stays immediate",
+      "expect": "immediate",
+      "finding": {
+        "framework": "aws_waf",
+        "pillar_id": "reliability",
+        "check_id": "REL-1",
+        "status": "partial",
+        "severity": "high",
+        "title": "Health check interval not specified",
+        "affected_components": ["alb"],
+        "remediation": "Set the target group health check interval to 10 seconds.",
+        "remediation_effort": "low",
+        "priority": 7
+      }
+    }
+  ],
+  "excluded": [
+    {
+      "name": "a passing check is not on the roadmap",
+      "finding": {
+        "framework": "aws_waf",
+        "pillar_id": "security",
+        "check_id": "SEC-1",
+        "status": "pass",
+        "severity": "high",
+        "title": "IAM roles are scoped per service",
+        "affected_components": ["api-service"],
+        "remediation": "",
+        "remediation_effort": "",
+        "priority": 0
+      }
+    },
+    {
+      "name": "a not-applicable check is not on the roadmap",
+      "finding": {
+        "framework": "trust7",
+        "pillar_id": "sustainability_ai",
+        "check_id": "T7-12",
+        "status": "not_applicable",
+        "severity": "low",
+        "title": "No AI workload in scope",
+        "affected_components": [],
+        "remediation": "",
+        "remediation_effort": "",
+        "priority": 0
+      }
+    }
+  ]
+}
