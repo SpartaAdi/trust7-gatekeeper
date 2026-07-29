@@ -156,7 +156,10 @@ describe('ResultsView', () => {
     expect(screen.getByTestId('roadmap')).toHaveTextContent(/enable sse-kms on the table/i)
   })
 
-  it('omits the action list entirely when nothing is open at high severity', async () => {
+  it('omits the roadmap entirely when nothing is open', async () => {
+    // Was written against the old flat shortlist, which no longer exists — so it
+    // asserted the absence of something absent for everyone. Repointed at the
+    // roadmap, which is what now has to hide itself on a clean review.
     getReview.mockResolvedValue(
       resultFixture({
         findings: resultFixture().findings.map((f) => ({ ...f, status: 'pass' as const })),
@@ -171,7 +174,10 @@ describe('ResultsView', () => {
       />)
 
     await screen.findByRole('heading', { name: /payments platform/i })
-    expect(screen.queryByTestId('top-actions')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('roadmap')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('priority-focus')).not.toBeInTheDocument()
+    // The audit trail still renders: a clean review is a result, not an absence.
+    expect(screen.getByTestId('detailed-findings')).toBeInTheDocument()
   })
 
   describe('How to Improve roadmap', () => {

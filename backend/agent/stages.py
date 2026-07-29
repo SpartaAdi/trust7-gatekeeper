@@ -612,10 +612,11 @@ def apply_ranking(
     open gaps kept priority 0, which is the same value a PASSING check carries.
 
     That is not a cosmetic problem. `priority == 0` is read as "unranked" in three
-    places: the frontend prints `·` instead of a number, `selectTopActions` sorts
-    those findings last and loses pillar tie-breaks on them, and the stored array is
-    sorted with passing checks. A partial ranking therefore silently demoted twelve
-    real gaps to the same standing as checks that passed.
+    places: the frontend prints `·` instead of a number, the action roadmap's
+    `prioritizedActions` sorts those findings last within their phase and loses
+    tie-breaks on them, and the stored array is sorted with passing checks. A
+    partial ranking therefore silently demoted twelve real gaps to the same
+    standing as checks that passed.
 
     So the ranking is completed here rather than trusted:
 

@@ -6,9 +6,9 @@ tree and git at the moment of writing, not from conversation memory. Where the
 outgoing session could not verify something, it says so rather than guessing.
 
 Read `CLAUDE.md` next — it holds the project's hard constraints (Vercel + Render,
-Claude via the Anthropic-compatible API rather than Bedrock, local-filesystem
-storage, the two-diagram-path-one-schema rule, the re-review delta, the UI rules).
-This file does not repeat it.
+**OpenRouter -> `moonshotai/kimi-k2.6`** with the provider lock, local-filesystem
+storage, the two-diagram-path-one-schema rule, the re-review delta, the UI rules,
+and the five-section results page). This file does not repeat it.
 
 ---
 
@@ -27,45 +27,26 @@ entirely. The real upstream is GitHub `SpartaAdi/trust7-gatekeeper`. If `git fet
 fails with a connection error, the proxy is what's missing — re-point origin at the
 GitHub remote rather than concluding the repo is gone.
 
-**Current branch** (`git branch --show-current`): `claude/trust7-gatekeeper-setup-tug467`
+**Current branch** (`git branch --show-current`): `main` — and `main` is now the
+only branch carrying application code. See the branch note at the end of §1.
 
-**Latest commit** (`git log -1 --format=%H`):
-`bd86e37d272abbc2b66a6630cbd8fe44082bd0ef`
+**Latest commit**: see `git log -1` — this file is no longer pinned to a hash,
+because every previous pinning went stale within the hour.
 
-**Last 10 commits** (`git log --oneline -10`):
+**Branch state — read this before touching any ref.**
 
-```
-bd86e37 Let the reviewer stop a running review
-d6c5ef8 Render the roadmap on the results view and in the report
-4c3d11c Add deterministic phase grouping for a roadmap section
-9524bea Drop the estimated-time-remaining text
-a7dc855 Show a running elapsed clock during a review
-521d42b Offer optional context on a diagram-only upload, with dictation
-71449bd Complete a partial ranking instead of leaving open findings unranked
-0b02925 Retry classify once when it returns an empty inventory for a non-empty design
-45fcf0f Treat finish_reason "error" as its own retryable fault, with the detail OpenRouter reports
-f1a0dd1 Stop requiring confidence, add a real wall-clock deadline, bound runaway generation
-```
+`main` is the only branch with application code, and `origin/main` is what
+deploys. There is one other live branch:
 
-45 commits total on the branch.
+| Branch | Holds | Action |
+|---|---|---|
+| `main` | all app code | the branch to work on |
+| `claude/ponytail-install-wvhjbn` | `.claude/settings.json` and nothing else — the ponytail plugin config, tooling not app code | leave alone, or merge if you want the plugin active from a fresh clone |
+| `claude/trust7-gatekeeper-setup-tug467` | nothing: an exact ancestor of `main`, zero unique commits | **delete it in the GitHub UI.** The session git proxy returns HTTP 403 on ref deletion and the GitHub MCP server exposes no delete-ref tool, so it could not be removed from here. |
 
-**main vs HEAD — identical, but there is a trap here.**
-
-```
-main: bd86e37d272abbc2b66a6630cbd8fe44082bd0ef
-HEAD: bd86e37d272abbc2b66a6630cbd8fe44082bd0ef
-```
-
-They match **now**. They did not five minutes ago: this session pushed with
-`git push origin HEAD:main`, which updates the remote but leaves the *local* `main`
-ref behind. Local `main` was stale at `a7dc855` (3 commits behind) while
-`origin/main` was already at `bd86e37`. It has been fast-forwarded and now tracks
-`origin/main`.
-
-**Carry this forward:** every branch in this repo — `main`, `claude/…-tug467`, and
-their two remote counterparts — points at `bd86e37`. Development happened on
-`claude/trust7-gatekeeper-setup-tug467` and was pushed to *both* refs each time.
-Prefer `git push -u origin <branch>` over `HEAD:main` so local refs stay honest.
+Verify a claimed push with `git ls-remote origin main` against `git rev-parse
+HEAD` — never trust the push output alone. This repo has already been bitten once
+by a `HEAD:main` push that updated the remote and left the local ref behind.
 
 **`git status`: clean.** Nothing uncommitted, staged, or untracked. Verbatim output
 of `git status --porcelain` is empty. Nothing to commit, stash, or discard.
@@ -82,7 +63,7 @@ of `git status --porcelain` is empty. Nothing to commit, stash, or discard.
 | `scripts/warm.sh` | keeps the Render free tier from cold-starting |
 | `fixtures/roadmap_cases.json` | shared phase-grouping cases, asserted by **both** test suites |
 | `rubric/` | the 45-check / 13-pillar rubric JSON |
-| `local-data/` | runtime storage. **Currently contains `reviews/` and nothing else — no stored review exists.** |
+| `local-data/` | runtime storage. **Empty — no stored review has ever existed in a container this session, because no live key has.** |
 
 **`backend/.env` does NOT exist.** Only `.env.example` is committed. `.gitignore`
 line 2 is `.env` and line 3 `.env.local`, so a real one can never be committed —
@@ -122,8 +103,9 @@ and removed it afterwards. Do not add it to `package.json`.
 
 ## 2. What's done — do not repeat, do not re-litigate
 
-Every item below was **verified present in the working tree at `bd86e37`** by
-grepping for its actual symbol, not inferred from commit messages.
+Every item below was verified present in the working tree by grepping for its
+actual symbol, not inferred from commit messages. Commit hashes name where a
+thing landed; they are not a claim about current HEAD.
 
 ### Provider routing and call safety
 
@@ -267,14 +249,24 @@ in any container this session.** Consequences, stated plainly:
   be thin and Short-term heavy. The rule is right either way; the **balance** is
   unmeasured.
 
-### ⏸ Dense-copy / markdown wording round — **BLOCKED**
+### ✅ Dense-copy / structured text — **DONE**, and what the real findings showed
 
-Blocked on real review findings to base the rewrite on. The user's instruction was
-explicit: show before/after on **2–3 real findings from an actual review**, "not a
-synthetic example", before touching every prompt.
+The assessment and multi-step remediations render as lists when the model writes
+them as lists. `StructuredText` (frontend) and `report.structured_lines`
+(backend) are mirrored implementations with the same cases asserted on both
+sides; the prompts ask for bullets where scanning beats prose.
 
-**No real findings have been captured. `local-data/reviews/` is empty and no stored
-review exists anywhere in the repo.** This stays blocked until a real run lands.
+**Verified against genuine output, which is the part worth carrying forward.**
+Two real remediations from a live run — `sec_encryption_transit` and
+`sec_identity_auth` — both parse as PROSE. They are genuinely multi-step but were
+written run-on, with no newlines and no markers. The detector correctly renders
+one paragraph and does NOT mis-split them mid-sentence, which is the failure that
+would have mattered. Only the prompt change can improve their shape, and those
+samples predate it. They are pinned verbatim in
+`backend/tests/test_real_findings_render.py` as the regression fixture.
+
+**Still owed:** a wording pass over the prompts judged against a fresh run made
+*after* the format instruction landed. Nobody has seen that output yet.
 
 ### ✅ Trend view / shareable link — **DONE**
 
@@ -331,8 +323,8 @@ module's one httpx transport, which is what `_abort_transport` closes.
 **Everything passes at `bd86e37`. Nothing is failing and nothing was left mid-fix.**
 
 ```
-backend    407 passed
-frontend   190 passed (12 files)
+backend    447 passed
+frontend   255 passed (13 files)
 ```
 
 Both figures include the share-link and user-key rounds. Note the container this
@@ -458,42 +450,24 @@ look like a failure. `scripts/warm.sh` exists for that.
 
 ## 7. Immediate next action
 
-Run this first, before writing any code — it establishes whether the one blocker
-that has held everything back all night is still in place:
+Unchanged, and it is the same blocker it has been all along:
 
 ```bash
-cd /home/user/trust7-gatekeeper/backend && \
-  python -c "import os; print('key present:', bool(os.environ.get('OPENROUTER_API_KEY')))"
+cd backend && python -c "import os; print('key present:', bool(os.environ.get('OPENROUTER_API_KEY')))"
 ```
 
-(Reads the environment directly on purpose. `config.openrouter_api_key()` *raises*
-`RuntimeError` when the key is absent rather than returning empty, so it would answer
-this question with a traceback.)
+**If `True`** — run a real review. That single act clears most of the unverified
+list in §3 at once: the provider lock, the wall-clock deadline, the remediation
+completion retry, the use-case notes, and the real shape of the model's prose
+under the new format instructions. Then do the live browser click-through.
 
-**If it prints `key present: True`** — a live key finally exists. Do the live smoke
-test, which is the highest-value open item and unblocks two others:
+**If `False`** — do not re-test stubs; 702 tests already cover that ground. Ask
+for a key.
 
-```bash
-cd /home/user/trust7-gatekeeper/backend && python scripts/real_api_e2e.py
-```
-
-Then capture the resulting findings and use them for the blocked dense-copy round,
-and check the real spread of `remediation_effort` against the roadmap's phase
-balance (§3).
-
-**If it prints `key present: False`** — do **not** spend the session re-testing
-stubs; that ground is covered by 527 passing tests. Ask the user for a key, and
-meanwhile do the one valuable thing that needs no key: start the frontend against a
-stubbed backend and click through Upload → Analyzing → Results in a real browser,
-which has genuinely never been done.
+**First, in any fresh container:** nothing is installed.
 
 ```bash
-cd /home/user/trust7-gatekeeper/frontend && npm run dev   # http://localhost:5173
-```
-
-Verify before trusting any state claim in this file:
-
-```bash
-cd /home/user/trust7-gatekeeper && git status --porcelain && \
-  git rev-parse HEAD && git ls-remote origin main
+cd backend && pip install -r requirements.txt -r requirements-dev.txt
+pip install --ignore-installed cryptography   # the dist-packages copy is broken
+cd ../frontend && npm ci
 ```
