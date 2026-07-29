@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import io
 import pathlib
+import re
+from typing import Any
 from xml.sax.saxutils import escape
 
 from reportlab.lib import pagesizes
@@ -127,6 +129,50 @@ def _t(value: object) -> str:
     raise a parse error mid-export.
     """
     return escape(str(value if value is not None else ""))
+
+
+# At least two marked lines: one sentence that happens to start with a dash is
+# prose, not a list.
+_MIN_LIST_ITEMS = 2
+_BULLET_MARKER = re.compile(r"^\s*[-•*]\s+")
+_ORDINAL_MARKER = re.compile(r"^\s*\d+[.)]\s+")
+
+
+def structured_lines(text: str) -> list[str] | None:
+    """Split model text into list items, or None when it is prose.
+
+    Mirrors `parseStructured` in frontend/src/components/StructuredText.tsx. The
+    prompts now ask for bullets where scanning beats prose, and without this the
+    PDF would print the markers literally inside one run-on paragraph — ReportLab
+    collapses newlines exactly as HTML does.
+
+    Every non-empty line must carry the marker. A paragraph followed by two
+    bullets is prose containing a list, and splitting it would drop the paragraph.
+    """
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    if len(lines) < _MIN_LIST_ITEMS:
+        return None
+    for marker in (_BULLET_MARKER, _ORDINAL_MARKER):
+        if all(marker.match(line) for line in lines):
+            return [marker.sub("", line) for line in lines]
+    return None
+
+
+def _prose_or_list(text: str, style: Any, bullet: str = "•") -> list[Any]:
+    """One Paragraph, or one per item with a hanging bullet.
+
+    A ListFlowable would be the obvious reach, but it does not inherit the
+    document's own body style cleanly and the indents it computes fight the
+    table cells remediation sits inside. An indented Paragraph per item is
+    fewer moving parts and renders identically.
+    """
+    items = structured_lines(text)
+    if items is None:
+        return [Paragraph(_t(text), style)]
+    return [
+        Paragraph(f"{bullet}&nbsp;&nbsp;{_t(item)}", style, bulletText=None)
+        for item in items
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -613,7 +659,7 @@ def _finding_block(finding: Finding, width: float) -> Flowable:
                     [
                         Paragraph(f"REMEDIATION{effort}", S["eyebrow"]),
                         Spacer(1, 1 * mm),
-                        Paragraph(_t(finding.remediation), S["body"]),
+                        *_prose_or_list(finding.remediation, S["body"]),
                     ]
                 ]
             ],
@@ -757,7 +803,7 @@ def _summaries(result: ReviewResult) -> list:
     if result.summary:
         story += [
             Paragraph("Assessment", S["h2"]),
-            Paragraph(_t(result.summary), S["body"]),
+            *_prose_or_list(result.summary, S["body"]),
             Spacer(1, 6 * mm),
         ]
     if result.delta:

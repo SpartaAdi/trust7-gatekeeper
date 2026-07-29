@@ -527,6 +527,12 @@ Rank every finding you are given, once each, with consecutive ranks starting at 
 Also write a `summary`: a short, plain assessment of where this design stands. \
 Address the reviewer, not the design's author, and lead with the conclusion.
 
+Write it as 3 to 5 bullet points, one per line, each line beginning with "- ". \
+One point per idea, each a single sentence, and no line that only restates the \
+score. Bullets because this is scanned, not read: the reviewer is looking for \
+where the design stands, not a paragraph to work through. Do not write a heading, \
+do not nest, and do not number them.
+
 {guard}""".format(guard=untrusted.GUARD)
 
 _PRIORITIZE_SCHEMA: dict[str, Any] = {
@@ -685,6 +691,13 @@ Do not restate the finding, moralise, or pad with generic best-practice prose. \
 Where a change has a material cost or operational tradeoff, say so in one clause \
 — the reviewer needs to weigh it, not be sold on it.
 
+FORMAT. When the fix is a single change, write one or two sentences of plain \
+prose. When it genuinely has distinct sequential steps, write them as lines \
+beginning with "- ", one step per line and nothing else on the line — a reader \
+following steps needs to see where each one ends. Do not force a single change \
+into a list to look thorough, and never mix a paragraph and bullets in the same \
+remediation.
+
 `effort` estimates the work to implement: low (a configuration or design-document \
 change), medium (a component or flow change), high (a structural change to the \
 architecture).
@@ -737,6 +750,10 @@ the reviewer as gaps with no guidance until they do.
 Be concrete and specific to this design: name the component, the mechanism, and \
 the outcome that closes the gap. Do not restate the finding or pad with generic \
 best-practice prose.
+
+FORMAT. One or two sentences of prose for a single change; lines beginning with \
+"- ", one step per line, when the fix has distinct sequential steps. Never mix \
+the two in one remediation.
 
 `effort` estimates the work to implement: low (a configuration or design-document \
 change), medium (a component or flow change), high (a structural change to the \

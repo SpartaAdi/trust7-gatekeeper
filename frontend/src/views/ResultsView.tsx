@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { ApiError, createShareLink, downloadReport, getReview, shareUrl } from '../api'
 import { ChangeBadge } from '../components/ChangeBadge'
 import { SeverityMark } from '../components/SeverityMark'
+import { StructuredText } from '../components/StructuredText'
 import {
   MATURITY_BOUND_NOTE,
   MATURITY_SCALE,
@@ -164,7 +165,10 @@ export function ResultsView({
       <section className="mt-12" data-testid="assessment">
         <h3 className="t-eyebrow text-ink-muted">Assessment · pillar maturity</h3>
         {result.summary && (
-          <p className="t-body mt-3 max-w-prose text-pretty">{result.summary}</p>
+          <StructuredText
+            text={result.summary}
+            className="t-body mt-3 max-w-prose text-pretty"
+          />
         )}
         <div className="mt-6 space-y-10">
           {result.frameworks.map((framework) => (
@@ -532,9 +536,16 @@ function PhaseGroup({ phase, findings }: { phase: Phase; findings: Finding[] }) 
                   own imperative text and is rendered unmodified. A finding with none
                   says so rather than having something invented for it.
                 */}
-                <p className="t-body mt-1 max-w-prose text-pretty text-ink-muted">
-                  {finding.remediation || 'No remediation text was generated for this check.'}
-                </p>
+                {finding.remediation ? (
+                  <StructuredText
+                    text={finding.remediation}
+                    className="t-body mt-1 max-w-prose text-pretty text-ink-muted"
+                  />
+                ) : (
+                  <p className="t-body mt-1 max-w-prose text-pretty text-ink-muted">
+                    No remediation text was generated for this check.
+                  </p>
+                )}
                 <p className="t-caption mt-1 text-ink-faint">
                   {finding.pillar_id.replace(/_/g, ' ')}
                   {finding.remediation_effort && (
@@ -1192,7 +1203,7 @@ function FindingRow({ finding }: { finding: Finding }) {
                   </span>
                 )}
               </p>
-              <p className="t-body mt-1.5">{finding.remediation}</p>
+              <StructuredText text={finding.remediation} className="t-body mt-1.5" />
             </div>
           )}
 

@@ -983,3 +983,97 @@ describe('ResultsView — copy fix-it prompt affordance', () => {
     expect(screen.getByRole('tooltip')).toHaveTextContent(/maturity tiers/i)
   })
 })
+
+/**
+ * Part 5: the prompts now ask for bullets where scanning beats prose, so the
+ * page has to render them as lists rather than printing the markers.
+ */
+describe('ResultsView — structured copy', () => {
+  it('renders a bulleted assessment as a list, not a dashed paragraph', async () => {
+    getReview.mockResolvedValue(
+      resultFixture({
+        summary:
+          '- Security is the weakest pillar at 48.\n' +
+          '- Two high-severity gaps block deployment.\n' +
+          '- Cost optimization is the strongest at 81.',
+      }),
+    )
+
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+
+    const assessment = await screen.findByTestId('assessment')
+    expect(within(assessment).getAllByRole('listitem')).toHaveLength(3)
+    expect(assessment.textContent).not.toContain('- Security')
+  })
+
+  it('leaves a prose assessment as a paragraph, so older reviews are unaffected', async () => {
+    getReview.mockResolvedValue(
+      resultFixture({ summary: 'Solid shape, with encryption and audit gaps to close.' }),
+    )
+
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+
+    const assessment = await screen.findByTestId('assessment')
+    expect(within(assessment).queryAllByRole('listitem')).toHaveLength(0)
+    expect(assessment).toHaveTextContent(/solid shape, with encryption/i)
+  })
+
+  it('renders multi-step remediation as steps in the roadmap', async () => {
+    const base = resultFixture().findings[0]!
+    getReview.mockResolvedValue(
+      resultFixture({
+        findings: [
+          {
+            ...base,
+            remediation:
+              '- Create a customer-managed KMS key.\n' +
+              '- Enable SSE-KMS on the orders table.\n' +
+              '- Re-encrypt existing snapshots.',
+          },
+        ],
+      }),
+    )
+    const user = userEvent.setup()
+
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+
+    await screen.findByTestId('roadmap')
+    await user.click(screen.getByRole('button', { name: /^Immediate/ }))
+
+    const roadmap = screen.getByTestId('roadmap')
+    expect(within(roadmap).getAllByRole('listitem').length).toBeGreaterThanOrEqual(3)
+    expect(roadmap.textContent).toContain('Re-encrypt existing snapshots.')
+    expect(roadmap.textContent).not.toContain('- Create a customer-managed')
+  })
+
+  /** The executive summary stays prose on purpose — it is a summary, not a list. */
+  it('keeps the executive summary as prose', async () => {
+    getReview.mockResolvedValue(resultFixture())
+
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+
+    const exec = await screen.findByTestId('executive-summary')
+    expect(within(exec).queryAllByRole('listitem')).toHaveLength(0)
+    expect(exec.querySelector('p')).not.toBeNull()
+  })
+})
