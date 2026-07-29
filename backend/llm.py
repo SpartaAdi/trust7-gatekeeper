@@ -82,6 +82,16 @@ class CallDeadlineExceeded(RuntimeError):
     """A single call ran past the wall-clock deadline and was aborted."""
 
 
+class ProviderStreamError(RuntimeError):
+    """The provider reported a mid-stream fault and stopped generating early.
+
+    Distinct from `TruncatedResponse`: that is the model reaching a token ceiling we
+    set, this is the endpoint failing. It arrives as `finish_reason: "error"` with a
+    partial body, at whatever token count generation happened to reach — 203 tokens
+    in the run that prompted this, nowhere near any limit.
+    """
+
+
 # --------------------------------------------------------------------------- #
 # Which provider actually served each call
 #
@@ -116,6 +126,53 @@ def _slug(name: str) -> str:
     (`Sail Research`). Comparing them raw reports a violation on every call.
     """
     return "".join(ch for ch in name.lower() if ch.isalnum())
+
+
+def _error_detail(response: Any, choice: Any) -> str:
+    """Everything OpenRouter tells us about a `finish_reason: "error"`.
+
+    Nothing here was being read, so the first occurrence was diagnosable only as
+    "content cut off mid-string". Per OpenRouter's API reference the detail lives in
+    three places, all optional, so all three are harvested and whatever is present is
+    reported:
+
+    * `choice.native_finish_reason` — the provider's own raw finish reason, as
+      opposed to the normalised one we already branch on.
+    * `choice.error` — `{code, message, metadata}`, where metadata carries
+      "provider details, the raw error message, etc".
+    * a top-level `error` on the response — how a mid-stream fault is reported, with
+      `metadata.error_type` (a typed code) and `metadata.provider_code` (the upstream
+      code, omitted on 500s).
+    """
+    parts: list[str] = []
+
+    native = getattr(choice, "native_finish_reason", None)
+    if isinstance(native, str) and native:
+        parts.append(f"native_finish_reason={native!r}")
+
+    for source, where in ((choice, "choice"), (response, "response")):
+        error = getattr(source, "error", None)
+        if error is None:
+            extra = getattr(source, "model_extra", None) or {}
+            error = extra.get("error")
+        if not error:
+            continue
+        as_dict = error if isinstance(error, dict) else getattr(error, "__dict__", {})
+        code = as_dict.get("code")
+        message = as_dict.get("message")
+        metadata = as_dict.get("metadata") or {}
+        described = f"{where}.error"
+        if code is not None:
+            described += f" code={code}"
+        if message:
+            described += f" message={str(message)[:300]!r}"
+        for key in ("error_type", "provider_code", "provider_name", "raw"):
+            value = metadata.get(key) if isinstance(metadata, dict) else None
+            if value:
+                described += f" {key}={str(value)[:200]!r}"
+        parts.append(described)
+
+    return "; ".join(parts) if parts else "no error detail was reported"
 
 
 def _served_provider(response: Any) -> str:
@@ -524,11 +581,30 @@ def _openrouter_complete(
     deadline error is deliberately NOT in the transient-retry path in
     `_openrouter_create_with_retry`: retrying a runaway at the same effort would
     just spend the deadline twice on its way to the same place.
+
+    A `ProviderStreamError` is handled separately and at the SAME effort. It is an
+    endpoint fault, not a budget fault — generation stopped at 203 tokens in the run
+    that prompted this, nowhere near a ceiling — so turning the reasoning down would
+    be treating a symptom the fault does not have. Either branch makes at most one
+    extra attempt and never chains into the other: two attempts total, then the
+    failure stands.
     """
     try:
         return _openrouter_attempt(
             system=system, content=content, schema=schema,
             effort=effort, max_tokens=max_tokens, label=label,
+        )
+    except ProviderStreamError as exc:
+        log.warning(
+            "Call %s hit a provider stream error (%s); retrying once at the same "
+            "effort=%s.", label or "unlabelled", exc, effort,
+        )
+        # Same effort, and deliberately final: a second stream error is a real
+        # failure rather than something to keep spinning on.
+        return _openrouter_attempt(
+            system=system, content=content, schema=schema,
+            effort=effort, max_tokens=max_tokens,
+            label=f"{label or 'unlabelled'}:retry-transient",
         )
     except (CallDeadlineExceeded, TruncatedResponse) as exc:
         lower = _EFFORT_STEP_DOWN.get(effort)
@@ -572,6 +648,14 @@ def _openrouter_attempt(
         raise ModelRefusal(f"Model declined the request. {choice.message.refusal}")
     if choice.finish_reason == "content_filter":
         raise ModelRefusal("Model response was blocked by a content filter.")
+    if choice.finish_reason == "error":
+        # Generation stopped because the ENDPOINT failed, not because we ran out of
+        # budget. The token count is whatever it happened to reach.
+        raise ProviderStreamError(
+            f"Provider reported a mid-stream error and stopped generating after "
+            f"{getattr(getattr(response, 'usage', None), 'completion_tokens', 0) or 0} "
+            f"output tokens. {_error_detail(response, choice)}"
+        )
     if choice.finish_reason == "length":
         raise TruncatedResponse(
             f"Model hit the {request['max_tokens']}-token output limit before "

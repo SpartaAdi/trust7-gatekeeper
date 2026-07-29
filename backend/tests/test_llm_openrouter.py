@@ -1099,3 +1099,221 @@ def test_a_finding_without_confidence_survives_enforcement() -> None:
 
     assert enforced["findings"][0].get("confidence", "") == ""
     assert stages._confidence_of(enforced["findings"][0]) == ""
+
+
+# --------------------------------------------------------------------------- #
+# 11. finish_reason "error" — an endpoint fault, not a budget fault
+#
+# Run 3 died on classify with finish_reason "error" at 203 output tokens: not a
+# ceiling, not a timeout, content cut mid-string. It was diagnosable only as "cut
+# off", because none of the detail OpenRouter attaches was being read.
+# --------------------------------------------------------------------------- #
+
+class _ErrorChoice(_Choice):
+    """A choice as OpenRouter shapes it when a provider faults mid-stream."""
+
+    def __init__(self, content: str = '{"partial": "cut off mid-str',
+                 native: str | None = None, error: dict | None = None) -> None:
+        super().__init__(content, finish_reason="error")
+        if native is not None:
+            self.native_finish_reason = native
+        if error is not None:
+            self.error = error
+
+
+class _ErrorResponse(_Response):
+    def __init__(self, choice: _ErrorChoice, response_error: dict | None = None,
+                 completion_tokens: int = 203) -> None:
+        super().__init__("")
+        self.choices = [choice]
+        self.usage.completion_tokens = completion_tokens
+        if response_error is not None:
+            self.error = response_error
+
+
+def _once(monkeypatch, response: Any) -> None:
+    class Completions:
+        def create(self, **_request: Any) -> Any:
+            return response
+
+    fake = type("FakeClient", (), {
+        "chat": type("Chat", (), {"completions": Completions()})()
+    })()
+    monkeypatch.setattr(llm, "_openrouter_client", lambda: fake)
+
+
+def test_a_stream_error_is_not_reported_as_a_truncation(monkeypatch) -> None:
+    """Retrying at lower effort would be the wrong lever: 203 tokens is not a
+    budget problem."""
+    _once(monkeypatch, _ErrorResponse(_ErrorChoice()))
+
+    with pytest.raises(llm.ProviderStreamError):
+        llm._openrouter_attempt(
+            system=[{"type": "text", "text": "s"}],
+            content=[{"type": "text", "text": "u"}],
+            schema=MINIMAL_SCHEMA, effort="medium", max_tokens=16000, label="classify",
+        )
+
+
+def test_the_exception_reports_the_token_count_it_stopped_at(monkeypatch) -> None:
+    _once(monkeypatch, _ErrorResponse(_ErrorChoice(), completion_tokens=203))
+
+    with pytest.raises(llm.ProviderStreamError) as caught:
+        llm._openrouter_attempt(
+            system=[{"type": "text", "text": "s"}],
+            content=[{"type": "text", "text": "u"}],
+            schema=MINIMAL_SCHEMA, effort="medium", max_tokens=16000, label="classify",
+        )
+
+    assert "203 output tokens" in str(caught.value)
+
+
+def test_the_providers_own_finish_reason_is_surfaced(monkeypatch) -> None:
+    """`native_finish_reason` is the raw one, next to the normalised "error"."""
+    _once(monkeypatch, _ErrorResponse(_ErrorChoice(native="stream_error")))
+
+    with pytest.raises(llm.ProviderStreamError) as caught:
+        llm._openrouter_attempt(
+            system=[{"type": "text", "text": "s"}],
+            content=[{"type": "text", "text": "u"}],
+            schema=MINIMAL_SCHEMA, effort="medium", max_tokens=16000, label="classify",
+        )
+
+    assert "native_finish_reason='stream_error'" in str(caught.value)
+
+
+def test_a_choice_level_error_object_is_surfaced_with_its_code(monkeypatch) -> None:
+    _once(monkeypatch, _ErrorResponse(_ErrorChoice(
+        error={"code": 502, "message": "upstream disconnected",
+               "metadata": {"provider_name": "CoreWeave", "raw": "EOF"}},
+    )))
+
+    with pytest.raises(llm.ProviderStreamError) as caught:
+        llm._openrouter_attempt(
+            system=[{"type": "text", "text": "s"}],
+            content=[{"type": "text", "text": "u"}],
+            schema=MINIMAL_SCHEMA, effort="medium", max_tokens=16000, label="classify",
+        )
+
+    message = str(caught.value)
+    assert "code=502" in message
+    assert "upstream disconnected" in message
+    assert "CoreWeave" in message
+
+
+def test_a_mid_stream_error_carries_the_typed_code_and_provider_code(monkeypatch) -> None:
+    """How OpenRouter documents a mid-stream fault: a top-level `error` whose
+    metadata holds `error_type` and the upstream `provider_code`."""
+    _once(monkeypatch, _ErrorResponse(
+        _ErrorChoice(),
+        response_error={"code": 429, "message": "Rate limit exceeded",
+                        "metadata": {"error_type": "rate_limit_exceeded",
+                                     "provider_code": "429_TOO_MANY"}},
+    ))
+
+    with pytest.raises(llm.ProviderStreamError) as caught:
+        llm._openrouter_attempt(
+            system=[{"type": "text", "text": "s"}],
+            content=[{"type": "text", "text": "u"}],
+            schema=MINIMAL_SCHEMA, effort="medium", max_tokens=16000, label="classify",
+        )
+
+    message = str(caught.value)
+    assert "error_type='rate_limit_exceeded'" in message
+    assert "provider_code='429_TOO_MANY'" in message
+
+
+def test_no_detail_says_so_rather_than_looking_complete(monkeypatch) -> None:
+    """The bare case, which is what run 3 actually looked like."""
+    _once(monkeypatch, _ErrorResponse(_ErrorChoice()))
+
+    with pytest.raises(llm.ProviderStreamError) as caught:
+        llm._openrouter_attempt(
+            system=[{"type": "text", "text": "s"}],
+            content=[{"type": "text", "text": "u"}],
+            schema=MINIMAL_SCHEMA, effort="medium", max_tokens=16000, label="classify",
+        )
+
+    assert "no error detail was reported" in str(caught.value)
+
+
+def test_a_stream_error_retries_once_at_the_SAME_effort(monkeypatch) -> None:
+    """Not the effort ladder: this is an endpoint fault, so lowering the reasoning
+    would be treating a symptom the fault does not have."""
+    efforts: list[str] = []
+
+    def attempt(**kwargs: Any) -> Any:
+        efforts.append(kwargs["effort"])
+        if len(efforts) == 1:
+            raise llm.ProviderStreamError("mid-stream fault")
+        return {"ok": True}, {}
+
+    monkeypatch.setattr(llm, "_openrouter_attempt", attempt)
+
+    llm.complete_json(
+        system=[{"type": "text", "text": "s"}],
+        content=[{"type": "text", "text": "u"}],
+        schema=MINIMAL_SCHEMA, effort="medium", label="classify",
+    )
+
+    assert efforts == ["medium", "medium"], "effort must not be stepped down"
+
+
+def test_two_stream_errors_surface_as_a_real_failure(monkeypatch) -> None:
+    """Retry once, then stop. No spinning on a persistently faulting endpoint."""
+    calls: list[str] = []
+
+    def attempt(**kwargs: Any) -> Any:
+        calls.append(kwargs["label"])
+        raise llm.ProviderStreamError("mid-stream fault")
+
+    monkeypatch.setattr(llm, "_openrouter_attempt", attempt)
+
+    with pytest.raises(llm.ProviderStreamError):
+        llm.complete_json(
+            system=[{"type": "text", "text": "s"}],
+            content=[{"type": "text", "text": "u"}],
+            schema=MINIMAL_SCHEMA, effort="medium", label="classify",
+        )
+
+    assert calls == ["classify", "classify:retry-transient"]
+
+
+def test_the_stream_retry_does_not_chain_into_the_effort_ladder(monkeypatch) -> None:
+    """Two attempts total on either branch. A stream error followed by a truncation
+    must not become a third call."""
+    seen: list[tuple[str, str]] = []
+
+    def attempt(**kwargs: Any) -> Any:
+        seen.append((kwargs["label"], kwargs["effort"]))
+        if len(seen) == 1:
+            raise llm.ProviderStreamError("mid-stream fault")
+        raise llm.TruncatedResponse("and then it truncated")
+
+    monkeypatch.setattr(llm, "_openrouter_attempt", attempt)
+
+    with pytest.raises(llm.TruncatedResponse):
+        llm.complete_json(
+            system=[{"type": "text", "text": "s"}],
+            content=[{"type": "text", "text": "u"}],
+            schema=MINIMAL_SCHEMA, effort="high", label="classify",
+        )
+
+    assert seen == [("classify", "high"), ("classify:retry-transient", "high")]
+
+
+def test_a_stream_error_is_still_attributed_to_its_provider(monkeypatch) -> None:
+    """Knowing WHICH endpoint faulted is the point, and the route log records it
+    before the finish_reason checks run."""
+    _once(monkeypatch, _ErrorResponse(_ErrorChoice()))
+
+    with pytest.raises(llm.ProviderStreamError):
+        llm._openrouter_attempt(
+            system=[{"type": "text", "text": "s"}],
+            content=[{"type": "text", "text": "u"}],
+            schema=MINIMAL_SCHEMA, effort="medium", max_tokens=16000, label="classify",
+        )
+
+    served = llm.route_log()[-1]
+    assert served.provider == "CoreWeave"
+    assert served.finish_reason == "error"
