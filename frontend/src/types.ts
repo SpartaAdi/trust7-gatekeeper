@@ -135,7 +135,12 @@ export const STAGE_LABELS: Record<StageName, string> = {
   remediate: 'Generating remediation',
 }
 
-export type StageState = 'pending' | 'running' | 'done' | 'error'
+/**
+ * `cancelled` marks the stage a deliberate stop interrupted — the one the pipeline
+ * stopped at. Distinct from `error` because nothing went wrong, and from `done`
+ * because it did not finish.
+ */
+export type StageState = 'pending' | 'running' | 'done' | 'error' | 'cancelled'
 
 export interface StageProgress {
   name: StageName
@@ -147,7 +152,10 @@ export interface StageProgress {
 
 export interface ReviewStatus {
   review_id: string
-  state: 'queued' | 'running' | 'complete' | 'error'
+  // `cancelled` is terminal like `complete` and `error`, and is not a kind of
+  // success: no result is stored for a cancelled review, so `getReview` 409s and
+  // the history list never shows it.
+  state: 'queued' | 'running' | 'complete' | 'error' | 'cancelled'
   stages: StageProgress[]
   error: string
   updated_at: string

@@ -9,7 +9,9 @@ import uuid
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 
+import cancel
 import config
+import llm
 import report
 import storage
 from agent import pipeline
@@ -172,6 +174,52 @@ class ReviewSummary(BaseModel):
     high_severity_open: int
     has_delta: bool
     pillars: list[PillarSummary]
+
+
+_TERMINAL_STATES = frozenset({"complete", "error", "cancelled"})
+
+
+@router.post("/reviews/{review_id}/cancel", response_model=ReviewStatus)
+def cancel_review(review_id: str) -> ReviewStatus:
+    """Stop a running review.
+
+    Two things happen, and both are needed. The flag is registered, which is what
+    stops the pipeline before its next stage — the part that actually saves money,
+    since five unstarted stages cost more than one abandoned response. Then the
+    transport is closed, which aborts the request already on the wire rather than
+    leaving a thread receiving a response nobody will read.
+
+    A call that is fully sent and merely awaiting a reply may still complete and
+    bill; that is accepted rather than fought. Nothing here tries to un-bill work
+    the provider has already done.
+
+    Cancelling an already-finished review is a conflict, not a no-op: a `complete`
+    review has a stored result, and answering 200 here would suggest that result
+    had been withdrawn when it has not.
+    """
+    try:
+        status = storage.get_status(review_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if status is None:
+        raise HTTPException(status_code=404, detail=f"No review {review_id!r}.")
+    if status.state in _TERMINAL_STATES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Review {review_id!r} is already {status.state}.",
+        )
+
+    cancel.request(review_id)
+    llm.abort_in_flight()
+
+    # Written here as well as by the pipeline, because the pipeline only notices at
+    # its next stage boundary and the reviewer who just clicked the button should
+    # not have to wait for that to see it. The pipeline's own write follows and
+    # marks which stage was interrupted.
+    status.state = "cancelled"
+    status.error = ""
+    storage.put_status(status)
+    return status
 
 
 @router.get("/reviews", response_model=list[ReviewSummary])

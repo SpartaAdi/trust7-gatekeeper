@@ -26,6 +26,8 @@ back rather than trusting what was asked for.
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
+import contextvars
 import dataclasses
 import functools
 import json
@@ -33,8 +35,9 @@ import logging
 import re
 import time
 from collections import deque
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable, Iterator
 
+import cancel
 import config
 
 log = logging.getLogger(__name__)
@@ -350,6 +353,58 @@ def _openrouter_client() -> Any:
         # 120s ceiling back into an hour. One retry, ours, deliberately placed.
         max_retries=0,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Cancellation
+#
+# The mechanism is the deadline's, unchanged: closing the transport is what turns a
+# blocked read into an exception instead of leaving a detached thread receiving —
+# and billing — for as long as the provider keeps talking. Cancellation needs
+# exactly that, so it borrows it rather than growing a second way to stop a call.
+#
+# The predicate is a ContextVar, not a module global: it is set per review by the
+# pipeline, and two reviews running on different threadpool threads must not be
+# able to cancel each other.
+# --------------------------------------------------------------------------- #
+
+_CANCELLED: contextvars.ContextVar[Callable[[], bool] | None] = contextvars.ContextVar(
+    "llm_cancelled", default=None
+)
+
+
+@contextlib.contextmanager
+def cancellation(predicate: Callable[[], bool]) -> Iterator[None]:
+    """Make `predicate` the cancellation test for calls made inside this block."""
+    token = _CANCELLED.set(predicate)
+    try:
+        yield
+    finally:
+        _CANCELLED.reset(token)
+
+
+def _check_cancelled() -> None:
+    """Refuse to open a request for a review that has been cancelled.
+
+    Guarding the single SDK call point rather than the retry wrapper is what makes
+    this hold for retries too: aborting the transport surfaces as a connection
+    error, and the existing one-shot retry would otherwise answer it by placing a
+    fresh, full-price call for work nobody is waiting for.
+    """
+    predicate = _CANCELLED.get()
+    if predicate is not None and predicate():
+        raise cancel.Cancelled("Review cancelled; not sending a further request.")
+
+
+def abort_in_flight() -> None:
+    """Abort whatever call is on the wire, as the deadline does.
+
+    Public because cancellation is a caller-driven event rather than something this
+    module detects for itself. It is the same close, with the same caveat the
+    deadline already carries: the transport is shared, so a concurrent review's
+    call is aborted too and retried once by `_openrouter_create_with_retry`.
+    """
+    _abort_transport()
 
 
 def _abort_transport() -> None:
@@ -705,6 +760,7 @@ def _openrouter_create(request: dict[str, Any]) -> Any:
     aborts the transfer rather than merely abandoning it — a detached thread would
     otherwise keep reading, and keep costing, for as long as the provider talked.
     """
+    _check_cancelled()
     client = _openrouter_client()
     started = time.monotonic()
     future = _deadline_pool.submit(lambda: client.chat.completions.create(**request))
@@ -814,6 +870,7 @@ def _anthropic_complete(
 
 def _create(request: dict[str, Any]) -> Any:
     """The single point where this codebase calls the Anthropic SDK."""
+    _check_cancelled()
     return _client().beta.messages.create(
         **request, betas=[_STRUCTURED_OUTPUTS_BETA]
     )

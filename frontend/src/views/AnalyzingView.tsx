@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { ApiError, getStatus } from '../api'
+import { ApiError, cancelReview, getStatus } from '../api'
 import { elapsedSeconds, formatElapsed } from '../elapsed'
 import { STAGE_LABELS, type ReviewStatus, type StageProgress } from '../types'
 
@@ -25,6 +25,14 @@ export function AnalyzingView({
   const [status, setStatus] = useState<ReviewStatus | null>(null)
   const [pollError, setPollError] = useState('')
   const [gaveUp, setGaveUp] = useState(false)
+  // Set the instant the button is pressed rather than waiting for the server's
+  // answer. The reviewer asked for this to stop; the screen should say so at once,
+  // and the request is on its way regardless of how long it takes to acknowledge.
+  const [stopping, setStopping] = useState(false)
+  // Its own state, not `pollError`: polling resumes when a stop fails, and its next
+  // success calls `setPollError('')` — which would wipe the one message telling the
+  // reviewer their stop did not take effect.
+  const [stopError, setStopError] = useState('')
 
   // One tick drives the elapsed clock, and `frozenMs` is a latch over it: once set, the
   // displayed instant can never move again. A latch rather than
@@ -45,14 +53,18 @@ export function AnalyzingView({
   onCompleteRef.current = onComplete
 
   useEffect(() => {
-    let cancelled = false
+    // Polling stops the moment the reviewer asks it to. `stopping` is in the deps so
+    // this effect tears down and does not re-arm — the request to the server is what
+    // stops the work, and continuing to ask about it would just be noise.
+    if (stopping) return
+    let abandoned = false
     let timer: number | undefined
     let failures = 0
 
     async function poll() {
       try {
         const next = await getStatus(reviewId)
-        if (cancelled) return
+        if (abandoned) return
 
         failures = 0
         setPollError('')
@@ -66,12 +78,15 @@ export function AnalyzingView({
           onCompleteRef.current()
           return
         }
-        if (next.state === 'error') {
+        if (next.state === 'error' || next.state === 'cancelled') {
+          // `cancelled` can arrive without this tab having asked — a second tab, or
+          // the reviewer's own click landing between two polls — so it is terminal
+          // here as well as on the button's own path.
           freeze()
           return
         }
       } catch (caught) {
-        if (cancelled) return
+        if (abandoned) return
         failures += 1
         setPollError(
           caught instanceof ApiError ? caught.message : 'Could not read review status.',
@@ -87,19 +102,51 @@ export function AnalyzingView({
 
     void poll()
     return () => {
-      cancelled = true
+      abandoned = true
       if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [reviewId])
+  }, [reviewId, stopping])
+
+  /**
+   * Stop the review.
+   *
+   * The clock freezes through the SAME latch the complete and error paths use — this
+   * is `freeze()`, not a second copy of the logic — so a cancelled run reports the
+   * time it actually ran for, and reports it the same way a failed one does.
+   *
+   * A 409 means the review finished between the last poll and the click. There is
+   * nothing to stop, and nothing to apologise for either: the screen has already
+   * moved on, so the rejection is swallowed rather than shown as a failure.
+   */
+  async function stop() {
+    setStopping(true)
+    setStopError('')
+    freeze()
+    try {
+      setStatus(await cancelReview(reviewId))
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 409) return
+      // Anything else and the server may still be running the pipeline, so say so
+      // rather than leaving the screen claiming a stop that did not happen.
+      setStopping(false)
+      setStopError(
+        caught instanceof ApiError ? caught.message : 'Could not stop the review.',
+      )
+    }
+  }
 
   const stages = status?.stages ?? []
   const doneCount = stages.filter((stage) => stage.state === 'done').length
   const failed = status?.state === 'error'
+  // `stopping` counts as cancelled straight away: the request may take a moment and
+  // the pipeline only notices at its next stage boundary, but the reviewer's intent
+  // is already known and nothing on this screen should keep implying work is queued.
+  const cancelled = stopping || status?.state === 'cancelled'
   const percent = stages.length > 0 ? Math.round((doneCount / stages.length) * 100) : 0
 
   // The tick only runs while the run does — an interval still firing on a finished
   // screen is a leak, even though the latch above means it could no longer be seen.
-  const settling = failed || gaveUp || status?.state === 'complete'
+  const settling = failed || gaveUp || cancelled || status?.state === 'complete'
   useEffect(() => {
     if (settling) return
     const ticker = window.setInterval(() => setTickMs(Date.now()), 1000)
@@ -116,10 +163,24 @@ export function AnalyzingView({
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-12 lg:py-16">
+      {/*
+        Three headings, because there are three outcomes and conflating two of them
+        would be a lie either way round: a failure is not a stop the reviewer chose,
+        and a stop the reviewer chose is not a failure.
+      */}
       <header>
-        <h2 className="t-display">{failed ? 'Analysis stopped' : 'Analyzing the design'}</h2>
+        <h2 className="t-display">
+          {cancelled
+            ? 'Review cancelled'
+            : failed
+              ? 'Analysis stopped'
+              : 'Analyzing the design'}
+        </h2>
         <p className="t-body mt-3 text-ink-muted">
-          {failed ? (
+          {cancelled ? (
+            'You stopped this review. Nothing was scored and no result was saved — ' +
+            'submit the design again to start a fresh review.'
+          ) : failed ? (
             'The pipeline failed at the stage marked below. Nothing was scored.'
           ) : (
             <>
@@ -131,7 +192,7 @@ export function AnalyzingView({
         <p className="t-caption mt-1.5 font-mono text-ink-faint">{reviewId}</p>
       </header>
 
-      {stages.length > 0 && !failed && (
+      {stages.length > 0 && !failed && !cancelled && (
         <div className="mt-8">
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
             <span className="t-eyebrow text-ink-muted">Progress</span>
@@ -157,7 +218,29 @@ export function AnalyzingView({
         </div>
       )}
 
-      {status === null && !gaveUp && (
+      {/*
+        Under the progress bar, not beside the heading: it is an action on the run in
+        progress, and the reviewer looks here to judge whether it is worth waiting.
+        Absent rather than disabled once the run has settled — there is nothing left
+        to stop, and a dead button invites a click that does nothing.
+      */}
+      {!settling && (
+        <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <button
+            type="button"
+            onClick={stop}
+            className="t-caption border border-hairline px-3.5 py-2 font-medium text-ink-muted transition-colors duration-150 hover:border-sev-high hover:text-sev-high"
+          >
+            Stop this review
+          </button>
+          <p className="t-caption text-ink-faint">
+            Stops before the next step starts. The step already running may still
+            finish and be charged.
+          </p>
+        </div>
+      )}
+
+      {status === null && !gaveUp && !cancelled && (
         <div className="mt-10 space-y-3" aria-live="polite">
           <p className="t-body text-ink-muted">Starting the pipeline…</p>
           {/* Skeleton rows, so the layout does not jump when the first status lands. */}
@@ -178,7 +261,7 @@ export function AnalyzingView({
         here — the elapsed time up to a failure is information, not decoration, and
         losing it would mean the one screen that most needs it does not show it.
       */}
-      {failed && (
+      {(failed || cancelled) && (
         <div className="mt-8 flex items-baseline justify-between gap-x-4">
           <span className="t-eyebrow text-ink-muted">Ran for</span>
           <ElapsedClock seconds={elapsed} />
@@ -208,7 +291,41 @@ export function AnalyzingView({
         </div>
       )}
 
-      {pollError && !failed && (
+      {cancelled && (
+        <div
+          role="status"
+          className="animate-enter mt-8 flex gap-3 border-l-2 border-minfy-navy bg-surface-sunken px-4 py-3.5"
+        >
+          {/* A stop glyph: ring plus square. Two paths rather than one — a single
+              path fills the inner square under nonzero winding and reads as a dot. */}
+          <svg viewBox="0 0 16 16" aria-hidden="true" className="mt-0.5 size-4 shrink-0">
+            <circle cx="8" cy="8" r="6.75" className="fill-none stroke-minfy-navy" strokeWidth="1.4" />
+            <rect x="5.4" y="5.4" width="5.2" height="5.2" className="fill-minfy-navy" />
+          </svg>
+          <div className="min-w-0">
+            <p className="t-heading">Cancelled at your request</p>
+            <p className="t-caption mt-1 text-ink-muted">
+              No further steps were started. This review was not saved and will not
+              appear in your history.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {stopError && (
+        <div
+          role="alert"
+          className="animate-enter mt-8 border-l-2 border-sev-medium bg-surface-sunken px-4 py-3.5"
+        >
+          <p className="t-heading text-sev-medium">Could not stop the review</p>
+          <p className="t-caption mt-1 break-words text-ink-muted">
+            {stopError} The review may still be running — try again, or leave it to
+            finish.
+          </p>
+        </div>
+      )}
+
+      {pollError && !failed && !cancelled && (
         <div
           role="alert"
           className="animate-enter mt-8 border-l-2 border-sev-medium bg-surface-sunken px-4 py-3.5"
@@ -229,13 +346,13 @@ export function AnalyzingView({
         </div>
       )}
 
-      {(failed || gaveUp) && (
+      {(failed || gaveUp || cancelled) && (
         <button
           type="button"
           onClick={onStartOver}
           className="t-caption mt-8 text-ink-muted underline underline-offset-2 transition-colors hover:text-ink"
         >
-          Start over
+          {cancelled ? 'Submit a design again' : 'Start over'}
         </button>
       )}
     </div>
@@ -283,7 +400,9 @@ function StageRow({ stage, index }: { stage: StageProgress; index: number }) {
                 ? 'text-ink'
                 : stage.state === 'error'
                   ? 'font-semibold text-sev-high'
-                  : 'text-ink-faint',
+                  : stage.state === 'cancelled'
+                    ? 'font-semibold text-ink'
+                    : 'text-ink-faint',
           ].join(' ')}
         >
           {label}
@@ -321,6 +440,15 @@ function StageMarker({ state }: { state: StageProgress['state'] }) {
         className={`${base} bg-sev-high text-[11px] font-bold text-white`}
       >
         !
+      </span>
+    )
+  }
+  if (state === 'cancelled') {
+    // A filled square: stopped, not failed and not pending. Muted navy rather than a
+    // severity colour, because nothing went wrong here.
+    return (
+      <span aria-label="Stopped" role="img" className={`${base} border border-minfy-navy`}>
+        <span className="size-2 bg-minfy-navy" />
       </span>
     )
   }

@@ -1,20 +1,39 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { statusFixture } from '../test/fixtures'
 import { AnalyzingView } from './AnalyzingView'
 
-const { getStatus } = vi.hoisted(() => ({ getStatus: vi.fn() }))
+// `FakeApiError` is hoisted with the mocks: `vi.mock`'s factory runs before any
+// module-scope class declaration would have been initialised.
+const { getStatus, cancelReview, FakeApiError } = vi.hoisted(() => ({
+  getStatus: vi.fn(),
+  cancelReview: vi.fn(),
+  FakeApiError: class FakeApiError extends Error {
+    status: number
+    constructor(message: string, status: number) {
+      super(message)
+      this.status = status
+    }
+  },
+}))
 
 /** A fixed submission instant, so elapsed assertions are deterministic. */
 const START = Date.parse('2026-07-29T10:00:00Z')
 
 vi.mock('../api', () => ({
-  ApiError: class ApiError extends Error {},
+  ApiError: FakeApiError,
   getStatus,
+  cancelReview,
 }))
 
 describe('AnalyzingView', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    cancelReview.mockResolvedValue(statusFixture({ state: 'cancelled' }))
+  })
+
   it('renders a row per pipeline stage from the status response', async () => {
     getStatus.mockResolvedValue(statusFixture())
 
@@ -87,6 +106,206 @@ describe('AnalyzingView', () => {
     )
 
     expect(await screen.findByRole('alert')).toHaveTextContent('ModelRefusal: declined')
+  })
+
+  // ------------------------------------------------------------------------- #
+  // Cancellation — a deliberate stop, not a failure
+  // ------------------------------------------------------------------------- #
+
+  describe('cancelling a running review', () => {
+    /** A status whose stages record where a cancel stopped the run. */
+    const cancelledFixture = () =>
+      statusFixture({
+        state: 'cancelled',
+        stages: statusFixture().stages.map((stage) =>
+          stage.name === 'classify'
+            ? { ...stage, state: 'cancelled' as const, detail: 'Stopped by the reviewer' }
+            : stage,
+        ),
+      })
+
+    it('offers a stop button while the review is running', async () => {
+      getStatus.mockResolvedValue(statusFixture())
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+
+      const button = await screen.findByRole('button', { name: /stop this review/i })
+      // Placed with the progress block it acts on, and honest about the cost: the
+      // step already running may still be charged.
+      expect(button).toBeEnabled()
+      expect(screen.getByText(/may still finish and be charged/i)).toBeInTheDocument()
+    })
+
+    it('offers no stop button once the run has settled', async () => {
+      getStatus.mockResolvedValue(
+        statusFixture({ state: 'error', error: 'ProviderStreamError: mid-stream' }),
+      )
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+
+      await screen.findByRole('alert')
+      // Absent rather than disabled: there is nothing left to stop.
+      expect(screen.queryByRole('button', { name: /stop this review/i })).toBeNull()
+    })
+
+    it('asks the server to cancel, and does not merely stop polling', async () => {
+      const user = userEvent.setup()
+      getStatus.mockResolvedValue(statusFixture())
+      cancelReview.mockResolvedValue(cancelledFixture())
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+      await user.click(await screen.findByRole('button', { name: /stop this review/i }))
+
+      // The whole point of the backend half: a frontend that only stopped polling
+      // would leave the pipeline burning calls nobody is waiting for.
+      await waitFor(() => expect(cancelReview).toHaveBeenCalledWith('rev-1'))
+    })
+
+    it('stops polling for status', async () => {
+      const user = userEvent.setup()
+      getStatus.mockResolvedValue(statusFixture())
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+      await user.click(await screen.findByRole('button', { name: /stop this review/i }))
+      await waitFor(() => expect(cancelReview).toHaveBeenCalled())
+
+      const pollsAtCancel = getStatus.mock.calls.length
+      // Longer than POLL_INTERVAL_MS (1500ms) — a shorter wait would pass even with
+      // the poll still armed, which is exactly the bug this test is here to catch.
+      await new Promise((resolve) => setTimeout(resolve, 1800))
+      expect(getStatus.mock.calls.length).toBe(pollsAtCancel)
+    })
+
+    it('shows a cancelled state that is not the error state', async () => {
+      const user = userEvent.setup()
+      getStatus.mockResolvedValue(statusFixture())
+      cancelReview.mockResolvedValue(cancelledFixture())
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+      await user.click(await screen.findByRole('button', { name: /stop this review/i }))
+
+      expect(
+        await screen.findByRole('heading', { name: /review cancelled/i }),
+      ).toBeInTheDocument()
+      // A status, not an alert: nothing went wrong, and an alert role would have a
+      // screen reader announce a deliberate action as an emergency.
+      const notice = screen.getByRole('status')
+      expect(notice).toHaveTextContent(/cancelled at your request/i)
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(screen.queryByText(/pipeline error/i)).toBeNull()
+      // And it says what became of the review, since that is the reviewer's next
+      // question.
+      expect(notice).toHaveTextContent(/no further steps were started/i)
+      expect(notice).toHaveTextContent(/not saved/i)
+    })
+
+    it('renders the cancelled state before the server has answered', async () => {
+      // The request may take a moment and the pipeline only notices at its next
+      // stage boundary. The reviewer's intent is already known.
+      const user = userEvent.setup()
+      getStatus.mockResolvedValue(statusFixture())
+      cancelReview.mockReturnValue(new Promise(() => {}))
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+      await user.click(await screen.findByRole('button', { name: /stop this review/i }))
+
+      expect(
+        await screen.findByRole('heading', { name: /review cancelled/i }),
+      ).toBeInTheDocument()
+    })
+
+    it('hides the progress bar, which would imply work still queued', async () => {
+      const user = userEvent.setup()
+      getStatus.mockResolvedValue(statusFixture())
+      cancelReview.mockResolvedValue(cancelledFixture())
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+      await user.click(await screen.findByRole('button', { name: /stop this review/i }))
+
+      await screen.findByRole('status')
+      expect(screen.queryByRole('progressbar')).toBeNull()
+      // No stage left spinning, either.
+      expect(screen.queryByLabelText('In progress')).toBeNull()
+      expect(screen.getByLabelText('Stopped')).toBeInTheDocument()
+    })
+
+    it('accepts a cancellation that arrived from somewhere else', async () => {
+      // A second tab, or this tab's click landing between two polls.
+      getStatus.mockResolvedValue(cancelledFixture())
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+
+      expect(
+        await screen.findByRole('heading', { name: /review cancelled/i }),
+      ).toBeInTheDocument()
+      expect(cancelReview).not.toHaveBeenCalled()
+    })
+
+    it('never reports a cancelled review as complete', async () => {
+      const user = userEvent.setup()
+      const onComplete = vi.fn()
+      getStatus.mockResolvedValue(statusFixture())
+      cancelReview.mockResolvedValue(cancelledFixture())
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={onComplete} onStartOver={vi.fn()} />,
+      )
+      await user.click(await screen.findByRole('button', { name: /stop this review/i }))
+      await screen.findByRole('status')
+
+      // The results view is only ever reached through this callback, so not calling
+      // it is what stops a cancelled review being displayed as a finished one.
+      expect(onComplete).not.toHaveBeenCalled()
+    })
+
+    it('swallows a 409 — the run had already finished', async () => {
+      const user = userEvent.setup()
+      getStatus.mockResolvedValue(statusFixture())
+      cancelReview.mockRejectedValue(new FakeApiError('Review is already complete.', 409))
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+      await user.click(await screen.findByRole('button', { name: /stop this review/i }))
+      await screen.findByRole('heading', { name: /review cancelled/i })
+
+      // Nothing to stop and nothing to apologise for: no failure is shown.
+      expect(screen.queryByText(/could not stop/i)).toBeNull()
+    })
+
+    it('says so when the cancel request itself fails', async () => {
+      // The pipeline may well still be running, so claiming a stop that did not
+      // happen would be the one genuinely misleading outcome here.
+      const user = userEvent.setup()
+      getStatus.mockResolvedValue(statusFixture())
+      cancelReview.mockRejectedValue(new FakeApiError('Service unavailable.', 503))
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+      await user.click(await screen.findByRole('button', { name: /stop this review/i }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Service unavailable.')
+      expect(screen.queryByRole('heading', { name: /review cancelled/i })).toBeNull()
+      // And the button comes back, so the reviewer can try again.
+      expect(screen.getByRole('button', { name: /stop this review/i })).toBeInTheDocument()
+    })
   })
 
   // ------------------------------------------------------------------------- #
@@ -199,6 +418,53 @@ describe('AnalyzingView', () => {
       // The elapsed time up to a failure is itself information.
       expect(screen.getByTestId('elapsed')).toHaveTextContent('2m 05s elapsed')
       expect(screen.getByTestId('elapsed')).not.toHaveTextContent('0s')
+    })
+
+    it('FREEZES on a cancel, the same as on an error', async () => {
+      // Item (b): the same latch, not a second copy of it. The clock advances during
+      // the cancel request, so 47s can only have come from the freeze.
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      getStatus.mockResolvedValue(statusFixture())
+      cancelReview.mockImplementation(async () => {
+        at(START + 47_000)
+        return statusFixture({ state: 'cancelled' })
+      })
+
+      renderRunning()
+      at(START + 47_000)
+      await user.click(await screen.findByRole('button', { name: /stop this review/i }))
+      await screen.findByRole('status')
+
+      expect(screen.getByTestId('elapsed')).toHaveTextContent('47s elapsed')
+
+      // And it does not keep ticking afterwards.
+      at(START + 300_000)
+      await tick(60_000)
+      expect(screen.getByTestId('elapsed')).toHaveTextContent('47s elapsed')
+      expect(screen.getByTestId('elapsed')).not.toHaveTextContent('0s')
+    })
+
+    it('freezes on cancel through the same latch the error path uses', () => {
+      // Structural, because the instruction was explicitly "reuse it, don't
+      // duplicate it": one `freeze` definition, and the cancel handler calls it.
+      const source = AnalyzingView.toString()
+      expect(source.match(/function freeze\(/g) ?? []).toHaveLength(1)
+    })
+
+    it('shows the run duration on the cancelled screen', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      at(START + 9000)
+      getStatus.mockResolvedValue(statusFixture())
+      cancelReview.mockResolvedValue(statusFixture({ state: 'cancelled' }))
+
+      renderRunning()
+      await user.click(await screen.findByRole('button', { name: /stop this review/i }))
+      await screen.findByRole('status')
+
+      // Same "Ran for" row the failure screen uses — the progress block is hidden on
+      // both, and how long a run got before being stopped is worth knowing either way.
+      expect(screen.getByText('Ran for')).toBeInTheDocument()
+      expect(screen.getByTestId('elapsed')).toHaveTextContent('9s elapsed')
     })
 
     it('is still shown on the failure screen, where the progress block is hidden', async () => {

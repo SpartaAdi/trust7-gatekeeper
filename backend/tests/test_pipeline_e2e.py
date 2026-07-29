@@ -877,7 +877,9 @@ def test_remediate_receives_the_same_list_prioritize_ranked() -> None:
 
     from agent import pipeline
 
-    source = inspect.getsource(pipeline.run)
+    # `_run` rather than `run`: `run` is a thin wrapper that establishes the
+    # cancellation scope, and the stage sequence this test is about lives in `_run`.
+    source = inspect.getsource(pipeline._run)
     ranking_call = source.index("apply_ranking")
     remediate_call = source.index("stages.remediate(")
 

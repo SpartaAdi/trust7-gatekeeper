@@ -247,7 +247,9 @@ STAGES: tuple[str, ...] = (
     "remediate",
 )
 
-StageState = Literal["pending", "running", "done", "error"]
+# `cancelled` marks the stage a deliberate stop interrupted. Distinct from `error`
+# because nothing went wrong, and distinct from `done` because it did not finish.
+StageState = Literal["pending", "running", "done", "error", "cancelled"]
 
 
 class StageProgress(BaseModel):
@@ -260,7 +262,10 @@ class StageProgress(BaseModel):
 
 class ReviewStatus(BaseModel):
     review_id: str
-    state: Literal["queued", "running", "complete", "error"] = "queued"
+    # `cancelled` is terminal like `complete` and `error`, and is NOT a kind of
+    # success: no ReviewResult is stored for a cancelled review, so the result
+    # route has nothing to serve and the history list never shows it.
+    state: Literal["queued", "running", "complete", "error", "cancelled"] = "queued"
     stages: list[StageProgress] = Field(default_factory=list)
     error: str = ""
     updated_at: str = ""

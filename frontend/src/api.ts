@@ -164,6 +164,21 @@ export function getStatus(reviewId: string): Promise<ReviewStatus> {
   return request<ReviewStatus>(`/reviews/${encodeURIComponent(reviewId)}/status`)
 }
 
+/**
+ * Stop a running review.
+ *
+ * The server registers the cancellation and closes the connection to whatever call
+ * is on the wire; it answers with the updated status, so the caller does not have to
+ * poll once more to learn the click landed. A 409 means the review had already
+ * finished — the click and the last poll crossed — which the caller treats as
+ * "nothing to stop" rather than as a failure.
+ */
+export function cancelReview(reviewId: string): Promise<ReviewStatus> {
+  return request<ReviewStatus>(`/reviews/${encodeURIComponent(reviewId)}/cancel`, {
+    method: 'POST',
+  })
+}
+
 export function getReview(reviewId: string): Promise<ReviewResult> {
   return request<ReviewResult>(`/reviews/${encodeURIComponent(reviewId)}`)
 }

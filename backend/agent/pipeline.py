@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 import time
 
+import cancel
+import llm
 import rubric
 import scoring
 import storage
@@ -30,6 +32,11 @@ class _Progress:
         self._status = status
 
     def start(self, stage: str, detail: str = "") -> None:
+        # The cancellation gate, and deliberately here rather than at six call
+        # sites: every stage begins with `start`, so a stage added later is guarded
+        # by construction instead of by whoever remembers. Checked BEFORE the
+        # status write, so a cancelled review never records a stage as running.
+        cancel.check(self._status.review_id)
         self._status.state = "running"
         for entry in self._status.stages:
             if entry.name == stage:
@@ -64,6 +71,23 @@ class _Progress:
                 entry.finished_at = _now()
         storage.put_status(self._status)
 
+    def cancelled(self, stage: str) -> None:
+        """Record a deliberate stop.
+
+        Not `fail`: `error` is reserved for something going wrong, and the screen
+        has to be able to tell the reviewer which of the two happened. The stage
+        that was interrupted is marked `cancelled` rather than left `running`, so
+        the tracker does not show a spinner on a stopped review.
+        """
+        self._status.state = "cancelled"
+        self._status.error = ""
+        for entry in self._status.stages:
+            if entry.name == stage:
+                entry.state = "cancelled"
+                entry.detail = "Stopped by the reviewer"
+                entry.finished_at = _now()
+        storage.put_status(self._status)
+
     def complete(self) -> None:
         self._status.state = "complete"
         storage.put_status(self._status)
@@ -78,7 +102,39 @@ def run(
     context: str = "",
     previous_review_id: str = "",
 ) -> ReviewResult:
-    """Run a full review and persist the result. Raises on failure."""
+    """Run a full review and persist the result. Raises on failure.
+
+    A thin wrapper so the cancellation scope is stated once, at the boundary,
+    rather than indenting the whole pipeline inside a `with`:
+
+    * `llm.cancellation` makes the flag visible to the request on the wire, so a
+      cancel arriving mid-stage can stop that stage and not just the next one.
+    * `cancel.clear` runs however the review ends, so the registry does not grow
+      for the lifetime of the process.
+    """
+    with llm.cancellation(lambda: cancel.is_cancelled(review_id)):
+        try:
+            return _run(
+                review_id=review_id,
+                title=title,
+                document_key=document_key,
+                diagram_key=diagram_key,
+                context=context,
+                previous_review_id=previous_review_id,
+            )
+        finally:
+            cancel.clear(review_id)
+
+
+def _run(
+    *,
+    review_id: str,
+    title: str,
+    document_key: str,
+    diagram_key: str,
+    context: str,
+    previous_review_id: str,
+) -> ReviewResult:
     status = storage.get_status(review_id) or ReviewStatus.initial(review_id)
     progress = _Progress(status)
     usages: list[dict[str, int]] = []
@@ -203,10 +259,23 @@ def run(
                     "Previous review %s not found; skipping delta", previous_review_id
                 )
 
+        # The last gap. Every stage is gated by `progress.start`, but nothing calls
+        # `start` between the final stage finishing and the result being written —
+        # so without this a cancel arriving during remediate would be answered with
+        # a stored, displayable review. A cancelled review is cancelled, not a
+        # truncated success, and this is the line that makes that true.
+        cancel.check(review_id)
         storage.put_review(result)
         progress.complete()
         return result
 
+    except cancel.Cancelled:
+        # Deliberately before the generic handler, and deliberately not `fail`:
+        # nothing went wrong. No result is stored, so `GET /reviews/{id}` has
+        # nothing to serve and the history list never sees this review.
+        log.info("Review %s cancelled during %s", review_id, stage)
+        progress.cancelled(stage)
+        raise
     except Exception as exc:  # noqa: BLE001 — recorded for the UI, then re-raised
         log.exception("Review %s failed during %s", review_id, stage)
         progress.fail(stage, f"{type(exc).__name__}: {exc}")
