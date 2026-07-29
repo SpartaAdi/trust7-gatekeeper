@@ -87,10 +87,12 @@ class _Usage:
 class _Response:
     def __init__(self, content: str, finish_reason: str = "stop",
                  refusal: str | None = None, cached: int = 0,
-                 provider: str | None = "CoreWeave", model: str = "moonshotai/kimi-k2.6") -> None:
+                 provider: str | None = "CoreWeave", model: str = "moonshotai/kimi-k2.6",
+                 response_id: str = "gen-test") -> None:
         self.choices = [_Choice(content, finish_reason, refusal)]
         self.usage = _Usage(cached)
         self.model = model
+        self.id = response_id
         # OpenRouter reports the serving provider here. `None` models the field
         # being absent, which is how a non-OpenRouter-shaped response looks.
         if provider is not None:
@@ -319,12 +321,14 @@ def test_the_configured_ceiling_is_not_below_what_any_stage_requests() -> None:
     """
     import re
 
-    stages_src = (
-        pathlib.Path(__file__).resolve().parent.parent / "agent" / "stages.py"
-    ).read_text()
-    requested = [int(n) for n in re.findall(r"max_tokens=(\d+),", stages_src)]
+    backend = pathlib.Path(__file__).resolve().parent.parent
+    # vision.py is included because it now asks for 64000 too — a guard that only
+    # read stages.py would have let the vision stage cross the ceiling unnoticed.
+    requested: list[int] = []
+    for source in (backend / "agent" / "stages.py", backend / "ingestion" / "vision.py"):
+        requested += [int(n) for n in re.findall(r"max_tokens=(\d+),", source.read_text())]
 
-    assert requested, "no max_tokens call sites found — has stages.py moved?"
+    assert requested, "no max_tokens call sites found — have the stages moved?"
     assert config.OPENROUTER_MAX_COMPLETION_TOKENS >= max(requested), (
         f"ceiling {config.OPENROUTER_MAX_COMPLETION_TOKENS} is below the largest "
         f"stage request {max(requested)}; that stage would be silently clamped"
@@ -341,12 +345,14 @@ def test_no_stage_requests_more_than_the_routing_safe_ceiling() -> None:
     """
     import re
 
-    stages_src = (
-        pathlib.Path(__file__).resolve().parent.parent / "agent" / "stages.py"
-    ).read_text()
-    requested = [int(n) for n in re.findall(r"max_tokens=(\d+),", stages_src)]
+    backend = pathlib.Path(__file__).resolve().parent.parent
+    # vision.py is included because it now asks for 64000 too — a guard that only
+    # read stages.py would have let the vision stage cross the ceiling unnoticed.
+    requested: list[int] = []
+    for source in (backend / "agent" / "stages.py", backend / "ingestion" / "vision.py"):
+        requested += [int(n) for n in re.findall(r"max_tokens=(\d+),", source.read_text())]
 
-    assert requested, "no max_tokens call sites found — has stages.py moved?"
+    assert requested, "no max_tokens call sites found — have the stages moved?"
     over = [n for n in requested if n > config.OPENROUTER_ROUTING_SAFE_COMPLETION_TOKENS]
     assert not over, (
         f"stage(s) requesting {over} exceed the routing-safe "
@@ -669,26 +675,68 @@ def test_the_served_provider_is_recorded(monkeypatch) -> None:
     assert served[0].output_tokens == 340
 
 
-def test_a_provider_outside_the_allow_list_is_flagged(monkeypatch, caplog) -> None:
-    """With fallbacks off this should be impossible, so it is logged at ERROR."""
+def test_a_provider_outside_the_allow_list_hard_fails(monkeypatch, caplog) -> None:
+    """The regression this exists for.
+
+    A run was served by Phala — not in the order, `allow_fallbacks: false` sent — and
+    completed looking exactly like a correctly pinned one, because this only logged.
+    """
     monkeypatch.setattr(config, "OPENROUTER_PROVIDER_ORDER", ["coreweave", "decart"])
     monkeypatch.setattr(config, "OPENROUTER_ALLOW_FALLBACKS", False)
 
-    with caplog.at_level("ERROR"):
-        _respond(monkeypatch, _Response('{"ok": true}', provider="Moonshot AI"))
+    with caplog.at_level("ERROR"), pytest.raises(llm.ProviderNotAllowed) as caught:
+        _respond(monkeypatch, _Response('{"ok": true}', provider="Phala"))
 
-    assert llm.route_log()[0].allowed is False
+    assert "Phala" in str(caught.value)
     assert "VIOLATION" in caplog.text
-    assert "Moonshot AI" in caplog.text
+    # Recorded as well as raised: the tail is what the e2e script prints.
+    assert llm.route_log()[0].allowed is False
 
 
-def test_a_violation_does_not_fail_the_call(monkeypatch) -> None:
-    """The response is already paid for; failing would hide the diagnosis."""
+def test_the_violation_message_carries_the_request_id(monkeypatch) -> None:
+    """The request id is the only handle on OpenRouter's activity log. Diagnosing a
+    bad route after the fact without it is guesswork — which is how the first one
+    went unexplained."""
     monkeypatch.setattr(config, "OPENROUTER_PROVIDER_ORDER", ["coreweave"])
 
-    _respond(monkeypatch, _Response('{"ok": true}', provider="Moonshot AI"))
+    with pytest.raises(llm.ProviderNotAllowed) as caught:
+        _respond(monkeypatch, _Response('{"ok": true}', provider="Phala",
+                                        response_id="gen-abc123"))
 
-    assert llm.route_log()[0].provider == "Moonshot AI"
+    assert "gen-abc123" in str(caught.value)
+
+
+def test_an_unreported_provider_also_hard_fails(monkeypatch) -> None:
+    """A response that does not say who served it cannot be shown to have honoured
+    the lock. "No evidence of a violation" is not "evidence of compliance", and a
+    real run came back with no provider recorded at all."""
+    with pytest.raises(llm.ProviderNotAllowed) as caught:
+        _respond(monkeypatch, _Response('{"ok": true}', provider=None))
+
+    assert "reported no serving provider" in str(caught.value)
+    assert llm.route_log()[0].provider == "unreported"
+
+
+def test_enforcement_can_be_switched_off_without_a_code_change(monkeypatch) -> None:
+    """Escape hatch for the case where a provider stops reporting the field and
+    shipping matters more than proving the route."""
+    monkeypatch.setattr(config, "OPENROUTER_ENFORCE_PROVIDER_LOCK", False)
+    monkeypatch.setattr(config, "OPENROUTER_PROVIDER_ORDER", ["coreweave"])
+
+    _respond(monkeypatch, _Response('{"ok": true}', provider="Phala"))
+
+    assert llm.route_log()[0].allowed is False
+
+
+def test_no_violation_is_raised_when_fallbacks_are_deliberately_allowed(
+    monkeypatch,
+) -> None:
+    """With fallbacks on, another provider serving is the configured behaviour."""
+    monkeypatch.setattr(config, "OPENROUTER_ALLOW_FALLBACKS", True)
+
+    _respond(monkeypatch, _Response('{"ok": true}', provider="Phala"))
+
+    assert llm.route_log()[0].allowed is True
 
 
 def test_display_names_are_matched_against_slugs(monkeypatch) -> None:
@@ -701,12 +749,6 @@ def test_display_names_are_matched_against_slugs(monkeypatch) -> None:
     _respond(monkeypatch, _Response('{"ok": true}', provider="Sail Research"))
 
     assert llm.route_log()[0].allowed is True
-
-
-def test_an_absent_provider_field_is_reported_as_unknown_not_guessed(monkeypatch) -> None:
-    _respond(monkeypatch, _Response('{"ok": true}', provider=None))
-
-    assert llm.route_log()[0].provider == "unreported"
 
 
 def test_a_truncated_call_is_still_attributed_before_it_raises(monkeypatch) -> None:
@@ -748,3 +790,97 @@ def test_every_pipeline_call_site_passes_a_label() -> None:
     # stages.py has one unrelated `label=` (component label), hence >= not ==.
     assert calls == 5, f"expected 5 call sites, found {calls}"
     assert labels >= calls
+
+
+# --------------------------------------------------------------------------- #
+# 9. A stalled call must fail fast, not hang
+#
+# A real run hung for 5,657 seconds — 94 minutes — and returned malformed JSON with
+# no provider recorded. There is no server-side deadline on a chat completion, so
+# without a client-side one a hung upstream is indistinguishable from a slow one.
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def fresh_client(monkeypatch):
+    """`_openrouter_client` is lru_cached so the connection pool is reused. That
+    cache outlives a test, so any test asserting on how the client was constructed
+    has to drop it first — otherwise it inspects one an earlier test built."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-not-real")
+    llm._openrouter_client.cache_clear()
+    yield
+    llm._openrouter_client.cache_clear()
+
+
+def test_the_client_carries_a_wall_clock_deadline(monkeypatch, fresh_client) -> None:
+    monkeypatch.setattr(config, "OPENROUTER_TIMEOUT_SECONDS", 120.0)
+
+    client = llm._openrouter_client()
+
+    assert client.timeout == 120.0
+
+
+def test_the_sdk_does_not_multiply_the_deadline_with_its_own_retries(
+    monkeypatch, fresh_client
+) -> None:
+    """The openai SDK retries twice by default and `_openrouter_create_with_retry`
+    retries once itself. Left at the default, a single stalled call could burn
+    6 x timeout before surfacing — which turns a 120s ceiling back into an hour."""
+    assert llm._openrouter_client().max_retries == 0
+
+
+def test_the_deadline_is_configurable_without_a_code_change(
+    monkeypatch, fresh_client
+) -> None:
+    """Evaluate is the stage most likely to legitimately approach 120s, at 64,000
+    output tokens on high effort. Raising the bound must not need a deploy."""
+    monkeypatch.setattr(config, "OPENROUTER_TIMEOUT_SECONDS", 300.0)
+
+    assert llm._openrouter_client().timeout == 300.0
+
+
+def test_the_anthropic_fallback_path_has_the_same_deadline(monkeypatch) -> None:
+    """A fallback provider that can hang for an hour is not a fallback."""
+    monkeypatch.setattr(config, "OPENROUTER_TIMEOUT_SECONDS", 120.0)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
+
+    client = llm._client()
+
+    assert client.timeout == 120.0
+    assert client.max_retries == 0
+
+
+def test_a_timeout_surfaces_rather_than_being_swallowed(monkeypatch) -> None:
+    """It must reach the caller as a failure. The pipeline writes the stage error to
+    the status file the UI polls, so a fast loud failure is visible; a swallowed one
+    would leave the review sitting at "running" forever."""
+    calls = {"n": 0}
+
+    def stall(request: dict) -> Any:
+        calls["n"] += 1
+        raise openai.APITimeoutError(request=httpx.Request("POST", "http://x"))
+
+    monkeypatch.setattr(llm, "_openrouter_create", stall)
+
+    with pytest.raises(openai.APITimeoutError):
+        llm.complete_json(
+            system=[{"type": "text", "text": "s"}],
+            content=[{"type": "text", "text": "u"}],
+            schema=MINIMAL_SCHEMA,
+            label="vision",
+        )
+
+    # Our own single retry applies — a timeout is transient — and no more.
+    assert calls["n"] == 2, f"expected 1 attempt + 1 retry, got {calls['n']}"
+
+
+def test_the_vision_stage_asks_for_the_capacity_we_verified(monkeypatch) -> None:
+    """16000 had been this stage's value since the first commit and was never a
+    measured number. A run hit it mid-JSON on a synthetic diagram, because
+    OpenRouter draws reasoning tokens from the SAME max_tokens budget."""
+    import re
+
+    source = (
+        pathlib.Path(__file__).resolve().parent.parent / "ingestion" / "vision.py"
+    ).read_text()
+
+    assert re.search(r"max_tokens=64000,", source), "vision stage is not at 64000"

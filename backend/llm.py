@@ -261,7 +261,16 @@ def _openrouter_client() -> Any:
     import openai
 
     return openai.OpenAI(
-        api_key=config.openrouter_api_key(), base_url=config.OPENROUTER_BASE_URL
+        api_key=config.openrouter_api_key(),
+        base_url=config.OPENROUTER_BASE_URL,
+        # A stalled call must fail fast rather than hang. Without this the SDK waits
+        # on its default 600s per attempt, and a hung upstream looks like a slow one.
+        timeout=config.OPENROUTER_TIMEOUT_SECONDS,
+        # The SDK retries twice by default, and `_openrouter_create_with_retry`
+        # already retries once itself. Left at the default, one stalled call could
+        # burn 6 x timeout before surfacing — the multiplication is what turns a
+        # 120s ceiling back into an hour. One retry, ours, deliberately placed.
+        max_retries=0,
     )
 
 
@@ -383,14 +392,23 @@ def _openrouter_request(
 
 
 def _record_route(response: Any, label: str, seconds: float) -> ServedCall:
-    """Log, and record, which provider served a call.
+    """Log, record, and — by default — HARD-FAIL on a provider outside the lock.
 
-    A served provider outside the allow-list is logged at ERROR: with
-    `allow_fallbacks: false` it should be impossible, so seeing one means the
-    routing directive is not being honoured and every assumption about cost and
-    output ceiling built on it is void. It is recorded rather than raised — the
-    response is already paid for and usable, and failing the review would hide the
-    diagnosis behind a pipeline error.
+    This used to log at ERROR and carry on, on the reasoning that a paid response is
+    still a usable response. That reasoning was wrong in practice: a run was served
+    by Phala, which is not in the configured order, the ERROR line went unread, and
+    the review completed looking exactly like a correctly pinned one. A route that
+    ignored the lock invalidates every cost and output-ceiling assumption built on
+    it, so it now raises.
+
+    An UNREPORTED provider raises too. The point of the lock is provability, and a
+    response that does not say who served it cannot be shown to have honoured it —
+    "no evidence of a violation" is not the same as "evidence of compliance". A run
+    has already come back with no provider recorded at all.
+
+    `OPENROUTER_ENFORCE_PROVIDER_LOCK=0` downgrades both back to a log line, for the
+    case where a provider stops reporting the field and shipping matters more than
+    proving the route.
     """
     provider = _served_provider(response)
     allow_list = {_slug(name) for name in config.OPENROUTER_PROVIDER_ORDER}
@@ -419,13 +437,27 @@ def _record_route(response: Any, label: str, seconds: float) -> ServedCall:
         served.label, served.provider, served.model,
         served.finish_reason, served.output_tokens, served.seconds,
     )
-    if not allowed:
-        log.error(
-            "route VIOLATION call=%s served by %r, which is not in the configured "
-            "order %s with allow_fallbacks=false. The routing directive is not "
-            "being honoured; cost and output-ceiling assumptions no longer hold.",
-            served.label, served.provider, config.OPENROUTER_PROVIDER_ORDER,
-        )
+    if allowed:
+        return served
+
+    # The request id is the only handle on OpenRouter's activity log, so it goes in
+    # the message rather than only in a debug line — diagnosing this after the fact
+    # without it is guesswork.
+    request_id = getattr(response, "id", "") or "unreported"
+    detail = (
+        f"reported no serving provider (request {request_id})"
+        if served.provider == "unreported"
+        else f"was served by {served.provider!r} (request {request_id})"
+    )
+    message = (
+        f"Provider lock violated: call {served.label!r} {detail}, which is not in "
+        f"the configured order {config.OPENROUTER_PROVIDER_ORDER} sent with "
+        f"allow_fallbacks={config.OPENROUTER_ALLOW_FALLBACKS}. The routing directive "
+        f"was not honoured, so cost and output-ceiling assumptions no longer hold."
+    )
+    log.error("route VIOLATION %s", message)
+    if config.OPENROUTER_ENFORCE_PROVIDER_LOCK:
+        raise ProviderNotAllowed(message)
     return served
 
 
@@ -495,9 +527,24 @@ def _openrouter_create(request: dict[str, Any]) -> Any:
 
 
 def _openrouter_create_with_retry(request: dict[str, Any]) -> Any:
+    """One retry, ours, on a transient failure. Never more.
+
+    Timeouts and connection errors are retried here as well as HTTP 5xx, because
+    setting the SDK's `max_retries=0` — which was necessary to stop it multiplying
+    the 120s deadline by three — otherwise leaves a single dropped connection fatal.
+    The bound is deliberate and arithmetic: at most two attempts, so at most
+    2 x OPENROUTER_TIMEOUT_SECONDS of wall clock per call, and nothing can turn a
+    120s ceiling back into an hour.
+    """
     import openai
 
     try:
+        return _openrouter_create(request)
+    except (openai.APITimeoutError, openai.APIConnectionError) as exc:
+        log.warning(
+            "OpenRouter call %s after %.0fs; retrying once.",
+            type(exc).__name__, config.OPENROUTER_TIMEOUT_SECONDS,
+        )
         return _openrouter_create(request)
     except openai.APIStatusError as exc:
         if not _is_transient(exc.status_code):
@@ -514,7 +561,13 @@ def _openrouter_create_with_retry(request: dict[str, Any]) -> Any:
 def _client() -> Any:
     import anthropic
 
-    return anthropic.Anthropic(api_key=config.anthropic_api_key())
+    # Same deadline as the OpenRouter path: this one is the fallback provider, and a
+    # fallback that can hang for an hour is not a fallback.
+    return anthropic.Anthropic(
+        api_key=config.anthropic_api_key(),
+        timeout=config.OPENROUTER_TIMEOUT_SECONDS,
+        max_retries=0,
+    )
 
 
 def _text_of(message: Any) -> str:

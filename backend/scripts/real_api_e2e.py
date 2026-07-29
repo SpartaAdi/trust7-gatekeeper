@@ -477,6 +477,10 @@ for i, call in enumerate(CALLS, 1):
 rule("4b. PROVIDER SERVED (from llm.ROUTE_LOG)")
 print(f"configured order:      {config.OPENROUTER_PROVIDER_ORDER}")
 print(f"allow_fallbacks:       {config.OPENROUTER_ALLOW_FALLBACKS}")
+print(f"enforce lock:          {config.OPENROUTER_ENFORCE_PROVIDER_LOCK} "
+      f"(a route outside the order raises ProviderNotAllowed)")
+print(f"per-call deadline:     {config.OPENROUTER_TIMEOUT_SECONDS:.0f}s "
+      f"(at most 2 attempts, so {2 * config.OPENROUTER_TIMEOUT_SECONDS:.0f}s worst case)")
 print(f"total wall clock:      {time.time() - T0:.1f}s")
 served = llm.route_log()
 print(f"\ncalls recorded:        {len(served)}\n")

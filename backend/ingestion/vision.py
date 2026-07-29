@@ -105,7 +105,20 @@ def parse(data: bytes, media_type: str) -> tuple[DesignGraph, dict[str, int]]:
         # Transcription, not judgement — the cheapest effort level that reads a
         # diagram reliably.
         effort="medium",
-        max_tokens=16000,
+        # 64000, raised from the 16000 this stage has carried since the first commit.
+        #
+        # 16000 was not a measured value and it was not enough: a run hit the ceiling
+        # mid-JSON on a *synthetic* diagram, whose graph is a few hundred tokens. The
+        # reason it can fail on so little output is that OpenRouter's reasoning tokens
+        # are drawn from the SAME max_tokens budget — `exclude: True` keeps them out
+        # of the response, not out of the accounting — so a stage that reasons at all
+        # has far less room for its answer than the number suggests.
+        #
+        # 64000 is capacity already verified rather than a guess: all three locked
+        # providers advertise 262,144 max completion tokens (see config.py), so this
+        # excludes no endpoint we route to. It matches evaluate, which is the other
+        # stage where reasoning competes with a structured answer.
+        max_tokens=64000,
         label="vision",
     )
 

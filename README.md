@@ -69,7 +69,7 @@ backend/
   maturity.py     score -> band; mirrors frontend/src/maturity.ts
   ingestion/      document, draw.io, and vision parsing; normalization
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          260 tests
+  tests/          268 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -156,12 +156,36 @@ serving provider off every response (OpenRouter returns it on the body) and logs
 route call=evaluate:aws_waf provider=CoreWeave model=moonshotai/kimi-k2.6 finish=stop out_tokens=8811 21.4s
 ```
 
-A provider outside the order is logged at ERROR — with fallbacks off it should be
-impossible, so it means the directive is not being honoured and every cost and
-output-ceiling assumption built on it is void. It is recorded, not raised: the
-response is already paid for, and failing the review would bury the diagnosis. The
-label identifies which of the six pipeline calls a line belongs to;
+A provider outside the order **raises** `ProviderNotAllowed`, and so does a response
+that reports no provider at all. It used to only log, on the reasoning that a paid
+response is still usable — and that reasoning failed in practice: a run was served by
+Phala, which is not in the order, the ERROR line went unread, and the review
+completed looking exactly like a correctly pinned one. A route that ignored the lock
+invalidates every cost and output-ceiling assumption built on it.
+
+An unreported provider raises for the same reason: the point of the lock is
+provability, and "no evidence of a violation" is not "evidence of compliance".
+`OPENROUTER_ENFORCE_PROVIDER_LOCK=0` downgrades both back to a log line.
+
+The exception message carries the OpenRouter request id, because that is the only
+handle on their activity log — diagnosing a bad route without it is guesswork.
+
+The label identifies which of the six pipeline calls a line belongs to;
 `tests/test_pipeline_e2e.py` asserts every call site passes one.
+
+### Deadlines
+
+Every call carries a 120s client-side deadline (`OPENROUTER_TIMEOUT_SECONDS`). There
+is no server-side deadline on a chat completion, so without one a hung upstream is
+indistinguishable from a slow one — a real run stalled for 5,657 seconds and returned
+malformed JSON.
+
+Two details make the bound real rather than nominal. The SDK's own `max_retries` is
+set to **0**, because it defaults to 2 and this module retries once itself: left
+alone, one stalled call could burn 6 x timeout and turn a 120s ceiling back into an
+hour. And because that removes the SDK's connection-level retry,
+`_openrouter_create_with_retry` now retries timeouts and connection errors as well as
+5xx — one retry, so at most two attempts and at most 2 x the deadline per call.
 
 ## LLM provider
 
@@ -480,7 +504,7 @@ two — nothing else references the shape.
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 260 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 268 tests
 cd frontend && npm test                                                          # 76 tests
 ```
 

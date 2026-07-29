@@ -115,6 +115,29 @@ OPENROUTER_ALLOW_FALLBACKS = os.environ.get(
     "OPENROUTER_ALLOW_FALLBACKS", ""
 ).strip().lower() in ("1", "true", "yes")
 
+# Wall-clock ceiling on a single model call, in seconds.
+#
+# There is no server-side deadline on a chat completion, so without this a stalled
+# upstream is indistinguishable from a slow one and the pipeline waits forever. It
+# has already cost a 94-minute hang that produced malformed JSON and no usable
+# diagnostics — a fast, loud failure would have been strictly better.
+#
+# 120s is the deliberate value. It is comfortably above every stage's observed
+# latency, and the stage most likely to legitimately approach it is evaluate, which
+# asks for 64,000 output tokens at high effort. Raise this rather than removing it
+# if a real design starts tripping it.
+OPENROUTER_TIMEOUT_SECONDS = float(
+    os.environ.get("OPENROUTER_TIMEOUT_SECONDS", "120")
+)
+
+# Hard-fail a call whose response came from a provider outside
+# OPENROUTER_PROVIDER_ORDER. On by default: a route that silently ignored the lock
+# is exactly the failure this configuration exists to prevent, and a warning in a
+# log nobody reads is how it went unnoticed once already.
+OPENROUTER_ENFORCE_PROVIDER_LOCK = os.environ.get(
+    "OPENROUTER_ENFORCE_PROVIDER_LOCK", "1"
+).strip().lower() in ("1", "true", "yes")
+
 # The model string in force for this process, whichever provider is selected.
 MODEL = OPENROUTER_MODEL if LLM_PROVIDER == "openrouter" else ANTHROPIC_MODEL
 
