@@ -45,32 +45,36 @@ describe('AnalyzingView', () => {
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
   })
 
-  it('shows an estimated time remaining alongside the progress bar', async () => {
+  it('promises no completion time, anywhere', async () => {
+    // There used to be an "about N min remaining" estimate beside the clock. It is
+    // gone on purpose: one review has taken anything from 14 seconds to 44 minutes on
+    // the same provider, so any figure claiming to know when this ends is wrong most
+    // of the time. Asserted over the whole screen, not just the old element, so the
+    // wording cannot creep back in somewhere else.
     getStatus.mockResolvedValue(statusFixture())
 
-    render(
+    const { container } = render(
       <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
     )
 
-    const eta = await screen.findByTestId('eta')
-    expect(eta).toHaveTextContent(/about .* remaining/)
-    // It belongs to the progress block, not to some unrelated corner of the page:
-    // the same element states how many stages are done.
-    expect(eta.parentElement).toHaveTextContent('2 of 6 stages')
-    expect(screen.getByRole('progressbar')).toBeInTheDocument()
+    const progress = await screen.findByRole('progressbar')
+    expect(progress).toBeInTheDocument()
+    expect(screen.queryByTestId('eta')).not.toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/remaining|estimat|left\b|about \d/i)
   })
 
-  it('shows no estimate once the run has failed', async () => {
+  it('promises no completion time on the failure screen either', async () => {
     getStatus.mockResolvedValue(
       statusFixture({ state: 'error', error: 'ModelRefusal: declined' }),
     )
 
-    render(
+    const { container } = render(
       <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
     )
 
     await screen.findByRole('alert')
     expect(screen.queryByTestId('eta')).not.toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/remaining|estimat|left\b|about \d/i)
   })
 
   it('surfaces a pipeline error instead of polling silently', async () => {

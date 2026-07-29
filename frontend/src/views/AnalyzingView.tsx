@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 
 import { ApiError, getStatus } from '../api'
 import { elapsedSeconds, formatElapsed } from '../elapsed'
-import { estimateRemainingSeconds, formatRemaining } from '../eta'
 import { STAGE_LABELS, type ReviewStatus, type StageProgress } from '../types'
 
 const POLL_INTERVAL_MS = 1500
@@ -27,8 +26,8 @@ export function AnalyzingView({
   const [pollError, setPollError] = useState('')
   const [gaveUp, setGaveUp] = useState(false)
 
-  // One tick drives both the elapsed clock and the estimate, and `frozenMs` is a latch
-  // over it: once set, the displayed instant can never move again. A latch rather than
+  // One tick drives the elapsed clock, and `frozenMs` is a latch over it: once set, the
+  // displayed instant can never move again. A latch rather than
   // just tearing the interval down, because teardown is an effect and an effect can
   // flush a beat after the state change it reacts to — long enough for one more tick
   // to land past the end of the run.
@@ -107,13 +106,13 @@ export function AnalyzingView({
     return () => window.clearInterval(ticker)
   }, [settling])
 
-  // A CLOCK, not an estimate. Latency for one review has ranged from 14 seconds to 44
-  // minutes on the same provider, so elapsed time is the only duration figure that is
-  // always true. It freezes with `nowMs` above: on a failure this screen stays
-  // mounted, and how long the run got before it broke is itself the finding.
+  // A CLOCK, and deliberately the only duration figure on this screen. There was an
+  // estimate here; it went because latency for one review has ranged from 14 seconds to
+  // 44 minutes on the same provider, so "about 3 min remaining" was wrong most of the
+  // time and read as broken beside a run twenty minutes in. Elapsed time is always
+  // true. It freezes with `nowMs` above: on a failure this screen stays mounted, and
+  // how long the run got before it broke is itself the finding.
   const elapsed = elapsedSeconds(startedAt, nowMs)
-
-  const remainingSeconds = failed ? null : estimateRemainingSeconds(stages, nowMs)
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-12 lg:py-16">
@@ -140,20 +139,6 @@ export function AnalyzingView({
               {doneCount} of {stages.length} stages
               <span aria-hidden="true"> · </span>
               <ElapsedClock seconds={elapsed} />
-              {remainingSeconds !== null && (
-                <>
-                  <span aria-hidden="true"> · </span>
-                  {/*
-                    Polite, not assertive: this text changes every second, and an
-                    assertive region would have a screen reader interrupt itself
-                    continuously. `data-testid` because the wording is an
-                    approximation the tests should not have to spell out.
-                  */}
-                  <span aria-live="polite" data-testid="eta">
-                    {formatRemaining(remainingSeconds)}
-                  </span>
-                </>
-              )}
             </span>
           </div>
           <div
