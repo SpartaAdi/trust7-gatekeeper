@@ -548,6 +548,26 @@ responses and must not crash, plus one interaction test covering the upload path
 The test setup throws on any unmocked `fetch`, so a test that reaches the network
 fails rather than hanging.
 
+## Copy fix-it prompt
+
+A completed review with open findings offers a **Copy fix-it prompt** button beside
+Download Report. It puts one plain-text block on the clipboard — the preamble plus a
+numbered list of remediations — to paste into any image-capable assistant alongside
+the diagram.
+
+Pure display assembly of data already on the page: no request, no new field, nothing
+derived that is not rendered a few hundred pixels above it.
+
+`buildFixItPrompt` calls `selectTopActions`, the same function Top Action Items uses,
+rather than re-filtering. That is the point: the prompt and the on-screen list cannot
+disagree about which findings qualify, how many, or which one wins a pillar. Two
+truncation rules over one dataset is a bug waiting for someone to notice the page
+said ten and the clipboard said eight.
+
+Remediation text is copied verbatim, falling back to the title exactly as the list
+does — nothing is rephrased client-side. The text names no assistant, since whoever
+pastes it may be using any of them.
+
 ## PDF export
 
 The Results page has a **Download Report** button behind

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Finding } from '../types'
-import { selectTopActions } from './ResultsView'
+import { FIX_IT_PREAMBLE, buildFixItPrompt, selectTopActions } from './ResultsView'
 
 function finding(over: Partial<Finding> = {}): Finding {
   return {
@@ -97,5 +97,82 @@ describe('selectTopActions', () => {
   it('returns nothing when there is no open high-severity finding', () => {
     expect(selectTopActions([])).toEqual([])
     expect(selectTopActions([finding({ severity: 'medium' })])).toEqual([])
+  })
+})
+
+describe('buildFixItPrompt', () => {
+  it('is assembled from selectTopActions, not a second filter', () => {
+    // Same input, two consumers. The prompt must list exactly the shortlist —
+    // otherwise the page says ten items and the clipboard says eight.
+    const findings = [
+      finding({ pillar_id: 'p1', check_id: 'a', remediation: 'Encrypt the store.' }),
+      finding({ pillar_id: 'p2', check_id: 'b', remediation: 'Pin the region.', priority: 2 }),
+      finding({ pillar_id: 'p3', check_id: 'skipped', severity: 'medium' }),
+      finding({ pillar_id: 'p4', check_id: 'passed', status: 'pass' }),
+    ]
+
+    const prompt = buildFixItPrompt(findings)
+
+    expect(prompt).toContain('1. Encrypt the store.')
+    expect(prompt).toContain('2. Pin the region.')
+    expect(prompt).not.toContain('skipped')
+    expect(prompt).not.toContain('passed')
+    // Numbering matches the shortlist's ordering and length exactly.
+    expect(prompt.match(/^\d+\. /gm)).toHaveLength(selectTopActions(findings).length)
+  })
+
+  it('copies remediation text verbatim', () => {
+    const exact =
+      'Enable encryption at rest with a customer-managed KMS key, and set a key ' +
+      'rotation policy. Existing snapshots must be re-encrypted, not just new writes.'
+
+    expect(buildFixItPrompt([finding({ remediation: exact })])).toContain(exact)
+  })
+
+  it('falls back to the title exactly as the action list does', () => {
+    // Not a separate rule: TopActionItems renders `remediation || title` too.
+    const prompt = buildFixItPrompt([
+      finding({ remediation: '', title: 'No region constraint documented' }),
+    ])
+
+    expect(prompt).toContain('1. No region constraint documented')
+  })
+
+  it('honours the same ten-item cap', () => {
+    const many = Array.from({ length: 14 }, (_, index) =>
+      finding({ pillar_id: `pillar_${index}`, check_id: `c${index}`, priority: index + 1 }),
+    )
+
+    expect(buildFixItPrompt(many).match(/^\d+\. /gm)).toHaveLength(10)
+  })
+
+  it('honours the same dedupe-by-framework-and-pillar rule', () => {
+    const prompt = buildFixItPrompt([
+      finding({ check_id: 'narrow', affected_components: ['a'], remediation: 'Narrow fix.' }),
+      finding({ check_id: 'wide', affected_components: ['a', 'b'], remediation: 'Wide fix.' }),
+    ])
+
+    expect(prompt).toContain('Wide fix.')
+    expect(prompt).not.toContain('Narrow fix.')
+  })
+
+  it('names no assistant, so it can be pasted into any of them', () => {
+    const prompt = buildFixItPrompt([finding()]).toLowerCase()
+
+    for (const vendor of ['claude', 'chatgpt', 'gpt', 'gemini', 'copilot', 'anthropic', 'openai']) {
+      expect(prompt).not.toContain(vendor)
+    }
+  })
+
+  it('opens by giving the assistant the architecture and the task', () => {
+    const prompt = buildFixItPrompt([finding()])
+
+    expect(prompt.startsWith(FIX_IT_PREAMBLE)).toBe(true)
+    expect(prompt).toContain('revise the diagram')
+  })
+
+  it('is empty when there is nothing to act on', () => {
+    expect(buildFixItPrompt([])).toBe('')
+    expect(buildFixItPrompt([finding({ status: 'pass' })])).toBe('')
   })
 })

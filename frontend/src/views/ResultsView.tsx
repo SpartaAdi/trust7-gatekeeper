@@ -171,6 +171,11 @@ export function ResultsView({
           Re-review a revised design
         </button>
         <DownloadReportButton reviewId={result.review_id} />
+        {/* Shown only when the prompt would carry something. A button that copies a
+            heading and an empty list is worse than no button. */}
+        {selectTopActions(result.findings).length > 0 && (
+          <CopyFixItPromptButton findings={result.findings} />
+        )}
         <button
           type="button"
           onClick={onStartOver}
@@ -256,6 +261,86 @@ function byPriority(a: Finding, b: Finding): number {
   const rank = (finding: Finding) =>
     finding.priority > 0 ? finding.priority : Number.MAX_SAFE_INTEGER
   return rank(a) - rank(b)
+}
+
+/**
+ * The fix-it prompt: the shortlist as one plain-text block to paste into an
+ * image-capable assistant alongside the diagram.
+ *
+ * Assembly of data already on the page — no request, no new field, nothing derived
+ * that is not already rendered a few hundred pixels above.
+ *
+ * It calls `selectTopActions` rather than re-filtering, so the prompt and the Top
+ * Action Items list can never disagree about which findings matter, how many, or
+ * which one wins a pillar. Two truncation rules over the same data would be a bug
+ * waiting for someone to notice the list said ten and the prompt said eight.
+ *
+ * Same verbatim rule as the list: `remediation` is the model's own imperative text
+ * and is copied unmodified, falling back to the title exactly as the list does when
+ * a finding has no remediation. Nothing is rephrased here.
+ *
+ * Deliberately names no assistant. Whoever pastes this may be using any of them, and
+ * a prompt that greets the wrong tool by name reads as a copy-paste artefact.
+ */
+export const FIX_IT_PREAMBLE =
+  'Here is my architecture. A review found the following gaps — please revise ' +
+  'the diagram to address each one:'
+
+export function buildFixItPrompt(findings: readonly Finding[]): string {
+  const actions = selectTopActions(findings)
+  if (actions.length === 0) return ''
+
+  const numbered = actions.map(
+    (finding, index) => `${index + 1}. ${finding.remediation || finding.title}`,
+  )
+  return `${FIX_IT_PREAMBLE}\n\n${numbered.join('\n')}\n`
+}
+
+/**
+ * Copies the fix-it prompt.
+ *
+ * `navigator.clipboard` is absent outside a secure context and can be refused by
+ * permissions, so the failure is surfaced rather than swallowed — a copy button that
+ * silently does nothing is worse than one that says it could not.
+ */
+function CopyFixItPromptButton({ findings }: { findings: Finding[] }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
+
+  async function run() {
+    try {
+      await navigator.clipboard.writeText(buildFixItPrompt(findings))
+      setState('copied')
+      window.setTimeout(() => setState('idle'), 2000)
+    } catch {
+      setState('failed')
+    }
+  }
+
+  return (
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <button
+        type="button"
+        onClick={run}
+        // Fixed width: the label shortens to "Copied" and back, and without this
+        // the whole action row reflows twice on every click.
+        className={`t-body flex w-[13.5rem] items-center justify-center gap-2 border border-minfy-navy px-4 py-2.5 font-semibold transition-colors duration-150 ${
+          state === 'copied'
+            ? 'bg-minfy-navy text-white'
+            : 'text-minfy-navy hover:bg-minfy-navy hover:text-white'
+        }`}
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true" className="size-3.5 fill-current">
+          <path d="M5.5 1.5h7A1.5 1.5 0 0 1 14 3v8h-1.5V3h-7Z M2 5h8.5A1.5 1.5 0 0 1 12 6.5v7A1.5 1.5 0 0 1 10.5 15H3.5A1.5 1.5 0 0 1 2 13.5Z" />
+        </svg>
+        {state === 'copied' ? 'Copied' : 'Copy fix-it prompt'}
+      </button>
+      {/* Polite, not an alert: a copy failure is recoverable and the user is
+          already looking at the button they just pressed. */}
+      <span aria-live="polite" className="t-caption text-sev-high">
+        {state === 'failed' ? 'Could not copy to the clipboard.' : ''}
+      </span>
+    </span>
+  )
 }
 
 function TopActionItems({ findings }: { findings: Finding[] }) {

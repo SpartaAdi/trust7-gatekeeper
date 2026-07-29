@@ -203,6 +203,9 @@ def pairs() -> list[tuple[str, str, str, str, str]]:
     add(s, "text input placeholder, ink-faint on surface", faint, surface, TEXT)
     add(s, "focus ring, indigo on surface", indigo, surface, GRAPHIC)
     add(s, "token gate card, ink on surface over navy", ink, surface, TEXT)
+    add(s, "copy fix-it prompt, navy on surface", navy, surface, TEXT)
+    add(s, "copy fix-it prompt copied, white on navy", white, navy, TEXT)
+    add(s, "copy failure message, sev-high on surface", high, surface, TEXT)
 
     s = "PDF cover"
     add(s, "title 30pt, WHITE on NAVY", p["WHITE"], p["NAVY"], LARGE)

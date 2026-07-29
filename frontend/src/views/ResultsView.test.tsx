@@ -260,6 +260,130 @@ describe('ResultsView', () => {
     )
   })
 
+  describe('Copy fix-it prompt', () => {
+    /** jsdom exposes `navigator.clipboard` as a getter-only property. */
+    function stubClipboard(
+      writeText = vi.fn((_text: string) => Promise.resolve()),
+    ) {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText },
+        configurable: true,
+      })
+      return writeText
+    }
+
+    it('copies the assembled prompt for the open findings', async () => {
+      getReview.mockResolvedValue(resultFixture())
+      const user = userEvent.setup()
+      // After setup(): userEvent installs its own clipboard stub and would
+      // otherwise replace this one, leaving the assertion watching a dead mock.
+      const writeText = stubClipboard()
+
+      render(<ResultsView
+          reviewId="rev-1"
+          onReReview={vi.fn()}
+          onStartOver={vi.fn()}
+          onBackToHistory={vi.fn()}
+        />)
+
+      await user.click(
+        await screen.findByRole('button', { name: /copy fix-it prompt/i }),
+      )
+
+      expect(writeText).toHaveBeenCalledTimes(1)
+      const copied = String(writeText.mock.calls[0]?.[0])
+      expect(copied).toContain('please revise the diagram to address each one')
+      // Verbatim remediation from the fixture's one open high-severity finding.
+      expect(copied).toContain('1. Enable SSE-KMS on the table with a customer-managed key.')
+      // The passing finding must not appear.
+      expect(copied).not.toContain('AI decisions are logged')
+    })
+
+    it('confirms the copy, then goes back to its resting label', async () => {
+      getReview.mockResolvedValue(resultFixture())
+      const user = userEvent.setup()
+      stubClipboard()
+
+      render(<ResultsView
+          reviewId="rev-1"
+          onReReview={vi.fn()}
+          onStartOver={vi.fn()}
+          onBackToHistory={vi.fn()}
+        />)
+
+      await user.click(
+        await screen.findByRole('button', { name: /copy fix-it prompt/i }),
+      )
+
+      expect(await screen.findByRole('button', { name: /copied/i })).toBeInTheDocument()
+    })
+
+    it('says so when the clipboard refuses, instead of doing nothing visible', async () => {
+      getReview.mockResolvedValue(resultFixture())
+      // How it fails outside a secure context, or when permission is denied.
+      const user = userEvent.setup()
+      stubClipboard(vi.fn((_text: string) => Promise.reject(new Error('denied'))))
+
+      render(<ResultsView
+          reviewId="rev-1"
+          onReReview={vi.fn()}
+          onStartOver={vi.fn()}
+          onBackToHistory={vi.fn()}
+        />)
+
+      await user.click(
+        await screen.findByRole('button', { name: /copy fix-it prompt/i }),
+      )
+
+      expect(await screen.findByText(/could not copy to the clipboard/i)).toBeInTheDocument()
+    })
+
+    it('is absent when no finding would appear in the prompt', async () => {
+      getReview.mockResolvedValue(
+        resultFixture({
+          findings: resultFixture().findings.map((f) => ({ ...f, status: 'pass' as const })),
+        }),
+      )
+
+      render(<ResultsView
+          reviewId="rev-1"
+          onReReview={vi.fn()}
+          onStartOver={vi.fn()}
+          onBackToHistory={vi.fn()}
+        />)
+
+      await screen.findByRole('heading', { name: /payments platform/i })
+      expect(
+        screen.queryByRole('button', { name: /copy fix-it prompt/i }),
+      ).not.toBeInTheDocument()
+    })
+
+    it('does not navigate away', async () => {
+      getReview.mockResolvedValue(resultFixture())
+      stubClipboard()
+      const onReReview = vi.fn()
+      const onStartOver = vi.fn()
+      const onBackToHistory = vi.fn()
+      const user = userEvent.setup()
+
+      render(<ResultsView
+          reviewId="rev-1"
+          onReReview={onReReview}
+          onStartOver={onStartOver}
+          onBackToHistory={onBackToHistory}
+        />)
+
+      await user.click(
+        await screen.findByRole('button', { name: /copy fix-it prompt/i }),
+      )
+
+      expect(onReReview).not.toHaveBeenCalled()
+      expect(onStartOver).not.toHaveBeenCalled()
+      expect(onBackToHistory).not.toHaveBeenCalled()
+      expect(screen.getByRole('heading', { name: /payments platform/i })).toBeInTheDocument()
+    })
+  })
+
   describe('Download Report', () => {
     /** jsdom implements neither createObjectURL nor anchor navigation. */
     function stubObjectUrl() {
