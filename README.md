@@ -69,7 +69,7 @@ backend/
   maturity.py     score -> band; mirrors frontend/src/maturity.ts
   ingestion/      document, draw.io, and vision parsing; normalization
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          288 tests
+  tests/          294 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -504,7 +504,7 @@ two — nothing else references the shape.
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 288 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 294 tests
 cd frontend && npm test                                                          # 76 tests
 ```
 

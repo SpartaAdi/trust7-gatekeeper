@@ -10,12 +10,16 @@ from cache instead of paying for it again.
 
 from __future__ import annotations
 
+import json
+import logging
 from typing import Any
 
 import llm
 import rubric
 from agent import untrusted
 from schema import Component, Finding, NormalizedDesign
+
+log = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
 # Stage 1 — classify components
@@ -115,8 +119,9 @@ _CLASSIFY_SCHEMA: dict[str, Any] = {
 }
 
 
-def classify(design: NormalizedDesign) -> tuple[dict[str, Any], dict[str, int]]:
-    """Build a consolidated component inventory from the normalized design."""
+def _classify_once(
+    design: NormalizedDesign, label: str
+) -> tuple[dict[str, Any], dict[str, int]]:
     return llm.complete_json(
         system=[
             {
@@ -129,8 +134,73 @@ def classify(design: NormalizedDesign) -> tuple[dict[str, Any], dict[str, int]]:
         schema=_CLASSIFY_SCHEMA,
         effort="medium",
         max_tokens=16000,
-        label="classify",
+        label=label,
     )
+
+
+def design_has_content(design: NormalizedDesign) -> bool:
+    """Whether there was anything for classify to find in the first place.
+
+    Without this the floor check below would retry a genuinely empty submission, and
+    pay twice to be told nothing is there.
+    """
+    return bool(design.graph.components or design.document_text.strip())
+
+
+def classify(design: NormalizedDesign) -> tuple[dict[str, Any], dict[str, int]]:
+    """Build a consolidated component inventory from the normalized design.
+
+    Retries once, at the same effort, when the response comes back EMPTY against a
+    design that demonstrably is not.
+
+    This is a semantic floor, not a schema one, and it exists because a real run
+    returned `components: []` in 34 output tokens for an image that ingest had
+    already parsed into 8 components — while every other run on the same input
+    returned all 8 in ~3000 tokens. The response was schema-valid, so nothing in
+    `enforce_schema` could have caught it: `{"design_summary": ..., "components":
+    [], "data_flows": [], "observations": [], "absent": []}` satisfies every
+    constraint including `additionalProperties: false`, and says nothing.
+
+    Same effort deliberately, matching how the provider stream error is handled:
+    this is a provider quality dip on one call, not a token-budget problem, so
+    lowering the reasoning would make it likelier rather than less.
+
+    A second empty response does NOT fail the review. Classify's inventory is not
+    load-bearing for the findings — evaluate, prioritize and remediate read the
+    normalized design text, which is exactly why the findings in that run stayed
+    accurate with a zero-component inventory. Discarding an otherwise sound review
+    over a degraded side-channel would be the wrong trade, so it is logged at ERROR
+    and the run continues with what came back.
+    """
+    payload, usage = _classify_once(design, "classify")
+
+    if payload.get("components") or not design_has_content(design):
+        return payload, usage
+
+    log.warning(
+        "classify returned %d components for a design with %d diagram components "
+        "and %d characters of document text; retrying once at the same effort. "
+        "Raw payload: %s",
+        len(payload.get("components", [])),
+        len(design.graph.components),
+        len(design.document_text),
+        # The body itself, because it is recoverable nowhere else: ROUTE_LOG keeps
+        # only metadata and no stage payload is persisted, so the first occurrence
+        # of this could only be described as "0 components" after the fact.
+        json.dumps(payload)[:2000],
+    )
+
+    retried, retry_usage = _classify_once(design, "classify:retry-empty")
+    combined = llm.sum_usage([usage, retry_usage])
+
+    if not retried.get("components"):
+        log.error(
+            "classify returned no components twice for a design with %d diagram "
+            "components. Continuing with an empty inventory: the findings are "
+            "produced from the normalized design text, not from this. Raw payload: %s",
+            len(design.graph.components), json.dumps(retried)[:2000],
+        )
+    return retried, combined
 
 
 def classified_components(payload: dict[str, Any]) -> list[Component]:

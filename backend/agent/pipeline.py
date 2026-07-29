@@ -112,7 +112,18 @@ def run(
         classification, usage = stages.classify(design)
         usages.append(usage)
         components = stages.classified_components(classification)
-        progress.finish("classify", f"{len(components)} components classified")
+        # An empty inventory against a non-empty design is worth saying out loud on
+        # the screen the reviewer is watching. Ingest has already reported what it
+        # found, so "0 components classified" on its own reads as a contradiction the
+        # user has to work out for themselves.
+        detail = f"{len(components)} components classified"
+        if not components and stages.design_has_content(design):
+            detail = (
+                f"0 components classified despite "
+                f"{len(design.graph.components)} in the diagram — the review "
+                f"continues from the design text"
+            )
+        progress.finish("classify", detail)
 
         # ---- evaluate ------------------------------------------------------- #
         stage = "evaluate"

@@ -395,10 +395,17 @@ def _stage_max_tokens(stage: str) -> int:
 
     from agent import stages
 
-    source = inspect.getsource(getattr(stages, stage))
-    found = re.search(r"max_tokens=(\d+)", source)
-    assert found, f"no max_tokens in {stage}()"
-    return int(found.group(1))
+    # A stage whose request was extracted into a helper (classify, so its empty-
+    # response retry can reuse it) holds no max_tokens of its own, so follow the
+    # indirection rather than reporting the stage as unbounded.
+    for name in (stage, f"_{stage}_once"):
+        function = getattr(stages, name, None)
+        if function is None:
+            continue
+        found = re.search(r"max_tokens=(\d+)", inspect.getsource(function))
+        if found:
+            return int(found.group(1))
+    raise AssertionError(f"no max_tokens found for {stage}()")
 
 
 def test_hitting_the_output_limit_raises_rather_than_returning_half_a_json(

@@ -543,3 +543,158 @@ def test_confidence_did_not_move_the_score(journey) -> None:
     recomputed, _ = scoring.score([Finding(**f) for f in body["findings"]])
 
     assert body["overall_score"] == recomputed
+
+
+# --------------------------------------------------------------------------- #
+# classify's empty-response floor
+#
+# A real run returned `components: []` in 34 output tokens for an image ingest had
+# already parsed into 8 components. Schema-valid, so `enforce_schema` could not have
+# caught it — the floor is semantic.
+# --------------------------------------------------------------------------- #
+
+def _empty_classification() -> dict[str, Any]:
+    """Exactly the shape that came back: valid against _CLASSIFY_SCHEMA, and empty."""
+    return {
+        "design_summary": "The design could not be determined.",
+        "components": [],
+        "data_flows": [],
+        "observations": [],
+        "absent": [],
+    }
+
+
+def _design_with(components: int = 8, text: str = "A payments platform.") -> Any:
+    from schema import Component, DesignGraph, NormalizedDesign
+
+    return NormalizedDesign(
+        review_id="3f7a1c92-5b64-4e2a-9d18-0c6b5a2e7f41",
+        title="t",
+        document_text=text,
+        graph=DesignGraph(
+            components=[
+                Component(id=f"c{i}", label=f"Component {i}", kind="compute",
+                          provider="aws", service="ec2")
+                for i in range(components)
+            ]
+        ),
+    )
+
+
+def test_an_empty_classification_is_retried_once_at_the_same_effort(monkeypatch) -> None:
+    from agent import stages
+
+    calls: list[tuple[str, str]] = []
+
+    def once(design, label):
+        calls.append((label, "medium"))
+        if len(calls) == 1:
+            return _empty_classification(), {"output_tokens": 34}
+        full = _empty_classification()
+        full["components"] = [{
+            "id": "api", "label": "API Gateway", "kind": "gateway",
+            "provider": "aws", "service": "api gateway", "attributes": [],
+        }]
+        return full, {"output_tokens": 3000}
+
+    monkeypatch.setattr(stages, "_classify_once", once)
+
+    payload, usage = stages.classify(_design_with())
+
+    assert calls == [("classify", "medium"), ("classify:retry-empty", "medium")]
+    assert len(payload["components"]) == 1
+    # Both calls are paid for, so both are counted.
+    assert usage["output_tokens"] == 3034
+
+
+def test_a_populated_classification_is_not_retried(monkeypatch) -> None:
+    from agent import stages
+
+    calls: list[str] = []
+
+    def once(design, label):
+        calls.append(label)
+        full = _empty_classification()
+        full["components"] = [{
+            "id": "api", "label": "API Gateway", "kind": "gateway",
+            "provider": "aws", "service": "api gateway", "attributes": [],
+        }]
+        return full, {}
+
+    monkeypatch.setattr(stages, "_classify_once", once)
+    stages.classify(_design_with())
+
+    assert calls == ["classify"], "a good response must not cost a second call"
+
+
+def test_a_genuinely_empty_design_is_not_retried(monkeypatch) -> None:
+    """Otherwise an empty submission pays twice to be told nothing is there."""
+    from agent import stages
+
+    calls: list[str] = []
+
+    def once(design, label):
+        calls.append(label)
+        return _empty_classification(), {}
+
+    monkeypatch.setattr(stages, "_classify_once", once)
+    stages.classify(_design_with(components=0, text="   "))
+
+    assert calls == ["classify"]
+
+
+def test_two_empty_classifications_do_not_fail_the_review(monkeypatch, caplog) -> None:
+    """The findings come from the normalized design text, not from this inventory —
+    which is why the real run's findings stayed accurate at zero components."""
+    from agent import stages
+
+    calls: list[str] = []
+
+    def once(design, label):
+        calls.append(label)
+        return _empty_classification(), {}
+
+    monkeypatch.setattr(stages, "_classify_once", once)
+
+    with caplog.at_level("ERROR"):
+        payload, _ = stages.classify(_design_with())
+
+    assert calls == ["classify", "classify:retry-empty"], "retried more than once"
+    assert payload["components"] == []
+    assert "twice" in caplog.text
+
+
+def test_the_empty_payload_is_logged_because_it_is_recoverable_nowhere_else(
+    monkeypatch, caplog
+) -> None:
+    """ROUTE_LOG keeps only metadata and no stage payload is persisted, so the first
+    occurrence of this could only be described after the fact as "0 components"."""
+    from agent import stages
+
+    def once(design, label):
+        if label == "classify":
+            return _empty_classification(), {}
+        full = _empty_classification()
+        full["components"] = [{
+            "id": "a", "label": "a", "kind": "compute",
+            "provider": "aws", "service": "ec2", "attributes": [],
+        }]
+        return full, {}
+
+    monkeypatch.setattr(stages, "_classify_once", once)
+
+    with caplog.at_level("WARNING"):
+        stages.classify(_design_with())
+
+    assert "Raw payload:" in caplog.text
+    assert "The design could not be determined." in caplog.text
+    assert "8 diagram components" in caplog.text
+
+
+def test_the_empty_shape_really_does_satisfy_the_schema() -> None:
+    """If it did not, enforce_schema would have caught the real one and no semantic
+    floor would be needed. This pins why the floor has to exist."""
+    import llm
+    from agent import stages
+
+    llm.enforce_schema(_empty_classification(), stages._CLASSIFY_SCHEMA)
