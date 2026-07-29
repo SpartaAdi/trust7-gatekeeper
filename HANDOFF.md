@@ -231,6 +231,22 @@ stage finishing and the result being written. In-flight calls are aborted by
 not a second path). A cancelled review stores no result → result route 409s, PDF
 route 409s, absent from history. Status is `cancelled`, never `error`.
 
+### 📋 Production-readiness backlog
+
+Deliberately deferred, not forgotten. Each is a known trade recorded at the time
+it was made, not a defect:
+
+* **Independent `SHARE_LINK_SECRET` for share links.** The share token is
+  currently `HMAC(DEMO_ACCESS_TOKEN, review_id)`, so rotating the gate token
+  revokes every outstanding share link at once. A separate secret would let the
+  two rotate independently. Accepted for the demo — reusing the gate token adds
+  no configuration and grants no privilege the gate token does not already
+  grant. See `backend/share.py`.
+* **Remote branch `claude/trust7-gatekeeper-setup-tug467` could not be deleted.**
+  It is an exact ancestor of `main` with zero unique commits, so it holds no
+  work. The session's git proxy returns **HTTP 403 on ref deletion**, and the
+  GitHub MCP server exposes no delete-ref tool. Delete it from the GitHub UI.
+
 ### ❌ Live browser smoke test — **STILL OPEN, and the biggest gap**
 
 Never performed in any session all night. Every screenshot produced tonight came
@@ -316,7 +332,7 @@ module's one httpx transport, which is what `_abort_transport` closes.
 
 ```
 backend    407 passed
-frontend   186 passed (12 files)
+frontend   190 passed (12 files)
 ```
 
 Both figures include the share-link and user-key rounds. Note the container this

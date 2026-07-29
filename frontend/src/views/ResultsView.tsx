@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { ApiError, createShareLink, downloadReport, getReview, shareUrl } from '../api'
+import { ChangeBadge } from '../components/ChangeBadge'
 import { SeverityMark } from '../components/SeverityMark'
 import {
   MATURITY_BOUND_NOTE,
@@ -752,23 +753,6 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: stri
       <dt className="t-caption text-ink-muted">{label}</dt>
       <dd className={`tnum t-caption font-semibold ${tone}`}>{value}</dd>
     </div>
-  )
-}
-
-function ChangeBadge({ change, compact }: { change: number; compact?: boolean }) {
-  const improved = change > 0
-  const worsened = change < 0
-  const tone = improved ? 'text-verdict-pass' : worsened ? 'text-sev-high' : 'text-ink-muted'
-  // Arrow direction carries the meaning as well as the colour.
-  const arrow = improved ? '▲' : worsened ? '▼' : '–'
-  const wording = improved ? 'up' : worsened ? 'down' : 'unchanged'
-
-  return (
-    <span className={`tnum ${compact ? 't-caption' : 't-body'} font-semibold ${tone}`}>
-      <span aria-hidden="true">{arrow} </span>
-      <span className="sr-only">{wording} </span>
-      {change === 0 ? '0.0' : Math.abs(change).toFixed(1)}
-    </span>
   )
 }
 

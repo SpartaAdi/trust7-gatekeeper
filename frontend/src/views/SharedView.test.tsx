@@ -112,11 +112,14 @@ describe('SharedView', () => {
     render(<SharedView reviewId="rev-1" token="tok" />)
     await screen.findByText('Payments platform')
 
-    expect(screen.getByText(/\+9\.5 since the previous review/)).toBeInTheDocument()
+    // Same badge the results view uses. Colour is not the only carrier: the
+    // direction is also stated in text for a screen reader.
+    expect(screen.getByText('up')).toBeInTheDocument()
+    expect(screen.getByText('9.5')).toBeInTheDocument()
     expect(screen.getByText(/2 resolved, 0 new, 1 still open/)).toBeInTheDocument()
   })
 
-  it('says "no change" rather than "+0.0", which reads as a rounding artefact', async () => {
+  it('reads an unchanged score as "unchanged", not as a direction', async () => {
     vi.mocked(getSharedReview).mockResolvedValue(
       sharedFixture({
         delta: {
@@ -135,7 +138,9 @@ describe('SharedView', () => {
     render(<SharedView reviewId="rev-1" token="tok" />)
     await screen.findByText('Payments platform')
 
-    expect(screen.getByText('No change')).toBeInTheDocument()
+    expect(screen.getByText('unchanged')).toBeInTheDocument()
+    expect(screen.queryByText('up')).not.toBeInTheDocument()
+    expect(screen.queryByText('down')).not.toBeInTheDocument()
   })
 
   it('omits the delta section entirely for a first review', async () => {
@@ -145,5 +150,54 @@ describe('SharedView', () => {
     await screen.findByText('Payments platform')
 
     expect(screen.queryByText(/change since the previous review/i)).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * The shared view is the newest screen and the one most likely to drift from
+ * the rest of the app. These pin the idioms it must not reinvent.
+ */
+describe('SharedView — consistency with the rest of the app', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('shows the /100 denominator, so the score is not read out of 5', async () => {
+    vi.mocked(getSharedReview).mockResolvedValue(sharedFixture())
+
+    render(<SharedView reviewId="rev-1" token="tok" />)
+    await screen.findByText('Payments platform')
+
+    expect(screen.getByText('/100')).toBeInTheDocument()
+  })
+
+  it('uses no severity or brand colour on the score itself', async () => {
+    vi.mocked(getSharedReview).mockResolvedValue(sharedFixture())
+
+    render(<SharedView reviewId="rev-1" token="tok" />)
+    const score = await screen.findByText('61.5')
+
+    // Colouring the number would assert a band the label already states, and
+    // would do it with a token that means something else elsewhere.
+    expect(score.className).not.toMatch(/text-sev-|text-minfy-|text-verdict-/)
+  })
+
+  it('renders a loading skeleton, not a bare line of text', async () => {
+    vi.mocked(getSharedReview).mockReturnValue(new Promise(() => {}))
+
+    const { container } = render(<SharedView reviewId="rev-1" token="tok" />)
+
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0)
+    expect(screen.getByText(/loading the shared review/i)).toHaveClass('sr-only')
+  })
+
+  it('uses the same alert shape as the other views', async () => {
+    vi.mocked(getSharedReview).mockRejectedValue(new ApiError('nope', 404))
+
+    render(<SharedView reviewId="rev-1" token="tok" />)
+    const alert = await screen.findByRole('alert')
+
+    expect(alert.className).toContain('border-sev-high')
+    expect(alert.querySelector('svg')).not.toBeNull()
   })
 })

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { ApiError, getSharedReview } from '../api'
+import { ChangeBadge } from '../components/ChangeBadge'
 import { MinfyMark } from '../components/MinfyMark'
 import { maturityFor } from '../maturity'
 import type { SharedReview } from '../types'
@@ -55,18 +56,44 @@ export function SharedView({ reviewId, token }: { reviewId: string; token: strin
       </header>
 
       <main className="mx-auto w-full max-w-3xl grow px-6 py-12">
+        {/* Same alert shape as every other view: left rule, warning glyph,
+            heading, then the detail. An error that looks different from the
+            app's other errors reads as a different kind of problem. */}
         {error && (
           <div
             role="alert"
-            className="border-l-2 border-sev-high bg-surface-sunken px-4 py-3.5"
+            className="flex gap-3 border-l-2 border-sev-high bg-surface-sunken px-4 py-3.5"
           >
-            <p className="t-heading text-sev-high">Link unavailable</p>
-            <p className="t-caption mt-1 max-w-prose text-ink-muted">{error}</p>
+            <svg
+              viewBox="0 0 16 16"
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0 fill-sev-high"
+            >
+              <path d="M8 1.5 L14.5 13.5 L1.5 13.5 Z" />
+            </svg>
+            <div className="min-w-0">
+              <p className="t-heading text-sev-high">Link unavailable</p>
+              <p className="t-caption mt-1 max-w-prose break-words text-ink-muted">
+                {error}
+              </p>
+            </div>
           </div>
         )}
 
+        {/* Skeleton rather than a spinner or a line of text, matching the
+            history and results views — the page is about to be dense, and a
+            shape that resembles it settles the layout before it arrives. */}
         {!error && !review && (
-          <p className="t-body text-ink-muted">Loading the shared review…</p>
+          <div className="space-y-4" aria-live="polite">
+            <span className="sr-only">Loading the shared review…</span>
+            {[0, 1, 2, 3].map((row) => (
+              <div
+                key={row}
+                className="h-3 animate-pulse bg-hairline"
+                style={{ width: `${80 - row * 12}%` }}
+              />
+            ))}
+          </div>
         )}
 
         {review && <SharedScoreboard review={review} />}
@@ -87,9 +114,17 @@ function SharedScoreboard({ review }: { review: SharedReview }) {
       </p>
 
       <div className="mt-8 flex flex-wrap items-baseline gap-x-6 gap-y-2 border-t border-hairline pt-6">
-        <p className="t-display text-minfy-indigo">{review.overall_score.toFixed(1)}</p>
-        <p className="t-heading">{band}</p>
-        {review.delta && <DeltaBadge change={review.delta.change} />}
+        {/* Plain ink and an explicit denominator, exactly as the results view
+            renders it — a bare "61.5" invites being read as 61.5 out of 5, and
+            colouring the number would imply a band the label already states. */}
+        <p className="tnum text-5xl font-semibold leading-none tracking-tight">
+          {review.overall_score.toFixed(1)}
+          <span className="t-title align-baseline font-normal text-ink-muted">
+            /100
+          </span>
+        </p>
+        <p className="t-eyebrow text-ink-muted">Overall · {band}</p>
+        {review.delta && <ChangeBadge change={review.delta.change} />}
       </div>
 
       <dl className="mt-6 flex flex-wrap gap-x-10 gap-y-3">
@@ -156,20 +191,5 @@ function SharedScoreboard({ review }: { review: SharedReview }) {
         {review.expires_note}
       </p>
     </div>
-  )
-}
-
-function DeltaBadge({ change }: { change: number }) {
-  const rounded = Number(change.toFixed(1))
-  if (rounded === 0) {
-    return <span className="t-caption text-ink-muted">No change</span>
-  }
-  return (
-    <span
-      className={`t-caption font-semibold ${rounded > 0 ? 'text-sev-low' : 'text-sev-high'}`}
-    >
-      {rounded > 0 ? '+' : ''}
-      {rounded.toFixed(1)} since the previous review
-    </span>
   )
 }
