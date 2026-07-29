@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -231,6 +231,40 @@ describe('ResultsView', () => {
       }
       return screen.getByTestId('roadmap').textContent
     }
+
+    it('states what the section is for, in the reader\'s terms', async () => {
+      await renderRoadmap()
+
+      expect(screen.getByTestId('roadmap')).toHaveTextContent(
+        /prioritized next actions, ordered by effort\. open findings only\./i,
+      )
+    })
+
+    it('numbers the rows within each phase, restarting at 1', async () => {
+      const user = userEvent.setup()
+      await renderRoadmap()
+      await expandAll(user)
+
+      // Each phase in the fixture holds one action, so each starts its own count
+      // rather than continuing a running total across the three.
+      for (const phase of ['immediate', 'short_term', 'structural']) {
+        const rows = within(screen.getByTestId(`phase-${phase}`)).getAllByRole('listitem')
+        expect(rows[0]!.textContent).toMatch(/^1/)
+      }
+    })
+
+    it('carries the ordinal visually without announcing it twice', async () => {
+      const user = userEvent.setup()
+      await renderRoadmap()
+      await expandAll(user)
+
+      const row = within(screen.getByTestId('phase-immediate')).getAllByRole('listitem')[0]!
+      const ordinal = row.querySelector('[aria-hidden="true"].tnum')
+      // The <ol> already conveys position to a screen reader; the digit is for
+      // the eye, so it must not be read out a second time.
+      expect(ordinal).not.toBeNull()
+      expect(ordinal!.textContent).toBe('1')
+    })
 
     it('sits below the assessment and above the detailed findings', async () => {
       const roadmap = await renderRoadmap()
@@ -689,5 +723,46 @@ describe('ResultsView', () => {
         expect(screen.getByRole('button', { name: /download report/i })).toBeEnabled(),
       )
     })
+  })
+})
+
+/**
+ * The two sections show overlapping data on purpose. What keeps them from
+ * reading as two competing to-do lists is that each says what it is.
+ */
+describe('ResultsView — roadmap vs detailed findings', () => {
+  function mountFull() {
+    getReview.mockResolvedValue(resultFixture())
+    return render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+  }
+
+  it('tells the reader the findings section is the record, not a second action list', async () => {
+    mountFull()
+
+    const findings = await screen.findByTestId('detailed-findings')
+    expect(findings).toHaveTextContent(
+      /complete evaluation record, including passed and not-applicable checks/i,
+    )
+    expect(findings).toHaveTextContent(/remediation is repeated here for reference/i)
+    expect(findings).toHaveTextContent(/action roadmap above is the prioritized list/i)
+  })
+
+  it('gives each section a distinct purpose line', async () => {
+    mountFull()
+
+    await screen.findByTestId('roadmap')
+    const roadmap = screen.getByTestId('roadmap').textContent ?? ''
+    const findings = screen.getByTestId('detailed-findings').textContent ?? ''
+
+    expect(roadmap).toMatch(/prioritized next actions/i)
+    expect(findings).toMatch(/complete evaluation record/i)
+    // Neither borrows the other's framing.
+    expect(roadmap).not.toMatch(/complete evaluation record/i)
+    expect(findings).not.toMatch(/prioritized next actions/i)
   })
 })

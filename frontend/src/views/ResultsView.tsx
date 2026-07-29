@@ -400,6 +400,14 @@ function ActionRoadmap({ findings }: { findings: Finding[] }) {
           · {total} prioritized {total === 1 ? 'action' : 'actions'} in three phases
         </span>
       </h3>
+      {/*
+        Says what the section is for in one line, so it is not mistaken for the
+        audit trail below. "Ordered by effort" names the actual grouping signal —
+        the phases come from `remediation_effort`, not from severity.
+      */}
+      <p className="t-caption mt-1.5 text-ink-faint">
+        Prioritized next actions, ordered by effort. Open findings only.
+      </p>
 
       {PHASE_ORDER.map((phase) => (
         <PhaseGroup key={phase} phase={phase} findings={grouped[phase]} />
@@ -443,11 +451,27 @@ function PhaseGroup({ phase, findings }: { phase: Phase; findings: Finding[] }) 
 
       {open && !empty && (
         <ol className="animate-enter mt-1 divide-y divide-hairline border-y border-hairline">
-          {findings.map((finding) => (
+          {findings.map((finding, index) => (
             <li
               key={`${finding.framework}-${finding.check_id}`}
               className="flex items-start gap-4 py-3"
             >
+              {/*
+                A visible ordinal, restarting at 1 in each phase. The rows were
+                already an <ol>, but with `list-style: none` the sequence existed
+                only in the markup — a reader scanning for "the first thing to do"
+                had nothing to anchor on, and the severity mark alone reads as a
+                bullet. Numbering per phase rather than continuously because the
+                phases are worked in sequence: item 1 of Short-term is the first
+                thing to do in that phase, not the twelfth thing overall.
+                `aria-hidden` because the <ol> already conveys position.
+              */}
+              <span
+                aria-hidden="true"
+                className="tnum t-body mt-px w-5 shrink-0 text-right font-semibold text-minfy-indigo"
+              >
+                {index + 1}
+              </span>
               {/*
                 Not decorative here: unlike the findings list, the phase rows do not
                 state the severity in text, so the mark is the only place it appears
@@ -793,12 +817,16 @@ function FindingsList({ findings }: { findings: Finding[] }) {
       </div>
 
       {/*
-        Says what this section is for. Without it a reader arriving from the
-        roadmap above sees a second list of the same gaps and reasonably reads it
-        as more work to do, rather than as the record of everything evaluated.
+        Says what this section is for, and what it is not. Without it a reader
+        arriving from the roadmap above sees a second list of the same gaps and
+        reasonably reads it as more work to do. The roadmap is the action list;
+        this is the record, and it repeats the remediation text for reference
+        rather than as a second set of instructions.
       */}
-      <p className="t-caption mt-1.5 text-ink-faint">
+      <p className="t-caption mt-1.5 max-w-prose text-ink-faint">
         Complete evaluation record, including passed and not-applicable checks.
+        Remediation is repeated here for reference — the Action roadmap above is
+        the prioritized list to work from.
       </p>
 
       {open.length === 0 ? (
