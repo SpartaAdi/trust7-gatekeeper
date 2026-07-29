@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { Finding } from '../types'
+import type { Finding, ReviewResult } from '../types'
 import { resultFixture } from '../test/fixtures'
 import { ResultsView } from './ResultsView'
 
@@ -1170,5 +1170,126 @@ describe('ResultsView — priority focus callout', () => {
       const title = row.querySelector('.font-medium')!.textContent!
       expect(roadmap.textContent).toContain(title)
     }
+  })
+})
+
+/**
+ * Genuine model output from a live run — the dense-copy round was blocked on
+ * verifying against real findings rather than a synthetic example. Kept verbatim.
+ */
+describe('ResultsView — real findings from a live run', () => {
+  const REMEDIATION_TLS =
+    'Reconfigure the ALB-to-API target group to use HTTPS on port 443 with a TLS ' +
+    'certificate on the EC2 instance... Enable RDS SSL/TLS by setting...'
+  const EVIDENCE_TLS =
+    "Data flow from ALB to API is explicitly listed as 'HTTP (internal)' (not " +
+    'HTTPS)... the design does not establish TLS/SSL for ALB->API, API->DB...'
+
+  it('renders multi-step prose as a paragraph, not mis-split into fragments', async () => {
+    const base = resultFixture().findings[0]!
+    getReview.mockResolvedValue(
+      resultFixture({
+        findings: [
+          { ...base, check_id: 'sec_encryption_transit', pillar_id: 'security',
+            title: 'No TLS on internal data flows', evidence: EVIDENCE_TLS,
+            remediation: REMEDIATION_TLS, remediation_effort: 'low' as const },
+        ],
+      }),
+    )
+    const user = userEvent.setup()
+
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+    await screen.findByTestId('roadmap')
+    await user.click(screen.getByRole('button', { name: /^Immediate/ }))
+
+    const row = within(screen.getByTestId('roadmap')).getAllByRole('listitem')[0]!
+    // One paragraph carrying the whole remediation, not a list of fragments.
+    expect(row.querySelector('ul')).toBeNull()
+    expect(row.querySelector('ol')).toBeNull()
+    expect(row.textContent).toContain(REMEDIATION_TLS)
+  })
+
+  it('does not mangle the arrow and quotes in real evidence', async () => {
+    const base = resultFixture().findings[0]!
+    getReview.mockResolvedValue(
+      resultFixture({
+        findings: [
+          { ...base, check_id: 'sec_encryption_transit', pillar_id: 'security',
+            title: 'No TLS on internal data flows', evidence: EVIDENCE_TLS,
+            remediation: REMEDIATION_TLS },
+        ],
+      }),
+    )
+    const user = userEvent.setup()
+
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+    await screen.findByTestId('detailed-findings')
+    await user.click(screen.getByRole('button', { name: /high severity/i }))
+    await user.click(screen.getByRole('button', { name: /sec_encryption_transit/i }))
+
+    expect(screen.getByTestId('detailed-findings').textContent).toContain('ALB->API')
+  })
+})
+
+describe('ResultsView — use-case notes', () => {
+  const note = {
+    component: 'Claims lookup store',
+    recommendation:
+      'A read replica in front of RDS fits better than scaling the primary.',
+    grounded_in: 'roughly 95% of traffic is agents looking up existing claims',
+  }
+
+  function mountNotes(over: Partial<ReviewResult>) {
+    getReview.mockResolvedValue(resultFixture(over))
+    return render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+  }
+
+  it('is absent when no context was supplied', async () => {
+    mountNotes({ context: '', use_case_notes: [note] })
+
+    await screen.findByTestId('detailed-findings')
+    expect(screen.queryByTestId('use-case-notes')).not.toBeInTheDocument()
+  })
+
+  it('is absent when context was supplied but nothing could be grounded', async () => {
+    mountNotes({ context: 'A read-heavy internal portal.', use_case_notes: [] })
+
+    await screen.findByTestId('detailed-findings')
+    expect(screen.queryByTestId('use-case-notes')).not.toBeInTheDocument()
+  })
+
+  it('renders the trade-off and the quote it rests on', async () => {
+    mountNotes({ context: 'A read-heavy internal portal.', use_case_notes: [note] })
+
+    const section = await screen.findByTestId('use-case-notes')
+    expect(section).toHaveTextContent('Claims lookup store')
+    expect(section).toHaveTextContent(/read replica in front of RDS/i)
+    expect(section).toHaveTextContent(/based on what you wrote/i)
+    expect(section).toHaveTextContent(/95% of traffic/i)
+  })
+
+  it('sits after the detailed findings, being advisory rather than assessed', async () => {
+    mountNotes({ context: 'A read-heavy internal portal.', use_case_notes: [note] })
+
+    const section = await screen.findByTestId('use-case-notes')
+    expect(
+      screen.getByTestId('detailed-findings').compareDocumentPosition(section) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   })
 })

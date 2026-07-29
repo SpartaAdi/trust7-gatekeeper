@@ -97,6 +97,14 @@ export interface ReviewSummary {
   pillars: PillarSummary[]
 }
 
+/** Mirrors `UseCaseNote` in backend/schema.py. */
+export interface UseCaseNote {
+  component: string
+  recommendation: string
+  /** The phrase from the submitted context this rests on, verbatim. */
+  grounded_in: string
+}
+
 export interface ReviewResult {
   review_id: string
   created_at: string
@@ -109,6 +117,9 @@ export interface ReviewResult {
   executive_summary: string
   /** Upload key of the diagram, used by the PDF appendix. '' on older reviews. */
   diagram_key: string
+  /** The submitter's own purpose/use-case text; empty when none was given. */
+  context: string
+  use_case_notes: UseCaseNote[]
   delta: ScoreDelta | null
   token_usage: Record<string, number>
 }

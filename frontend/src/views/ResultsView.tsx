@@ -18,6 +18,7 @@ import type {
   ReviewResult,
   ScoreDelta,
   Severity,
+  UseCaseNote,
 } from '../types'
 import {
   PHASE_BLURB,
@@ -190,6 +191,9 @@ export function ResultsView({
 
       {/* (d) Detailed findings — the audit trail. */}
       <FindingsList findings={result.findings} />
+
+      {/* (e) Use-case notes — only when context was given and could be used. */}
+      <UseCaseNotes notes={result.use_case_notes} context={result.context} />
 
       <footer className="mt-16 flex flex-wrap items-center gap-x-6 gap-y-4 border-t border-hairline pt-8">
         <button
@@ -765,6 +769,56 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: stri
 const FRAMEWORK_BLOCK: Record<string, string> = {
   aws_waf: 'bg-pastel-sky',
   trust7: 'bg-pastel-mint',
+}
+
+/**
+ * Component trade-offs the submitter's stated use case makes relevant.
+ *
+ * Rendered only when context was supplied AND the remediate stage could ground a
+ * recommendation in something that context actually states. Both conditions
+ * matter: no context means there is nothing to be specific about, and a note the
+ * backend could not tie to a quoted phrase was discarded before it ever reached
+ * here, so an empty list is a correct and common outcome rather than a failure
+ * worth apologising for on screen.
+ *
+ * Last on the page on purpose. This is the one section that is advisory rather
+ * than assessed — it weighs choices the design got to make, not gaps it failed
+ * to close — so it sits after the audit trail rather than competing with the
+ * roadmap for the reader's attention.
+ */
+function UseCaseNotes({ notes, context }: { notes: UseCaseNote[]; context: string }) {
+  if (!context || notes.length === 0) return null
+
+  return (
+    <section className="mt-16" data-testid="use-case-notes">
+      <h3 className="t-eyebrow text-ink-muted">For your stated use case</h3>
+      <p className="t-caption mt-1.5 max-w-prose text-ink-faint">
+        Trade-offs that the purpose and use case you submitted make relevant.
+        Each one quotes the part of your context it rests on.
+      </p>
+
+      <ul className="mt-4 space-y-5">
+        {notes.map((note, index) => (
+          <li key={index} className="border-l-2 border-minfy-indigo bg-pastel-sky px-5 py-4">
+            <p className="t-heading">{note.component}</p>
+            <StructuredText
+              text={note.recommendation}
+              className="t-body mt-1.5 max-w-prose text-pretty"
+            />
+            {/*
+              The quote is shown, not just used. It is what separates a
+              recommendation grounded in this submission from a generic
+              comparison, and a reader can only judge that if they can see it.
+            */}
+            <p className="t-caption mt-2.5 border-t border-ink/15 pt-2 text-ink-muted">
+              <span className="font-semibold">Based on what you wrote:</span>{' '}
+              <q className="italic">{note.grounded_in}</q>
+            </p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
 }
 
 /**

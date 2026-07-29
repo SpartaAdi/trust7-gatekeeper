@@ -187,8 +187,16 @@ def test_the_section_heading_frames_it_as_data_not_instruction() -> None:
 # Output schemas are untouched
 # --------------------------------------------------------------------------- #
 
-def test_no_output_schema_changed() -> None:
-    """The input grew; the contracts the model must satisfy did not."""
+def test_only_the_remediate_schema_reads_the_context() -> None:
+    """Three of the four contracts are still untouched by the context feature.
+
+    This test used to assert that NO output schema changed, which was true while
+    the context was input-only. `use_case_notes` is the deliberate exception: the
+    remediate stage now returns component trade-offs grounded in what the
+    submitter stated. The guarantee that still matters — and that this keeps — is
+    that classify, evaluate and prioritize are unaffected, so the findings and
+    the scores cannot move because someone typed a use case.
+    """
     from ingestion import vision
 
     assert set(stages._CLASSIFY_SCHEMA["required"]) == {
@@ -200,15 +208,19 @@ def test_no_output_schema_changed() -> None:
         "title", "evidence", "affected_components",
     }
     assert set(stages._PRIORITIZE_SCHEMA["required"]) == {"summary", "ranking"}
-    assert set(stages._REMEDIATE_SCHEMA["required"]) == {
-        "executive_summary", "remediations",
-    }
     assert "context" not in str(vision._SCHEMA)
 
-    # And no output schema mentions the new field anywhere.
+    # The three scoring-relevant contracts still never mention it.
     for schema in (stages._CLASSIFY_SCHEMA, stages._EVALUATE_SCHEMA,
-                   stages._PRIORITIZE_SCHEMA, stages._REMEDIATE_SCHEMA):
+                   stages._PRIORITIZE_SCHEMA):
         assert "context" not in str(schema)
+
+    # Remediate gained exactly one field, and nothing that feeds scoring.
+    assert set(stages._REMEDIATE_SCHEMA["required"]) == {
+        "executive_summary", "remediations", "use_case_notes",
+    }
+    note = stages._REMEDIATE_SCHEMA["properties"]["use_case_notes"]["items"]
+    assert set(note["properties"]) == {"component", "recommendation", "grounded_in"}
 
 
 def test_the_finding_model_did_not_gain_a_field() -> None:

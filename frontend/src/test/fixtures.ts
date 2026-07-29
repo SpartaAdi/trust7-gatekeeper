@@ -46,6 +46,8 @@ export function resultFixture(overrides: Partial<ReviewResult> = {}): ReviewResu
     components: [],
     diagram_key: 'uploads/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/design.drawio',
     token_usage: { input_tokens: 1000, output_tokens: 500 },
+    context: '',
+    use_case_notes: [],
     delta: null,
     frameworks: [
       {

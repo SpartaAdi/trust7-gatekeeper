@@ -232,8 +232,11 @@ def _run(
 
         stage = "remediate"
         progress.start("remediate", "Generating remediation and summary")
-        remediations, efforts, executive_summary, usage = stages.remediate(
-            findings, classification, scoring.scoreboard(overall, framework_scores, findings)
+        remediations, efforts, executive_summary, use_case_notes, usage = stages.remediate(
+            findings,
+            classification,
+            scoring.scoreboard(overall, framework_scores, findings),
+            context=design.context,
         )
         usages.append(usage)
         for finding in findings:
@@ -254,6 +257,10 @@ def _run(
             components=components,
             summary=ranking_payload.get("summary", ""),
             executive_summary=executive_summary,
+            # From the normalized design, not the raw request: that copy has
+            # already been stripped and capped by the model's own validator, so
+            # what is stored is exactly what the pipeline evaluated.
+            context=design.context,
             diagram_key=diagram_key,
             token_usage=_sum(usages),
         )

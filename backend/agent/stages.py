@@ -17,7 +17,7 @@ from typing import Any
 import llm
 import rubric
 from agent import untrusted
-from schema import Component, Finding, NormalizedDesign
+from schema import Component, Finding, NormalizedDesign, UseCaseNote
 
 log = logging.getLogger(__name__)
 
@@ -702,6 +702,26 @@ remediation.
 change), medium (a component or flow change), high (a structural change to the \
 architecture).
 
+## Use-case notes
+
+If — and ONLY if — a "Submitter-supplied context" block appears below, you may \
+also write `use_case_notes`: component-level trade-offs that the stated use case \
+makes relevant. For example, where the context states a read-heavy access \
+pattern, a note might weigh one storage or caching choice against another and \
+say why, in terms of that pattern.
+
+Every note must carry `grounded_in`: the phrase from the submitted context, \
+copied verbatim, that the recommendation rests on. If you cannot copy such a \
+phrase, do not write the note.
+
+Return an EMPTY `use_case_notes` array when the context states no constraint or \
+access pattern that bears on a component choice, or when no context block \
+appears at all. An empty array is the correct and expected answer — a generic \
+comparison that is not tied to something the submitter actually wrote is worse \
+than saying nothing, and will be discarded. Do not infer constraints the context \
+does not state, and do not restate a finding here; this is for choices the \
+design got to make, not gaps it failed to close.
+
 You also write the `executive_summary`: three or four sentences for someone \
 deciding whether this design is ready to deploy. State the overall score and \
 what it means, name the strongest and weakest pillar, and say how many \
@@ -731,9 +751,26 @@ _REMEDIATE_SCHEMA: dict[str, Any] = {
                 "required": ["check_id", "remediation", "effort"],
                 "additionalProperties": False,
             },
-        }
+        },
+        "use_case_notes": {
+            "type": "array",
+            "description": (
+                "Component trade-offs the stated use case makes relevant. Empty "
+                "unless the submitted context states something to ground them in."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "component": {"type": "string"},
+                    "recommendation": {"type": "string"},
+                    "grounded_in": {"type": "string"},
+                },
+                "required": ["component", "recommendation", "grounded_in"],
+                "additionalProperties": False,
+            },
+        },
     },
-    "required": ["executive_summary", "remediations"],
+    "required": ["executive_summary", "remediations", "use_case_notes"],
     "additionalProperties": False,
 }
 
@@ -777,7 +814,8 @@ def remediate(
     findings: list[Finding],
     classification: dict[str, Any],
     scoreboard: str = "",
-) -> tuple[dict[str, str], dict[str, str], str, dict[str, int]]:
+    context: str = "",
+) -> tuple[dict[str, str], dict[str, str], str, list[UseCaseNote], dict[str, int]]:
     """Generate remediation guidance and the executive summary.
 
     The summary rides along with this stage rather than costing a fifth API
@@ -790,7 +828,7 @@ def remediate(
         return {}, {}, (
             "Every applicable check passed. No high-severity findings block "
             "deployment."
-        ), {}
+        ), [], {}
 
     payload, usage = llm.complete_json(
         system=[
@@ -809,6 +847,15 @@ def remediate(
                     f"{scoreboard}\n\n"
                     f"## Findings needing remediation\n"
                     f"{untrusted.wrap(_render_findings(open_findings))}"
+                    # Fenced like every other submitter-supplied string. This is
+                    # the one input a submitter types directly, so it reaches the
+                    # model inside the same guard the document and diagram do.
+                    + (
+                        f"\n\n## Submitter-supplied context (purpose and use case)\n"
+                        f"{untrusted.wrap(context)}"
+                        if context
+                        else ""
+                    )
                 ),
             }
         ],
@@ -874,7 +921,58 @@ def remediate(
                 len(still_missing), len(wanted), ", ".join(still_missing),
             )
 
-    return text, effort, payload.get("executive_summary", ""), usage
+    return (
+        text,
+        effort,
+        payload.get("executive_summary", ""),
+        _use_case_notes(payload, context),
+        usage,
+    )
+
+
+def _use_case_notes(payload: dict[str, Any], context: str) -> list[UseCaseNote]:
+    """Keep only notes that are demonstrably grounded in the submitted context.
+
+    The prompt asks the model to quote the phrase it is relying on. This checks
+    that the quote is actually there, which is the difference between a
+    recommendation tied to what the submitter wrote and a generic comparison
+    dressed up as one. A note that fails the check is dropped, not repaired:
+    there is no honest way to reconstruct what it should have pointed at.
+
+    No context means no notes at all — the model is told that, and this enforces
+    it rather than trusting it, since a stated constraint is the only thing that
+    makes a trade-off specific rather than boilerplate.
+
+    Matching is case-insensitive on collapsed whitespace, because a model
+    re-typing a quoted phrase reliably changes spacing and capitalisation and
+    just as reliably keeps the words.
+    """
+    if not context:
+        return []
+
+    haystack = " ".join(context.lower().split())
+    notes: list[UseCaseNote] = []
+    for raw in payload.get("use_case_notes", []):
+        quote = " ".join(str(raw.get("grounded_in", "")).lower().split())
+        component = str(raw.get("component", "")).strip()
+        recommendation = str(raw.get("recommendation", "")).strip()
+        if not quote or not component or not recommendation:
+            continue
+        if quote not in haystack:
+            log.info(
+                "Discarding a use-case note: its grounding quote is not in the "
+                "submitted context (component=%r)",
+                component,
+            )
+            continue
+        notes.append(
+            UseCaseNote(
+                component=component,
+                recommendation=recommendation,
+                grounded_in=str(raw.get("grounded_in", "")).strip(),
+            )
+        )
+    return notes
 
 
 def _collect_remediations(

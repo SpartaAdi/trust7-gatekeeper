@@ -212,6 +212,25 @@ class ScoreDelta(BaseModel):
     unchanged_failures: list[str] = Field(default_factory=list)
 
 
+class UseCaseNote(BaseModel):
+    """A component-level trade-off, grounded in what the submitter actually said.
+
+    `grounded_in` is the anti-fabrication lever and the reason this model exists
+    rather than a plain string. The model must quote the phrase from the
+    submitted context that the recommendation rests on; a note that cannot point
+    at one is not supposed to be written at all, and a note whose quote is not
+    in the context is discarded before it is stored.
+    """
+
+    component: str = Field(description="The component or choice being weighed.")
+    recommendation: str = Field(
+        description="The trade-off, in the submitter's terms. Names both options."
+    )
+    grounded_in: str = Field(
+        description="The phrase from the submitted context this rests on, verbatim."
+    )
+
+
 class ReviewResult(BaseModel):
     review_id: str
     created_at: str
@@ -230,8 +249,30 @@ class ReviewResult(BaseModel):
         description="Upload key of the architecture diagram, retained so the PDF "
         "export can embed it in its appendix. Empty for older reviews.",
     )
+    # The submitter's own purpose/use-case text, retained so the results page can
+    # tell whether any was given and show recommendations grounded in it.
+    #
+    # UNTRUSTED, and treated exactly as it is everywhere else. It reaches a prompt
+    # only through `NormalizedDesign.as_prompt_context()`, which fences it inside
+    # `untrusted.wrap()`; storing a copy here adds no new path to the model. The
+    # same validator caps it, so the stored copy cannot exceed what was evaluated.
+    #
+    # Defaults to "" so every review written before this field existed still
+    # loads, and so an upload with no context is byte-identical to before.
+    context: str = ""
+
+    # Written only when the submitter supplied context AND the model could ground
+    # a trade-off in something it actually states. Empty is the normal case and
+    # is not a failure — see `_REMEDIATE_SYSTEM`.
+    use_case_notes: list[UseCaseNote] = Field(default_factory=list)
     delta: ScoreDelta | None = None
     token_usage: dict[str, int] = Field(default_factory=dict)
+
+    @field_validator("context")
+    @classmethod
+    def _cap_context(cls, value: str) -> str:
+        """The same cap `NormalizedDesign` applies, for the same two reasons."""
+        return value.strip()[:MAX_CONTEXT_CHARS]
 
 
 # --------------------------------------------------------------------------- #
