@@ -334,16 +334,35 @@ _deadline_pool = concurrent.futures.ThreadPoolExecutor(
 
 @functools.lru_cache(maxsize=1)
 def _openrouter_client() -> Any:
-    import httpx
+    """The process-wide client, on the server's own credential.
+
+    Cached, so the connection pool is reused. `config.openrouter_api_key()` raises
+    when the server has no key — deliberately, and only on this path: a reviewer
+    supplying their own key goes through `_build_client` instead and must still
+    work on a server that has none of its own.
+    """
+    return _build_client(config.openrouter_api_key())
+
+
+def _build_client(api_key: str) -> Any:
     import openai
 
     global _transport
     # httpx's `timeout` is per socket operation, NOT per call — see the note on
     # `_openrouter_create`. It is still set, because it is the cheap way to catch a
     # genuinely dead connection; the wall-clock bound is enforced separately.
-    _transport = httpx.Client(timeout=httpx.Timeout(config.OPENROUTER_TIMEOUT_SECONDS))
+    #
+    # One transport for every client this module builds, whoever's key they carry:
+    # `_abort_transport` closes exactly this object, so a client with a private
+    # pool would be immune to both the deadline and cancellation.
+    if _transport is None or _transport.is_closed:
+        import httpx
+
+        _transport = httpx.Client(
+            timeout=httpx.Timeout(config.OPENROUTER_TIMEOUT_SECONDS)
+        )
     return openai.OpenAI(
-        api_key=config.openrouter_api_key(),
+        api_key=api_key,
         base_url=config.OPENROUTER_BASE_URL,
         http_client=_transport,
         timeout=config.OPENROUTER_TIMEOUT_SECONDS,
@@ -394,6 +413,59 @@ def _check_cancelled() -> None:
     predicate = _CANCELLED.get()
     if predicate is not None and predicate():
         raise cancel.Cancelled("Review cancelled; not sending a further request.")
+
+
+# --------------------------------------------------------------------------- #
+# Caller-supplied API key
+#
+# A reviewer may spend their own OpenRouter credit instead of the server's. The
+# key is a credential, so the only question that matters is where it can come to
+# rest — and the answer here is nowhere:
+#
+# * It lives in ONE place, this ContextVar, for exactly the duration of one
+#   pipeline run, and `api_key_override` resets it in a `finally`.
+# * It is deliberately NOT an argument to `_openrouter_client`, because that is
+#   `lru_cache`d — caching on the key would retain every reviewer's credential in
+#   the cache for the life of the process.
+# * The per-call client it builds shares the module's one httpx transport, so
+#   `_abort_transport` still cancels a user-key call. A client with a private
+#   pool would be immune to both the deadline and the cancel button;
+#   `test_a_user_key_call_still_shares_the_abortable_transport` pins that.
+#
+# A ContextVar, not a global, for the same reason cancellation is one: two
+# reviews on different threadpool threads must not see each other's key.
+# --------------------------------------------------------------------------- #
+
+_API_KEY: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "llm_api_key_override", default=""
+)
+
+
+@contextlib.contextmanager
+def api_key_override(key: str) -> Iterator[None]:
+    """Bill calls made inside this block to `key` instead of the server's.
+
+    An empty key is a no-op, which is what makes "no key supplied" fall back to
+    the server's own credential with no branch at the call site.
+    """
+    token = _API_KEY.set(key or "")
+    try:
+        yield
+    finally:
+        # Runs however the review ends — success, failure, or cancellation — so a
+        # reviewer's key is never readable by whatever runs on this thread next.
+        _API_KEY.reset(token)
+
+
+def _client_for_call() -> Any:
+    """The cached server-key client, or a per-call one bound to the caller's key.
+
+    Built per call rather than cached, because a cache keyed by credential is a
+    credential store. Construction opens no sockets — the transport is shared —
+    so the cost is an object, once per model call.
+    """
+    key = _API_KEY.get()
+    return _build_client(key) if key else _openrouter_client()
 
 
 def abort_in_flight() -> None:
@@ -761,7 +833,7 @@ def _openrouter_create(request: dict[str, Any]) -> Any:
     otherwise keep reading, and keep costing, for as long as the provider talked.
     """
     _check_cancelled()
-    client = _openrouter_client()
+    client = _client_for_call()
     started = time.monotonic()
     future = _deadline_pool.submit(lambda: client.chat.completions.create(**request))
     try:

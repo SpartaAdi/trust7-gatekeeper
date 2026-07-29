@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { submitReview, uploadFile } from '../api'
+import { clearApiKey, getApiKey } from '../apiKey'
 import { UploadView } from './UploadView'
 
 vi.mock('../api', () => ({
@@ -141,6 +142,15 @@ describe('UploadView', () => {
 
     const intro = screen.getByText(/read using AI vision/i)
     expect(intro).toBeInTheDocument()
+
+    // The bring-your-own-key control is the one deliberate exception and is
+    // excluded rather than the rule being dropped: a reviewer pasting a
+    // credential has to be told which provider it belongs to, or they will paste
+    // an Anthropic key into a field the pipeline sends to OpenRouter. Everywhere
+    // else on this view stays vendor-neutral, which is what this test protects.
+    const keyField = screen.getByTestId('api-key-field')
+    keyField.remove()
+
     expect(document.body.textContent).not.toMatch(/claude|anthropic|openrouter|kimi/i)
   })
 
@@ -509,5 +519,93 @@ describe('context field', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /dictate context/i })).toBeInTheDocument(),
     )
+  })
+})
+
+describe('UploadView — the reviewer’s own OpenRouter key', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    clearApiKey()
+  })
+
+  /**
+   * The counterpart to the vendor-neutrality test above. Softening this label to
+   * a generic "API key" would let a reviewer paste an Anthropic key, which the
+   * live pipeline never reads — the request would go to OpenRouter and 401 with
+   * nothing on screen explaining why.
+   */
+  it('names the provider, because the wrong vendor’s key silently fails', async () => {
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    const toggle = screen.getByRole('button', { name: /use my own openrouter key/i })
+    await user.click(toggle)
+
+    expect(screen.getByTestId('api-key-field').textContent).toMatch(/openrouter/i)
+    expect(screen.getByLabelText(/openrouter api key/i)).toHaveAttribute(
+      'placeholder',
+      expect.stringContaining('sk-or-'),
+    )
+  })
+
+  it('is collapsed by default, so a credential field is not the default path', () => {
+    render(<UploadView onStarted={vi.fn()} />)
+
+    expect(
+      screen.getByRole('button', { name: /use my own openrouter key/i }),
+    ).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByLabelText(/openrouter api key/i)).not.toBeInTheDocument()
+  })
+
+  it('stores what is typed, so the next submission bills to it', async () => {
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: /use my own openrouter key/i }))
+    await user.type(screen.getByLabelText(/openrouter api key/i), 'sk-or-v1-typed-key')
+
+    expect(getApiKey()).toBe('sk-or-v1-typed-key')
+  })
+
+  it('masks the key as a password field rather than showing it on screen', async () => {
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: /use my own openrouter key/i }))
+    const field = screen.getByLabelText(/openrouter api key/i)
+
+    expect(field).toHaveAttribute('type', 'password')
+    expect(field).toHaveAttribute('autoComplete', 'off')
+  })
+
+  it('says plainly that a refresh clears it, because it does', async () => {
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: /use my own openrouter key/i }))
+
+    expect(screen.getByText(/never saved to the server or to your browser/i)).toBeInTheDocument()
+    expect(screen.getByText(/a refresh clears it/i)).toBeInTheDocument()
+  })
+
+  it('clears on request, and shows only a masked hint when collapsed', async () => {
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: /use my own openrouter key/i }))
+    await user.type(
+      screen.getByLabelText(/openrouter api key/i),
+      'sk-or-v1-abcdefghijklmnop',
+    )
+    await user.click(screen.getByRole('button', { name: /hide/i }))
+
+    // Collapsed: a recognisable fragment, never the whole credential.
+    expect(screen.getByText(/sk-or-…mnop/)).toBeInTheDocument()
+    expect(screen.queryByText(/abcdefghijkl/)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /use my own openrouter key/i }))
+    await user.click(screen.getByRole('button', { name: /clear now/i }))
+
+    expect(getApiKey()).toBe('')
   })
 })

@@ -5,6 +5,7 @@
  * result on error, so views can't silently render nothing.
  */
 
+import { getApiKey } from './apiKey'
 import { clearToken, getToken } from './token'
 import type {
   ReviewAccepted,
@@ -147,6 +148,16 @@ export interface SubmitOptions {
   previousReviewId?: string
 }
 
+/**
+ * Header carrying the reviewer's own OpenRouter key. Mirrors
+ * `routes.OPENROUTER_KEY_HEADER`.
+ *
+ * A header and not a body field, matching the server: FastAPI's 422 handler
+ * echoes a rejected body back, so a key sent in the body would come back in a
+ * response the moment any neighbouring field was malformed.
+ */
+export const OPENROUTER_KEY_HEADER = 'X-OpenRouter-Key'
+
 export async function submitReview(options: SubmitOptions): Promise<ReviewAccepted> {
   const body = JSON.stringify({
     document_key: options.documentKey ?? '',
@@ -157,7 +168,15 @@ export async function submitReview(options: SubmitOptions): Promise<ReviewAccept
   const path = options.previousReviewId
     ? `/reviews/${encodeURIComponent(options.previousReviewId)}/reanalyze`
     : '/reviews'
-  return request<ReviewAccepted>(path, { method: 'POST', body })
+  // Only this call sends it. The key buys model calls, and submitting a review
+  // is the only thing that makes any — attaching it to polling or downloads
+  // would put the credential on the wire repeatedly for no reason.
+  const apiKey = getApiKey()
+  return request<ReviewAccepted>(path, {
+    method: 'POST',
+    body,
+    headers: apiKey ? { [OPENROUTER_KEY_HEADER]: apiKey } : {},
+  })
 }
 
 export function getStatus(reviewId: string): Promise<ReviewStatus> {

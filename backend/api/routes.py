@@ -6,7 +6,15 @@ import logging
 import pathlib
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    File,
+    Header,
+    HTTPException,
+    Response,
+    UploadFile,
+)
 from pydantic import BaseModel, Field
 
 import cancel
@@ -86,11 +94,23 @@ class ReviewAccepted(BaseModel):
     result_url: str
 
 
+# A reviewer's own OpenRouter key, spent instead of the server's for their reviews.
+#
+# A HEADER and not a body field, deliberately. FastAPI answers a malformed body
+# with a 422 that echoes the offending input back to the client, so one bad
+# neighbouring field would put the key in a response — the exact thing it must
+# never appear in. Headers are not echoed by that handler.
+OPENROUTER_KEY_HEADER = "X-OpenRouter-Key"
+
+
 @router.post(
     "/reviews/{review_id}/reanalyze", response_model=ReviewAccepted, status_code=202
 )
 def reanalyze(
-    review_id: str, request: ReviewRequest, background: BackgroundTasks
+    review_id: str,
+    request: ReviewRequest,
+    background: BackgroundTasks,
+    x_openrouter_key: str = Header(default=""),
 ) -> ReviewAccepted:
     """Re-review a revised design against an earlier review.
 
@@ -99,20 +119,24 @@ def reanalyze(
     body is ignored.
     """
     return _start_review(
-        request.model_copy(update={"previous_review_id": review_id}), background
+        request.model_copy(update={"previous_review_id": review_id}),
+        background,
+        x_openrouter_key,
     )
 
 
 @router.post("/reviews", response_model=ReviewAccepted, status_code=202)
 def create_review(
-    request: ReviewRequest, background: BackgroundTasks
+    request: ReviewRequest,
+    background: BackgroundTasks,
+    x_openrouter_key: str = Header(default=""),
 ) -> ReviewAccepted:
     """Accept a design for review and start the pipeline in the background."""
-    return _start_review(request, background)
+    return _start_review(request, background, x_openrouter_key)
 
 
 def _start_review(
-    request: ReviewRequest, background: BackgroundTasks
+    request: ReviewRequest, background: BackgroundTasks, api_key: str = ""
 ) -> ReviewAccepted:
     if not request.document_key and not request.diagram_key:
         raise HTTPException(
@@ -141,6 +165,11 @@ def _start_review(
         diagram_key=request.diagram_key,
         context=request.context,
         previous_review_id=request.previous_review_id,
+        # Held only for the life of this background task, and only in the
+        # ContextVar `pipeline.run` sets from it. Never reaches storage: the
+        # status and result records below are written from the pipeline's own
+        # models, neither of which has a field for it.
+        api_key=api_key.strip(),
     )
 
     return ReviewAccepted(

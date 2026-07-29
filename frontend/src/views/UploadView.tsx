@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 
 import { ApiError, submitReview, uploadFile } from '../api'
+import { getApiKey, maskApiKey, setApiKey } from '../apiKey'
 import { DropZone, type StagedFile } from '../components/DropZone'
 import { classify, isSupported, type FileKind } from '../fileKind'
 import { useDictation } from '../useDictation'
@@ -210,6 +211,8 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
           />
         )}
 
+        <ApiKeyField disabled={busy !== ''} />
+
         {error && (
           <div
             role="alert"
@@ -274,6 +277,80 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
  * Dictated text is appended rather than replacing the field, so someone can type,
  * dictate, and type again without losing what came before.
  */
+/**
+ * Optional: spend your own OpenRouter credit instead of the server's.
+ *
+ * Collapsed by default. It is a power-user escape hatch, not part of the normal
+ * path — the server's key is what the demo runs on, and putting a credential
+ * field in front of every reviewer invites them to think one is required.
+ *
+ * `type="password"` and `autoComplete="off"`: the browser must not offer to save
+ * this, and it must not be readable over a shoulder or in a screen share, which
+ * is a realistic way to leak it during a demo.
+ */
+function ApiKeyField({ disabled }: { disabled: boolean }) {
+  const [open, setOpen] = useState(false)
+  const [value, setValue] = useState(getApiKey())
+
+  const update = (next: string) => {
+    setValue(next)
+    setApiKey(next)
+  }
+
+  return (
+    <div className="border-t border-hairline pt-6" data-testid="api-key-field">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="t-caption flex items-center gap-1.5 text-ink-muted underline underline-offset-2 transition-colors hover:text-ink"
+      >
+        {open ? 'Hide' : 'Use my own OpenRouter key'}
+        {!open && value !== '' && (
+          <span className="font-mono text-ink-faint">({maskApiKey(value)})</span>
+        )}
+      </button>
+
+      {open && (
+        <div className="animate-enter mt-3">
+          <label htmlFor="openrouter-key" className="t-heading block">
+            OpenRouter API key{' '}
+            <span className="t-caption font-normal text-ink-muted">(optional)</span>
+          </label>
+          <p className="t-caption mt-1 max-w-prose text-ink-muted">
+            This review's model calls are billed to your key instead of the
+            server's. Leave it empty to use the server's.
+          </p>
+          <input
+            id="openrouter-key"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={value}
+            onChange={(event) => update(event.target.value)}
+            disabled={disabled}
+            placeholder="sk-or-v1-…"
+            className="t-body mt-2 w-full border border-hairline bg-surface px-3 py-2 font-mono transition-colors duration-150 placeholder:text-ink-faint hover:border-ink-faint focus:border-minfy-indigo disabled:opacity-60"
+          />
+          <p className="t-caption mt-1.5 text-ink-faint">
+            Held in this tab's memory only — never saved to the server or to your
+            browser's storage, so a refresh clears it.{' '}
+            {value !== '' && (
+              <button
+                type="button"
+                onClick={() => update('')}
+                className="underline underline-offset-2 transition-colors hover:text-ink"
+              >
+                Clear now
+              </button>
+            )}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ContextField({
   value,
   onChange,

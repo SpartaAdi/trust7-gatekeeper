@@ -101,6 +101,7 @@ def run(
     diagram_key: str = "",
     context: str = "",
     previous_review_id: str = "",
+    api_key: str = "",
 ) -> ReviewResult:
     """Run a full review and persist the result. Raises on failure.
 
@@ -109,10 +110,17 @@ def run(
 
     * `llm.cancellation` makes the flag visible to the request on the wire, so a
       cancel arriving mid-stage can stop that stage and not just the next one.
+    * `llm.api_key_override` bills this review's six calls to the reviewer's own
+      key when they supplied one, and resets on the way out. Empty means the
+      server's key, which is the unchanged default. `api_key` stops here and is
+      never passed to `_run` — nothing below this line needs it, and the less of
+      the pipeline that can see a credential the better.
     * `cancel.clear` runs however the review ends, so the registry does not grow
       for the lifetime of the process.
     """
-    with llm.cancellation(lambda: cancel.is_cancelled(review_id)):
+    with llm.cancellation(lambda: cancel.is_cancelled(review_id)), llm.api_key_override(
+        api_key
+    ):
         try:
             return _run(
                 review_id=review_id,
