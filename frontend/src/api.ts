@@ -141,6 +141,8 @@ export interface SubmitOptions {
   documentKey?: string
   diagramKey?: string
   title?: string
+  /** Optional free text, offered only for a diagram-only submission. */
+  context?: string
   /** Set to compare against an earlier review; routes to /reanalyze. */
   previousReviewId?: string
 }
@@ -150,6 +152,7 @@ export async function submitReview(options: SubmitOptions): Promise<ReviewAccept
     document_key: options.documentKey ?? '',
     diagram_key: options.diagramKey ?? '',
     title: options.title ?? '',
+    context: options.context ?? '',
   })
   const path = options.previousReviewId
     ? `/reviews/${encodeURIComponent(options.previousReviewId)}/reanalyze`

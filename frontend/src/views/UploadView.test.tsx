@@ -260,3 +260,228 @@ describe('UploadView', () => {
     expect(screen.getByText('rev-1')).toBeInTheDocument()
   })
 })
+
+// --------------------------------------------------------------------------- #
+// Optional context field — diagram-only, with dictation
+// --------------------------------------------------------------------------- #
+
+describe('context field', () => {
+  // A sibling of the describe above, so it does not inherit that block's
+  // beforeEach — without this, `submitReview.mock.calls[0]` reads the previous
+  // test's call and an assertion about THIS test passes or fails on stale data.
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  /** Install or remove a Web Speech API stub before the view mounts. */
+  function setSpeechSupport(supported: boolean) {
+    const scope = window as unknown as Record<string, unknown>
+    if (!supported) {
+      delete scope['SpeechRecognition']
+      delete scope['webkitSpeechRecognition']
+      return null
+    }
+    const instances: Record<string, unknown>[] = []
+    class FakeRecognition {
+      continuous = false
+      interimResults = true
+      lang = ''
+      onresult: ((event: unknown) => void) | null = null
+      onerror: (() => void) | null = null
+      onend: (() => void) | null = null
+      started = false
+      stopped = false
+      constructor() {
+        instances.push(this as unknown as Record<string, unknown>)
+      }
+      start() {
+        this.started = true
+      }
+      stop() {
+        this.stopped = true
+        this.onend?.()
+      }
+    }
+    scope['SpeechRecognition'] = FakeRecognition
+    return instances
+  }
+
+  async function stageDiagramOnly(user: ReturnType<typeof userEvent.setup>) {
+    await user.upload(fileInput(), diagram())
+  }
+
+  it('is offered when the upload is diagram-only', async () => {
+    setSpeechSupport(false)
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await stageDiagramOnly(user)
+
+    expect(
+      screen.getByLabelText(/add more context — purpose and use case/i),
+    ).toBeInTheDocument()
+  })
+
+  it('is NOT offered when a solution document is also attached', async () => {
+    setSpeechSupport(false)
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await user.upload(fileInput(), [diagram(), sow()])
+
+    // The SoW already carries purpose and use case.
+    expect(
+      screen.queryByLabelText(/add more context/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it('sends the typed context with a diagram-only submission', async () => {
+    setSpeechSupport(false)
+    vi.mocked(uploadFile).mockResolvedValue('uploads/x/design.drawio')
+    vi.mocked(submitReview).mockResolvedValue({
+      review_id: 'rev-9', status_url: '', result_url: '',
+    })
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await stageDiagramOnly(user)
+    await user.type(
+      screen.getByLabelText(/add more context/i),
+      'Internal claims portal used by 40 staff.',
+    )
+    await user.click(screen.getByRole('button', { name: /start review/i }))
+
+    await waitFor(() => expect(submitReview).toHaveBeenCalled())
+    expect(vi.mocked(submitReview).mock.calls[0]?.[0]).toMatchObject({
+      context: 'Internal claims portal used by 40 staff.',
+    })
+  })
+
+  it('sends an empty context when a document is attached', async () => {
+    setSpeechSupport(false)
+    vi.mocked(uploadFile).mockResolvedValue('uploads/x/f')
+    vi.mocked(submitReview).mockResolvedValue({
+      review_id: 'rev-9', status_url: '', result_url: '',
+    })
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await user.upload(fileInput(), sow())
+    await user.click(screen.getByRole('button', { name: /start review/i }))
+
+    await waitFor(() => expect(submitReview).toHaveBeenCalled())
+    // The existing path is unchanged: '' exactly as before the field existed.
+    expect(vi.mocked(submitReview).mock.calls[0]?.[0]).toMatchObject({ context: '' })
+  })
+
+  it('caps what can be typed at the backend limit', async () => {
+    setSpeechSupport(false)
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await stageDiagramOnly(user)
+    const field = screen.getByLabelText(/add more context/i) as HTMLTextAreaElement
+
+    // maxLength is the browser's stop; the slice is ours, for a paste.
+    expect(field.maxLength).toBe(1000)
+  })
+
+  it('shows the mic when the browser supports speech recognition', async () => {
+    setSpeechSupport(true)
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await stageDiagramOnly(user)
+
+    expect(screen.getByRole('button', { name: /dictate context/i })).toBeInTheDocument()
+  })
+
+  it('hides the mic entirely when the browser does not support it', async () => {
+    // Firefox and older Safari have no implementation. A button that cannot listen
+    // teaches the user nothing when it fails.
+    setSpeechSupport(false)
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await stageDiagramOnly(user)
+
+    expect(screen.queryByRole('button', { name: /dictate/i })).not.toBeInTheDocument()
+    // The field itself is still offered.
+    expect(screen.getByLabelText(/add more context/i)).toBeInTheDocument()
+  })
+
+  it('appends dictated text rather than replacing what was typed', async () => {
+    const instances = setSpeechSupport(true)!
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await stageDiagramOnly(user)
+    const field = screen.getByLabelText(/add more context/i)
+    await user.type(field, 'Claims portal.')
+    await user.click(screen.getByRole('button', { name: /dictate context/i }))
+
+    const recogniser = instances[0]!
+    ;(recogniser['onresult'] as (event: unknown) => void)({
+      resultIndex: 0,
+      results: Object.assign([{ 0: { transcript: 'Used by 40 staff.' }, isFinal: true }], {
+        length: 1,
+      }),
+    })
+
+    await waitFor(() =>
+      expect(field).toHaveValue('Claims portal. Used by 40 staff.'),
+    )
+  })
+
+  it('drops interim results, which rewrite themselves mid-utterance', async () => {
+    const instances = setSpeechSupport(true)!
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await stageDiagramOnly(user)
+    await user.click(screen.getByRole('button', { name: /dictate context/i }))
+
+    const recogniser = instances[0]!
+    ;(recogniser['onresult'] as (event: unknown) => void)({
+      resultIndex: 0,
+      results: Object.assign([{ 0: { transcript: 'half a thou' }, isFinal: false }], {
+        length: 1,
+      }),
+    })
+
+    expect(screen.getByLabelText(/add more context/i)).toHaveValue('')
+  })
+
+  it('asks for continuous, final-only recognition', async () => {
+    const instances = setSpeechSupport(true)!
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await stageDiagramOnly(user)
+    await user.click(screen.getByRole('button', { name: /dictate context/i }))
+
+    expect(instances[0]).toMatchObject({
+      continuous: true,
+      interimResults: false,
+      started: true,
+    })
+  })
+
+  it('returns the mic to its resting state when recognition ends', async () => {
+    // Covers a permission denial too: both onerror and onend clear the recogniser,
+    // so the button cannot stick in a listening state with nothing behind it.
+    const instances = setSpeechSupport(true)!
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+
+    await stageDiagramOnly(user)
+    await user.click(screen.getByRole('button', { name: /dictate context/i }))
+    expect(screen.getByRole('button', { name: /stop dictating/i })).toBeInTheDocument()
+
+    ;(instances[0]!['onerror'] as () => void)()
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /dictate context/i })).toBeInTheDocument(),
+    )
+  })
+})

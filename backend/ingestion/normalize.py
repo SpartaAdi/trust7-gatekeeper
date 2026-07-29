@@ -28,6 +28,7 @@ def ingest(
     title: str = "",
     document_key: str = "",
     diagram_key: str = "",
+    context: str = "",
 ) -> tuple[NormalizedDesign, dict[str, int]]:
     """Fetch the uploads, parse each, and converge on the common schema."""
     document_text = ""
@@ -50,6 +51,9 @@ def ingest(
         review_id=review_id,
         title=title or _default_title(document_key, diagram_key),
         document_text=document_text,
+        # Passed through verbatim; the model's validator caps and strips it, and
+        # `as_prompt_context` fences it. Nothing here interprets it.
+        context=context,
         graph=graph,
     )
     return design, usage

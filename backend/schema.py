@@ -10,7 +10,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # --------------------------------------------------------------------------- #
 # Design representation (the one common schema)
@@ -54,6 +54,16 @@ class DesignGraph(BaseModel):
     source: DiagramSource = DiagramSource.DOCUMENT
 
 
+# Cap on the optional free-text context field.
+#
+# It bounds two things at once: cost, since this rides in the prompt of both the
+# classify and evaluate calls, and injection surface, since it is the one input a
+# submitter can type directly rather than having to hide inside a document or a
+# diagram label. 1000 characters is a paragraph or two — enough to say what a system
+# does and who uses it, not enough to smuggle in a second document.
+MAX_CONTEXT_CHARS = 1000
+
+
 class NormalizedDesign(BaseModel):
     """Everything the agent pipeline needs, from whichever inputs were supplied."""
 
@@ -61,6 +71,23 @@ class NormalizedDesign(BaseModel):
     title: str = ""
     document_text: str = ""
     graph: DesignGraph = Field(default_factory=DesignGraph)
+
+    # Optional free text the submitter typed, offered only when there is no SoW to
+    # carry the same information. UNTRUSTED, exactly like document_text and diagram
+    # labels: it reaches the prompt inside the `untrusted.wrap()` fence that both
+    # call sites of `as_prompt_context` already apply.
+    context: str = ""
+
+    @field_validator("context")
+    @classmethod
+    def _cap_context(cls, value: str) -> str:
+        """Truncate silently at the cap.
+
+        On the model rather than at the route, so every entry point inherits it —
+        the route, `normalize.ingest`, and a test constructing this directly. A
+        route-level check would leave the other two unbounded.
+        """
+        return value.strip()[:MAX_CONTEXT_CHARS]
 
     def as_prompt_context(self) -> str:
         lines: list[str] = []
@@ -90,6 +117,12 @@ class NormalizedDesign(BaseModel):
         if self.document_text:
             lines.append("\n## Solution document / SoW")
             lines.append(self.document_text)
+        # Appended ONLY when non-empty, which is what makes an upload without context
+        # byte-identical to before this field existed. tests/test_context_field.py
+        # asserts that equivalence rather than trusting it.
+        if self.context:
+            lines.append("\n## Submitter-supplied context (purpose and use case)")
+            lines.append(self.context)
         return "\n".join(lines) if lines else "(no design content supplied)"
 
 

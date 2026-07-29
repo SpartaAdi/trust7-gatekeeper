@@ -65,6 +65,12 @@ class ReviewRequest(BaseModel):
     document_key: str = ""
     diagram_key: str = ""
     title: str = ""
+    context: str = Field(
+        default="",
+        description="Optional free text describing purpose and use case. Offered by "
+        "the UI only for a diagram-only submission, where there is no SoW to carry "
+        "it. UNTRUSTED input: capped and fenced, never treated as instructions.",
+    )
     previous_review_id: str = Field(
         default="",
         description="Set to re-review a revised design and get a score delta "
@@ -131,6 +137,7 @@ def _start_review(
         title=request.title,
         document_key=request.document_key,
         diagram_key=request.diagram_key,
+        context=request.context,
         previous_review_id=request.previous_review_id,
     )
 

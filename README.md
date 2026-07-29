@@ -69,7 +69,7 @@ backend/
   maturity.py     score -> band; mirrors frontend/src/maturity.ts
   ingestion/      document, draw.io, and vision parsing; normalization
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          304 tests
+  tests/          320 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -504,7 +504,7 @@ two — nothing else references the shape.
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 304 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 320 tests
 cd frontend && npm test                                                          # 76 tests
 ```
 
@@ -547,6 +547,37 @@ Frontend tests are deliberately shallow: each view renders with mocked API
 responses and must not crash, plus one interaction test covering the upload path.
 The test setup throws on any unmocked `fetch`, so a test that reaches the network
 fails rather than hanging.
+
+## Optional context on a diagram-only upload
+
+A diagram shows structure, not intent. When a submission has no SoW, the upload page
+offers an optional free-text field — purpose, users, constraints — with a mic button
+for dictation via the Web Speech API (browser-only; no request, no dependency). Where
+that API is missing, as in Firefox and older Safari, the mic is **absent** rather than
+disabled: a button that cannot listen teaches the user nothing when it fails.
+
+The field is offered ONLY when there is no document. A SoW already carries this, and
+asking twice would invite two contradicting answers for the review to reconcile.
+
+Server-side it is `NormalizedDesign.context`, capped at `MAX_CONTEXT_CHARS` (1000) by
+a validator **on the model** rather than at the route, so the route,
+`normalize.ingest`, and direct construction all inherit the same bound. Over-length
+input truncates silently; rejecting it would lose a paragraph someone had just
+dictated.
+
+It is untrusted, and treated exactly like document text or a diagram label. It folds
+into `as_prompt_context()`, which is the single seam both the classify and evaluate
+calls read, and both already wrap that in `untrusted.wrap()` — so the fencing and the
+forged-closing-tag defence are inherited rather than re-implemented. No seventh call,
+and neither stage's code changed. The section heading is "Submitter-supplied context
+(purpose and use case)", framing it as material rather than as anything to obey; a
+test asserts the heading contains no word inviting compliance.
+
+**Zero regression to the existing path.** The section is appended only when the field
+is non-empty, so a submission without context produces byte-identical prompt context
+to before the field existed — asserted in `tests/test_context_field.py` against a
+literal reconstruction of the old format, not against the code itself. No output
+schema changed.
 
 ## Copy fix-it prompt
 

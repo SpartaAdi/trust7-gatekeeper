@@ -75,6 +75,7 @@ def run(
     title: str = "",
     document_key: str = "",
     diagram_key: str = "",
+    context: str = "",
     previous_review_id: str = "",
 ) -> ReviewResult:
     """Run a full review and persist the result. Raises on failure."""
@@ -91,6 +92,7 @@ def run(
             title=title,
             document_key=document_key,
             diagram_key=diagram_key,
+            context=context,
         )
         usages.append(ingest_usage)
         progress.finish(

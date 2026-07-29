@@ -3,6 +3,10 @@ import { useMemo, useState } from 'react'
 import { ApiError, submitReview, uploadFile } from '../api'
 import { DropZone, type StagedFile } from '../components/DropZone'
 import { classify, isSupported, type FileKind } from '../fileKind'
+import { useDictation } from '../useDictation'
+
+/** Mirrors MAX_CONTEXT_CHARS in backend/schema.py, which truncates server-side. */
+const MAX_CONTEXT_CHARS = 1000
 
 interface Props {
   /** Set when re-reviewing; the new review is compared against this one. */
@@ -14,6 +18,7 @@ interface Props {
 export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
   const [staged, setStaged] = useState<StagedFile[]>([])
   const [name, setName] = useState('')
+  const [context, setContext] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
 
@@ -97,6 +102,9 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
         documentKey,
         diagramKey,
         title: effectiveName,
+        // Only sent when the field was actually offered. A document-bearing
+        // submission sends '' here exactly as it did before this field existed.
+        context: diagramOnly ? context.trim() : '',
         previousReviewId,
       })
       onStarted(accepted.review_id)
@@ -182,6 +190,19 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
           )}
         </div>
 
+        {/*
+          Offered only for a diagram-only submission. When a SoW is attached it
+          already carries purpose and use case, and asking twice would invite
+          contradicting answers for the review to reconcile.
+        */}
+        {diagramOnly && (
+          <ContextField
+            value={context}
+            onChange={setContext}
+            disabled={busy !== ''}
+          />
+        )}
+
         {error && (
           <div
             role="alert"
@@ -231,6 +252,91 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
           )}
         </div>
       </form>
+    </div>
+  )
+}
+
+
+/**
+ * Optional free text, with dictation.
+ *
+ * The mic is absent rather than disabled where the Web Speech API is missing: a
+ * button that cannot listen teaches the user nothing when it fails, and Firefox and
+ * older Safari have no implementation at all.
+ *
+ * Dictated text is appended rather than replacing the field, so someone can type,
+ * dictate, and type again without losing what came before.
+ */
+function ContextField({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string
+  onChange: (next: string) => void
+  disabled: boolean
+}) {
+  const { supported, listening, toggle } = useDictation((spoken) => {
+    onChange(
+      (value ? `${value.trimEnd()} ` : '') + spoken.trim(),
+    )
+  })
+
+  const remaining = MAX_CONTEXT_CHARS - value.length
+
+  return (
+    <div>
+      <label htmlFor="review-context" className="t-heading block">
+        Add more context — purpose and use case{' '}
+        <span className="t-caption font-normal text-ink-muted">(optional)</span>
+      </label>
+      <p className="t-caption mt-1 max-w-prose text-ink-muted">
+        A diagram shows structure, not intent. Anything here is read as part of the
+        design, alongside it.
+      </p>
+
+      <div className="mt-2 flex items-start gap-2">
+        <textarea
+          id="review-context"
+          value={value}
+          onChange={(event) => onChange(event.target.value.slice(0, MAX_CONTEXT_CHARS))}
+          disabled={disabled}
+          rows={4}
+          maxLength={MAX_CONTEXT_CHARS}
+          placeholder="What the system does, who uses it, and any constraints it has to meet — data residency, an audit obligation, a migration deadline."
+          className="t-body min-w-0 flex-1 resize-y border border-hairline bg-surface px-3 py-2 transition-colors duration-150 placeholder:text-ink-faint hover:border-ink-faint focus:border-minfy-indigo disabled:opacity-60"
+        />
+
+        {supported && (
+          <button
+            type="button"
+            onClick={toggle}
+            disabled={disabled}
+            aria-pressed={listening}
+            aria-label={listening ? 'Stop dictating' : 'Dictate context'}
+            title={listening ? 'Stop dictating' : 'Dictate context'}
+            className={`flex size-10 shrink-0 items-center justify-center border transition-colors duration-150 disabled:opacity-60 ${
+              listening
+                ? 'border-minfy-indigo bg-minfy-indigo text-white'
+                : 'border-hairline text-ink-muted hover:border-minfy-indigo hover:text-minfy-indigo'
+            }`}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true" className="size-4 fill-current">
+              <path d="M8 1.5a2 2 0 0 1 2 2v4a2 2 0 0 1-4 0v-4a2 2 0 0 1 2-2Z" />
+              <path d="M4 7a.75.75 0 0 1 1.5 0 2.5 2.5 0 0 0 5 0A.75.75 0 0 1 12 7a4 4 0 0 1-3.25 3.93v1.32h1.75a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.75v-1.32A4 4 0 0 1 4 7Z" />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      <p
+        className="t-caption mt-1.5 text-[0.75rem] text-ink-muted"
+        aria-live="polite"
+      >
+        {listening
+          ? 'Listening — speak, then press the mic again to stop.'
+          : `${remaining} characters left.`}
+      </p>
     </div>
   )
 }
