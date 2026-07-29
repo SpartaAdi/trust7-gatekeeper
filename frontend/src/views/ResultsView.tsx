@@ -22,7 +22,8 @@ import {
   PHASE_BLURB,
   PHASE_LABEL,
   PHASE_ORDER,
-  groupByPhase,
+  flattenActions,
+  prioritizedActions,
   type Phase,
 } from './roadmap'
 
@@ -141,12 +142,15 @@ export function ResultsView({
 
       {result.delta && <DeltaSummary delta={result.delta} />}
 
-      <TopActionItems findings={result.findings} />
+      {/*
+        Four sections, in the order a reader needs them: what it means, how it
+        scored, what to do, then the full record. The previous order opened with
+        two overlapping action lists before the reader knew the verdict.
+      */}
 
-      <ImprovementRoadmap findings={result.findings} />
-
+      {/* (a) Executive summary — the verdict, first. */}
       {result.executive_summary && (
-        <section className="mt-12 bg-pastel-cream px-5 py-5">
+        <section className="mt-12 bg-pastel-cream px-5 py-5" data-testid="executive-summary">
           <h3 className="t-eyebrow text-ink-muted">Executive summary</h3>
           <p className="t-body mt-2.5 max-w-prose text-pretty text-[0.9375rem] leading-relaxed">
             {result.executive_summary}
@@ -154,22 +158,25 @@ export function ResultsView({
         </section>
       )}
 
-      {result.summary && (
-        <section className="mt-10">
-          <h3 className="t-eyebrow text-ink-muted">Assessment</h3>
+      {/* (b) Assessment — the prose assessment and the two heatmaps under one
+          heading, since they answer the same question at different resolutions.
+          Framework order follows the rubric: AWS Well-Architected, then TRUST-7. */}
+      <section className="mt-12" data-testid="assessment">
+        <h3 className="t-eyebrow text-ink-muted">Assessment · pillar maturity</h3>
+        {result.summary && (
           <p className="t-body mt-3 max-w-prose text-pretty">{result.summary}</p>
-        </section>
-      )}
-
-      <section className="mt-12">
-        <h3 className="t-eyebrow text-ink-muted">Pillar maturity</h3>
-        <div className="mt-4 space-y-10">
+        )}
+        <div className="mt-6 space-y-10">
           {result.frameworks.map((framework) => (
             <FrameworkSection key={framework.framework} framework={framework} />
           ))}
         </div>
       </section>
 
+      {/* (c) Action roadmap — the single prioritized action view. */}
+      <ActionRoadmap findings={result.findings} />
+
+      {/* (d) Detailed findings — the audit trail. */}
       <FindingsList findings={result.findings} />
 
       <footer className="mt-16 flex flex-wrap items-center gap-x-6 gap-y-4 border-t border-hairline pt-8">
@@ -183,7 +190,7 @@ export function ResultsView({
         <DownloadReportButton reviewId={result.review_id} />
         {/* Shown only when the prompt would carry something. A button that copies a
             heading and an empty list is worse than no button. */}
-        {selectTopActions(result.findings).length > 0 && (
+        {buildFixItPrompt(result.findings) !== '' && (
           <CopyFixItPromptButton findings={result.findings} />
         )}
         <CopyShareLinkButton reviewId={result.review_id} />
@@ -219,86 +226,29 @@ export function ResultsView({
   )
 }
 
-/** Cap on the action list. Beyond this it stops being a shortlist. */
-const MAX_ACTION_ITEMS = 10
-
 /**
- * The one-per-pillar high-severity shortlist, computed here from the findings the
- * API already returned — no extra request, no backend change.
- *
- * Two deliberate departures from a literal reading of "take severity=high
- * findings", both because the literal version would put nonsense on the page:
- *
- *  - Only OPEN findings qualify (`fail` or `partial`). A high-severity check that
- *    PASSED has nothing to act on and carries no remediation text, so it would
- *    render as a blank action item.
- *  - The imperative line is the finding's `remediation`, not its `title`. Titles
- *    are written as observations ("X has no encryption specified") and cannot be
- *    turned into imperatives without inventing wording; `remediation` is generated
- *    as "what the delivery team should change" and is already imperative. The
- *    title is kept underneath as context. Nothing is rephrased client-side.
- *
- * A finding with no remediation text falls back to its title, marked as an
- * observation rather than dressed up as an instruction.
+ * Cap on the copied prompt. The roadmap on screen is uncapped — it is a plan and
+ * a plan that stops at ten is wrong — but a prompt pasted into an assistant is a
+ * different artefact, and forty-five imperatives is not a usable instruction.
  */
-export function selectTopActions(findings: readonly Finding[]): Finding[] {
-  const open = findings.filter(
-    (finding) =>
-      finding.severity === 'high' &&
-      (finding.status === 'fail' || finding.status === 'partial'),
-  )
+const MAX_PROMPT_ITEMS = 10
 
-  // One per pillar, keeping the widest-reaching finding. Priority breaks a tie so
-  // the choice is deterministic rather than dependent on array order.
-  const perPillar = new Map<string, Finding>()
-  for (const finding of open) {
-    const key = `${finding.framework}:${finding.pillar_id}`
-    const held = perPillar.get(key)
-    if (held === undefined || beats(finding, held)) perPillar.set(key, finding)
-  }
-
-  return [...perPillar.values()].sort(byPriority).slice(0, MAX_ACTION_ITEMS)
-}
-
-function beats(candidate: Finding, held: Finding): boolean {
-  if (candidate.affected_components.length !== held.affected_components.length) {
-    return candidate.affected_components.length > held.affected_components.length
-  }
-  return byPriority(candidate, held) < 0
-}
-
-/** Remediation order: 1 first, and an unranked 0 last rather than first. */
-function byPriority(a: Finding, b: Finding): number {
-  const rank = (finding: Finding) =>
-    finding.priority > 0 ? finding.priority : Number.MAX_SAFE_INTEGER
-  return rank(a) - rank(b)
-}
-
-/**
- * The fix-it prompt: the shortlist as one plain-text block to paste into an
- * image-capable assistant alongside the diagram.
- *
- * Assembly of data already on the page — no request, no new field, nothing derived
- * that is not already rendered a few hundred pixels above.
- *
- * It calls `selectTopActions` rather than re-filtering, so the prompt and the Top
- * Action Items list can never disagree about which findings matter, how many, or
- * which one wins a pillar. Two truncation rules over the same data would be a bug
- * waiting for someone to notice the list said ten and the prompt said eight.
- *
- * Same verbatim rule as the list: `remediation` is the model's own imperative text
- * and is copied unmodified, falling back to the title exactly as the list does when
- * a finding has no remediation. Nothing is rephrased here.
- *
- * Deliberately names no assistant. Whoever pastes this may be using any of them, and
- * a prompt that greets the wrong tool by name reads as a copy-paste artefact.
- */
 export const FIX_IT_PREAMBLE =
   'Here is my architecture. A review found the following gaps — please revise ' +
   'the diagram to address each one:'
 
+/**
+ * The fix-it prompt, built from the same prioritized actions the roadmap shows.
+ *
+ * Sourced from `prioritizedActions` rather than a separate selector, so what gets
+ * copied is what is on screen, in the same order. When these were two functions
+ * the prompt and the page could disagree about what the top actions were.
+ */
 export function buildFixItPrompt(findings: readonly Finding[]): string {
-  const actions = selectTopActions(findings)
+  const actions = flattenActions(prioritizedActions(findings)).slice(
+    0,
+    MAX_PROMPT_ITEMS,
+  )
   if (actions.length === 0) return ''
 
   const numbered = actions.map(
@@ -413,56 +363,21 @@ function CopyShareLinkButton({ reviewId }: { reviewId: string }) {
   )
 }
 
-function TopActionItems({ findings }: { findings: Finding[] }) {
-  const actions = selectTopActions(findings)
-  if (actions.length === 0) return null
-
-  return (
-    <section className="mt-12" data-testid="top-actions">
-      <h3 className="t-eyebrow text-ink-muted">
-        Top action items
-        <span className="tnum font-normal normal-case tracking-normal text-ink-faint">
-          {' '}
-          · highest severity, one per pillar
-        </span>
-      </h3>
-      <ol className="mt-4 divide-y divide-hairline border-y border-hairline">
-        {actions.map((finding, index) => (
-          <li
-            key={`${finding.framework}-${finding.check_id}`}
-            className="flex items-start gap-4 py-3"
-          >
-            <span className="tnum t-body mt-px w-5 shrink-0 text-right font-semibold text-minfy-indigo">
-              {index + 1}
-            </span>
-            <span className="min-w-0">
-              <span className="t-body block">
-                {finding.remediation || finding.title}
-              </span>
-              <span className="t-caption mt-0.5 block text-ink-muted">
-                {finding.remediation ? (
-                  finding.title
-                ) : (
-                  <>Observed gap — no remediation text was generated.</>
-                )}
-                <span aria-hidden="true"> · </span>
-                <span>{finding.pillar_id.replace(/_/g, ' ')}</span>
-              </span>
-            </span>
-          </li>
-        ))}
-      </ol>
-    </section>
-  )
-}
-
 /**
- * "How to Improve" — the open findings sequenced into three phases.
+ * "Action roadmap" — the single prioritized action view.
  *
- * Where Top Action Items above is a shortlist (ten, one per pillar), this is the
- * whole plan: every open finding appears exactly once. The two answer different
- * questions — "what do I fix first" against "what does the work look like" — so the
- * roadmap deliberately does not cap or dedupe.
+ * This replaces the pair it grew out of: a flat top-ten shortlist and a separate
+ * three-phase plan, which listed the same work twice under two headings and left
+ * the reader to reconcile them. One section now answers "what do I do", sequenced
+ * Immediate -> Short-term -> Structural.
+ *
+ * Selection is `prioritizedActions`: `groupByPhase` for the phase, then one entry
+ * per pillar within each phase, ordered by severity. The dedupe lives in the
+ * presentation layer, NOT in `groupByPhase` — that function is mirrored in
+ * `backend/roadmap.py` and pinned by `fixtures/roadmap_cases.json`, and it stays a
+ * pure partition so the PDF keeps printing every open finding.
+ *
+ * Nothing is hidden by the dedupe: Detailed Findings below is the complete record.
  *
  * Grouping is `groupByPhase`, which is pure: no request, no new field, and the same
  * findings always land in the same phases. The rule is documented in `roadmap.ts`.
@@ -471,18 +386,18 @@ function TopActionItems({ findings }: { findings: Finding[] }) {
  * counts are what a reader scans for, and the roadmap sits above the full findings
  * list which already offers per-finding disclosure.
  */
-function ImprovementRoadmap({ findings }: { findings: Finding[] }) {
-  const grouped = groupByPhase(findings)
+function ActionRoadmap({ findings }: { findings: Finding[] }) {
+  const grouped = prioritizedActions(findings)
   const total = PHASE_ORDER.reduce((sum, phase) => sum + grouped[phase].length, 0)
   if (total === 0) return null
 
   return (
     <section className="mt-12" data-testid="roadmap">
       <h3 className="t-eyebrow text-ink-muted">
-        How to improve
+        Action roadmap
         <span className="tnum font-normal normal-case tracking-normal text-ink-faint">
           {' '}
-          · {total} open {total === 1 ? 'finding' : 'findings'} in three phases
+          · {total} prioritized {total === 1 ? 'action' : 'actions'} in three phases
         </span>
       </h3>
 
@@ -860,9 +775,9 @@ function FindingsList({ findings }: { findings: Finding[] }) {
   )
 
   return (
-    <section className="mt-16">
+    <section className="mt-16" data-testid="detailed-findings">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
-        <h3 className="t-eyebrow text-ink-muted">Findings, in remediation order</h3>
+        <h3 className="t-eyebrow text-ink-muted">Detailed findings</h3>
         {rest.length > 0 && (
           <button
             type="button"
@@ -876,6 +791,15 @@ function FindingsList({ findings }: { findings: Finding[] }) {
           </button>
         )}
       </div>
+
+      {/*
+        Says what this section is for. Without it a reader arriving from the
+        roadmap above sees a second list of the same gaps and reasonably reads it
+        as more work to do, rather than as the record of everything evaluated.
+      */}
+      <p className="t-caption mt-1.5 text-ink-faint">
+        Complete evaluation record, including passed and not-applicable checks.
+      </p>
 
       {open.length === 0 ? (
         <div className="mt-6 flex items-center gap-3 border-l-2 border-verdict-pass bg-surface-sunken px-4 py-4">

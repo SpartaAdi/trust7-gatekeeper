@@ -297,6 +297,39 @@ describe('UploadView', () => {
   })
 })
 
+/** Install or remove a Web Speech API stub before the view mounts. */
+function setSpeechSupport(supported: boolean) {
+  const scope = window as unknown as Record<string, unknown>
+  if (!supported) {
+    delete scope['SpeechRecognition']
+    delete scope['webkitSpeechRecognition']
+    return null
+  }
+  const instances: Record<string, unknown>[] = []
+  class FakeRecognition {
+    continuous = false
+    interimResults = true
+    lang = ''
+    onresult: ((event: unknown) => void) | null = null
+    onerror: (() => void) | null = null
+    onend: (() => void) | null = null
+    started = false
+    stopped = false
+    constructor() {
+      instances.push(this as unknown as Record<string, unknown>)
+    }
+    start() {
+      this.started = true
+    }
+    stop() {
+      this.stopped = true
+      this.onend?.()
+    }
+  }
+  scope['SpeechRecognition'] = FakeRecognition
+  return instances
+}
+
 // --------------------------------------------------------------------------- #
 // Optional context field — diagram-only, with dictation
 // --------------------------------------------------------------------------- #
@@ -308,39 +341,6 @@ describe('context field', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
-
-  /** Install or remove a Web Speech API stub before the view mounts. */
-  function setSpeechSupport(supported: boolean) {
-    const scope = window as unknown as Record<string, unknown>
-    if (!supported) {
-      delete scope['SpeechRecognition']
-      delete scope['webkitSpeechRecognition']
-      return null
-    }
-    const instances: Record<string, unknown>[] = []
-    class FakeRecognition {
-      continuous = false
-      interimResults = true
-      lang = ''
-      onresult: ((event: unknown) => void) | null = null
-      onerror: (() => void) | null = null
-      onend: (() => void) | null = null
-      started = false
-      stopped = false
-      constructor() {
-        instances.push(this as unknown as Record<string, unknown>)
-      }
-      start() {
-        this.started = true
-      }
-      stop() {
-        this.stopped = true
-        this.onend?.()
-      }
-    }
-    scope['SpeechRecognition'] = FakeRecognition
-    return instances
-  }
 
   async function stageDiagramOnly(user: ReturnType<typeof userEvent.setup>) {
     await user.upload(fileInput(), diagram())
@@ -429,7 +429,7 @@ describe('context field', () => {
 
     await stageDiagramOnly(user)
 
-    expect(screen.getByRole('button', { name: /dictate context/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /speak out your purpose and use case/i })).toBeInTheDocument()
   })
 
   it('hides the mic entirely when the browser does not support it', async () => {
@@ -454,7 +454,7 @@ describe('context field', () => {
     await stageDiagramOnly(user)
     const field = screen.getByLabelText(/add more context/i)
     await user.type(field, 'Claims portal.')
-    await user.click(screen.getByRole('button', { name: /dictate context/i }))
+    await user.click(screen.getByRole('button', { name: /speak out your purpose and use case/i }))
 
     const recogniser = instances[0]!
     ;(recogniser['onresult'] as (event: unknown) => void)({
@@ -475,7 +475,7 @@ describe('context field', () => {
     render(<UploadView onStarted={vi.fn()} />)
 
     await stageDiagramOnly(user)
-    await user.click(screen.getByRole('button', { name: /dictate context/i }))
+    await user.click(screen.getByRole('button', { name: /speak out your purpose and use case/i }))
 
     const recogniser = instances[0]!
     ;(recogniser['onresult'] as (event: unknown) => void)({
@@ -494,7 +494,7 @@ describe('context field', () => {
     render(<UploadView onStarted={vi.fn()} />)
 
     await stageDiagramOnly(user)
-    await user.click(screen.getByRole('button', { name: /dictate context/i }))
+    await user.click(screen.getByRole('button', { name: /speak out your purpose and use case/i }))
 
     expect(instances[0]).toMatchObject({
       continuous: true,
@@ -511,13 +511,13 @@ describe('context field', () => {
     render(<UploadView onStarted={vi.fn()} />)
 
     await stageDiagramOnly(user)
-    await user.click(screen.getByRole('button', { name: /dictate context/i }))
+    await user.click(screen.getByRole('button', { name: /speak out your purpose and use case/i }))
     expect(screen.getByRole('button', { name: /stop dictating/i })).toBeInTheDocument()
 
     ;(instances[0]!['onerror'] as () => void)()
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /dictate context/i })).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: /speak out your purpose and use case/i })).toBeInTheDocument(),
     )
   })
 })
@@ -607,5 +607,73 @@ describe('UploadView — the reviewer’s own OpenRouter key', () => {
     await user.click(screen.getByRole('button', { name: /clear now/i }))
 
     expect(getApiKey()).toBe('')
+  })
+})
+
+/**
+ * On a diagram-only submission this field is the only place intent can come
+ * from, and live feedback was that both it and the mic were being missed.
+ */
+describe('UploadView — context and dictation discoverability', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  async function stageDiagram() {
+    const user = userEvent.setup()
+    render(<UploadView onStarted={vi.fn()} />)
+    await user.upload(fileInput(), [diagram()])
+    return user
+  }
+
+  it('gives the context field its own tinted panel, not a bare label', async () => {
+    await stageDiagram()
+
+    const field = screen.getByTestId('context-field')
+    expect(field.className).toContain('bg-pastel-sky')
+    expect(field.className).toContain('border-minfy-indigo')
+  })
+
+  it('tells the reader they can speak it as well as type it', async () => {
+    await stageDiagram()
+
+    expect(screen.getByTestId('context-field')).toHaveTextContent(/type it or say it/i)
+  })
+
+  it('labels the mic with the spoken prompt, for both hover and assistive tech', async () => {
+    setSpeechSupport(true)
+    await stageDiagram()
+
+    const mic = screen.getByRole('button', {
+      name: /speak out your purpose and use case/i,
+    })
+    expect(mic).toHaveAttribute('title', 'Speak out your purpose and use case')
+    expect(screen.getByTestId('mic-tooltip')).toHaveTextContent(
+      'Speak out your purpose and use case',
+    )
+  })
+
+  it('hides the visual tooltip from assistive tech, so it is not read twice', async () => {
+    setSpeechSupport(true)
+    await stageDiagram()
+
+    expect(screen.getByTestId('mic-tooltip')).toHaveAttribute('aria-hidden', 'true')
+  })
+
+  it('uses no severity colour for the recording state', async () => {
+    setSpeechSupport(true)
+    const user = await stageDiagram()
+
+    const mic = screen.getByRole('button', {
+      name: /speak out your purpose and use case/i,
+    })
+    expect(mic.className).toContain('bg-minfy-indigo')
+
+    await user.click(mic)
+
+    // Recording is a state, not a finding: sev-high means one thing everywhere.
+    const listening = screen.getByRole('button', { name: /stop dictating/i })
+    expect(listening.className).toContain('bg-minfy-navy')
+    expect(listening.className).not.toMatch(/sev-/)
   })
 })

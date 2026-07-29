@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -90,5 +90,51 @@ describe('HistoryView', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       /could not load past reviews/i,
     )
+  })
+})
+
+/**
+ * The empty state was never the bug. It exists and is covered above ("offers a
+ * first-run prompt"). What was missing is that a Render free-tier cold start
+ * takes ~50s, during which a correct skeleton is indistinguishable from a hang —
+ * which is what read as a spinner that never resolved.
+ */
+describe('HistoryView — slow first load', () => {
+  it('says nothing about waking on a fast load', async () => {
+    vi.useFakeTimers()
+    try {
+      listReviews.mockResolvedValue([])
+      render(<HistoryView onOpen={vi.fn()} onNewReview={vi.fn()} />)
+
+      expect(screen.queryByText(/waking the review service/i)).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('explains the wait once it stops looking normal', async () => {
+    vi.useFakeTimers()
+    try {
+      // Never resolves: the cold-start case, where the request is still open.
+      listReviews.mockReturnValue(new Promise(() => {}))
+      render(<HistoryView onOpen={vi.fn()} onNewReview={vi.fn()} />)
+
+      expect(screen.queryByText(/waking the review service/i)).not.toBeInTheDocument()
+      await act(async () => {
+        vi.advanceTimersByTime(6000)
+      })
+
+      expect(screen.getByText(/waking the review service/i)).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows the empty state, not the notice, when the answer is simply zero', async () => {
+    listReviews.mockResolvedValue([])
+    render(<HistoryView onOpen={vi.fn()} onNewReview={vi.fn()} />)
+
+    expect(await screen.findByText(/nothing reviewed yet/i)).toBeInTheDocument()
+    expect(screen.queryByText(/waking the review service/i)).not.toBeInTheDocument()
   })
 })

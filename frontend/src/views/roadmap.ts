@@ -118,3 +118,80 @@ function byPriorityThenId(a: Finding, b: Finding): number {
   if (rank(a) !== rank(b)) return rank(a) - rank(b)
   return `${a.framework}:${a.check_id}`.localeCompare(`${b.framework}:${b.check_id}`)
 }
+
+/**
+ * Severity rank for ordering. High first — within a phase the work is already
+ * comparable in size, so severity is what decides which to pick up first.
+ */
+const SEVERITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 }
+
+/**
+ * The prioritized action view: `groupByPhase`, then one entry per pillar in each
+ * phase, ordered by severity.
+ *
+ * This is a PRESENTATION layer over `groupByPhase`, deliberately not a change to
+ * it. `groupByPhase` is the partition — no cap, no dedupe — and it is mirrored in
+ * `backend/roadmap.py` with `fixtures/roadmap_cases.json` asserting both copies
+ * agree. Folding the dedupe into it would have to be mirrored in Python and would
+ * change what the PDF prints.
+ *
+ * Dedupe is per phase, not global: the same pillar can legitimately need a cheap
+ * fix now and a structural one later, and collapsing those into one line would
+ * hide the second piece of work.
+ *
+ * Nothing is lost by deduping here, because the Detailed Findings section below
+ * is the complete record — this section answers "what do I do", that one answers
+ * "what was evaluated".
+ */
+export function prioritizedActions(
+  findings: readonly Finding[],
+): Record<Phase, Finding[]> {
+  const grouped = groupByPhase(findings)
+  const out: Record<Phase, Finding[]> = {
+    immediate: [],
+    short_term: [],
+    structural: [],
+  }
+
+  for (const phase of PHASE_ORDER) {
+    // One per pillar, keeping the widest-reaching finding — the same rule the
+    // old Top Action Items shortlist used, applied inside each phase.
+    const perPillar = new Map<string, Finding>()
+    for (const finding of grouped[phase]) {
+      const key = `${finding.framework}:${finding.pillar_id}`
+      const held = perPillar.get(key)
+      if (held === undefined || widerThan(finding, held)) perPillar.set(key, finding)
+    }
+    out[phase] = [...perPillar.values()].sort(bySeverityThenPriority)
+  }
+
+  return out
+}
+
+/** Every prioritized action, phases in working order. */
+export function flattenActions(grouped: Record<Phase, Finding[]>): Finding[] {
+  return PHASE_ORDER.flatMap((phase) => grouped[phase])
+}
+
+/**
+ * Blast radius first, then remediation priority as a deterministic tie-break —
+ * so which finding represents a pillar never depends on array order.
+ */
+function widerThan(candidate: Finding, held: Finding): boolean {
+  if (candidate.affected_components.length !== held.affected_components.length) {
+    return candidate.affected_components.length > held.affected_components.length
+  }
+  return rankOf(candidate) < rankOf(held)
+}
+
+function rankOf(finding: Finding): number {
+  return finding.priority > 0 ? finding.priority : Number.MAX_SAFE_INTEGER
+}
+
+function bySeverityThenPriority(a: Finding, b: Finding): number {
+  const severity =
+    (SEVERITY_RANK[a.severity] ?? 3) - (SEVERITY_RANK[b.severity] ?? 3)
+  if (severity !== 0) return severity
+  if (rankOf(a) !== rankOf(b)) return rankOf(a) - rankOf(b)
+  return `${a.framework}:${a.check_id}`.localeCompare(`${b.framework}:${b.check_id}`)
+}

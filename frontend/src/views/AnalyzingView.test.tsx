@@ -544,3 +544,48 @@ describe('AnalyzingView', () => {
     })
   })
 })
+
+describe('AnalyzingView — duration expectation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getStatus.mockResolvedValue(statusFixture())
+  })
+
+  it('states a typical range next to the clock, as static text', async () => {
+    render(
+      <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+    )
+
+    const note = await screen.findByTestId('duration-note')
+    expect(note).toHaveTextContent(
+      /typically 1–10 min; can occasionally run longer depending on provider load/i,
+    )
+  })
+
+  /**
+   * The range is an expectation, not a prediction. Observed latency has spanned
+   * 14s to 44 minutes on the same provider, so a figure that counted down or
+   * narrowed as the run proceeded would be wrong most of the time — the same
+   * reason the ETA was removed and must not come back.
+   */
+  it('does not change as the run proceeds, and promises no completion time', async () => {
+    const { rerender } = render(
+      <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+    )
+    const before = (await screen.findByTestId('duration-note')).textContent
+
+    rerender(
+      <AnalyzingView
+        reviewId="rev-1"
+        startedAt={START - 300_000}
+        onComplete={vi.fn()}
+        onStartOver={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('duration-note').textContent).toBe(before)
+    expect(screen.getByTestId('duration-note').textContent).not.toMatch(
+      /remaining|left\b|estimat|eta/i,
+    )
+  })
+})

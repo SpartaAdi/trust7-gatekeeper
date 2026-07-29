@@ -93,7 +93,13 @@ describe('ResultsView', () => {
     }
   })
 
-  it('lists top action items above the executive summary', async () => {
+  /**
+   * The page is four sections in a fixed order: what it means, how it scored,
+   * what to do, then the full record. This replaces two older tests that pinned
+   * the previous order, in which a flat top-ten shortlist and a separate roadmap
+   * both sat above the executive summary and listed the same work twice.
+   */
+  it('runs executive summary -> assessment -> roadmap -> detailed findings', async () => {
     getReview.mockResolvedValue(resultFixture())
 
     render(<ResultsView
@@ -103,17 +109,50 @@ describe('ResultsView', () => {
         onBackToHistory={vi.fn()}
       />)
 
-    const actions = await screen.findByTestId('top-actions')
-    // The imperative comes from the finding's own remediation text.
-    expect(actions).toHaveTextContent(/enable sse-kms on the table/i)
-    // And the observation it addresses is kept as context.
-    expect(actions).toHaveTextContent(/customer data store has no encryption/i)
+    await screen.findByTestId('executive-summary')
+    const order = ['executive-summary', 'assessment', 'roadmap', 'detailed-findings']
+      .map((id) => screen.getByTestId(id))
 
-    // Position matters: this is a shortlist to read before the narrative.
-    const summary = screen.getByText(/this design scores 62.5 of 100/i)
-    expect(
-      actions.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy()
+    for (let i = 0; i < order.length - 1; i += 1) {
+      expect(
+        order[i]!.compareDocumentPosition(order[i + 1]!) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+    }
+  })
+
+  it('has no separate flat top-action list any more', async () => {
+    getReview.mockResolvedValue(resultFixture())
+
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+
+    await screen.findByTestId('roadmap')
+    // The roadmap is the single prioritized action view; a second list of the
+    // same items under its own heading is what this restructure removed.
+    expect(screen.queryByTestId('top-actions')).toBeNull()
+    expect(screen.queryByText(/top action items/i)).toBeNull()
+  })
+
+  it('still surfaces the imperative remediation text, now inside the roadmap', async () => {
+    getReview.mockResolvedValue(resultFixture())
+
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+
+    const user = userEvent.setup()
+    await screen.findByTestId('roadmap')
+    await user.click(screen.getByRole('button', { name: /^Immediate/ }))
+
+    expect(screen.getByTestId('roadmap')).toHaveTextContent(/enable sse-kms on the table/i)
   })
 
   it('omits the action list entirely when nothing is open at high severity', async () => {
@@ -193,12 +232,16 @@ describe('ResultsView', () => {
       return screen.getByTestId('roadmap').textContent
     }
 
-    it('sits below Top Action Items, not above it', async () => {
+    it('sits below the assessment and above the detailed findings', async () => {
       const roadmap = await renderRoadmap()
-      const actions = screen.getByTestId('top-actions')
 
       expect(
-        actions.compareDocumentPosition(roadmap) & Node.DOCUMENT_POSITION_FOLLOWING,
+        screen.getByTestId('assessment').compareDocumentPosition(roadmap) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+      expect(
+        roadmap.compareDocumentPosition(screen.getByTestId('detailed-findings')) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy()
     })
 

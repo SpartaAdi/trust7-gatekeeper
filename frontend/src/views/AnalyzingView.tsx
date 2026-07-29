@@ -202,6 +202,17 @@ export function AnalyzingView({
               <ElapsedClock seconds={elapsed} />
             </span>
           </div>
+          {/*
+            Static, and deliberately a range rather than a figure. Observed latency
+            has spanned 14 seconds to 44 minutes on the same provider, so anything
+            claiming to know when this run ends would be wrong most of the time —
+            see the ETA note in HANDOFF. This sets an expectation without making a
+            promise, and it never changes as the run proceeds.
+          */}
+          <p className="t-caption mt-1.5 text-ink-faint" data-testid="duration-note">
+            Typically 1–10 min; can occasionally run longer depending on provider
+            load.
+          </p>
           <div
             className="mt-2 h-1 w-full overflow-hidden bg-hairline"
             role="progressbar"

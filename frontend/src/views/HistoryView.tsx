@@ -9,9 +9,27 @@ interface Props {
   onNewReview: () => void
 }
 
+/**
+ * How long the list may take before the wait gets an explanation.
+ *
+ * The backend is a Render free-tier service, which spins down when idle and takes
+ * roughly 50 seconds to answer the first request after that. The empty state and
+ * the skeleton were both already correct; what was missing is that a cold start
+ * is indistinguishable from a hang, so an empty account looked like a spinner
+ * that never resolved. Six seconds is past any warm response and well short of a
+ * cold one.
+ */
+const COLD_START_NOTICE_MS = 6000
+
 export function HistoryView({ onOpen, onNewReview }: Props) {
   const [reviews, setReviews] = useState<ReviewSummary[] | null>(null)
   const [error, setError] = useState('')
+  const [slow, setSlow] = useState(false)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSlow(true), COLD_START_NOTICE_MS)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -79,6 +97,14 @@ export function HistoryView({ onOpen, onNewReview }: Props) {
               <span className="h-3 w-24 animate-pulse bg-hairline" />
             </div>
           ))}
+          {/* Only after the wait stops looking normal. Saying this immediately
+              would make every warm load look like a problem. */}
+          {slow && (
+            <p className="t-caption pt-2 text-ink-muted">
+              Still waking the review service — it sleeps when idle and can take
+              up to a minute to answer the first request.
+            </p>
+          )}
         </div>
       )}
 

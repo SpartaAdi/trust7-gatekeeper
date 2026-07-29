@@ -369,14 +369,22 @@ function ContextField({
   const remaining = MAX_CONTEXT_CHARS - value.length
 
   return (
-    <div>
+    // Tinted panel with an indigo rule, the same treatment the results view gives
+    // the delta summary. This field was being missed entirely: on a diagram-only
+    // submission it is the only place intent can come from, so it earns emphasis
+    // that a plain label under a file list does not carry.
+    <div
+      data-testid="context-field"
+      className="border-l-2 border-minfy-indigo bg-pastel-sky px-5 py-4.5"
+    >
       <label htmlFor="review-context" className="t-heading block">
         Add more context — purpose and use case{' '}
         <span className="t-caption font-normal text-ink-muted">(optional)</span>
       </label>
       <p className="t-caption mt-1 max-w-prose text-ink-muted">
         A diagram shows structure, not intent. Anything here is read as part of the
-        design, alongside it.
+        design, alongside it. <span className="font-semibold">Type it or say it</span> —
+        the microphone dictates straight into the box.
       </p>
 
       <div className="mt-2 flex items-start gap-2">
@@ -391,25 +399,50 @@ function ContextField({
           className="t-body min-w-0 flex-1 resize-y border border-hairline bg-surface px-3 py-2 transition-colors duration-150 placeholder:text-ink-faint hover:border-ink-faint focus:border-minfy-indigo disabled:opacity-60"
         />
 
+        {/*
+          Filled indigo at rest rather than a hairline outline, and larger, because
+          at 40px with a grey border it read as a decorative box rather than a
+          control. `group` drives the hover popover below it; `title` stays so the
+          same wording reaches a touch device holding the button, which has no
+          hover state to show the popover with.
+        */}
         {supported && (
-          <button
-            type="button"
-            onClick={toggle}
-            disabled={disabled}
-            aria-pressed={listening}
-            aria-label={listening ? 'Stop dictating' : 'Dictate context'}
-            title={listening ? 'Stop dictating' : 'Dictate context'}
-            className={`flex size-10 shrink-0 items-center justify-center border transition-colors duration-150 disabled:opacity-60 ${
-              listening
-                ? 'border-minfy-indigo bg-minfy-indigo text-white'
-                : 'border-hairline text-ink-muted hover:border-minfy-indigo hover:text-minfy-indigo'
-            }`}
-          >
-            <svg viewBox="0 0 16 16" aria-hidden="true" className="size-4 fill-current">
-              <path d="M8 1.5a2 2 0 0 1 2 2v4a2 2 0 0 1-4 0v-4a2 2 0 0 1 2-2Z" />
-              <path d="M4 7a.75.75 0 0 1 1.5 0 2.5 2.5 0 0 0 5 0A.75.75 0 0 1 12 7a4 4 0 0 1-3.25 3.93v1.32h1.75a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.75v-1.32A4 4 0 0 1 4 7Z" />
-            </svg>
-          </button>
+          <span className="group relative shrink-0">
+            <button
+              type="button"
+              onClick={toggle}
+              disabled={disabled}
+              aria-pressed={listening}
+              aria-label={
+                listening
+                  ? 'Stop dictating'
+                  : 'Speak out your purpose and use case'
+              }
+              title="Speak out your purpose and use case"
+              // Navy while listening, not a severity red: "recording" is a state,
+              // not a finding, and sev-high means one specific thing everywhere
+              // else in this app.
+              className={`flex size-12 items-center justify-center transition-colors duration-150 disabled:opacity-60 ${
+                listening
+                  ? 'bg-minfy-navy text-white'
+                  : 'bg-minfy-indigo text-white hover:bg-minfy-blue'
+              }`}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true" className="size-5 fill-current">
+                <path d="M8 1.5a2 2 0 0 1 2 2v4a2 2 0 0 1-4 0v-4a2 2 0 0 1 2-2Z" />
+                <path d="M4 7a.75.75 0 0 1 1.5 0 2.5 2.5 0 0 0 5 0A.75.75 0 0 1 12 7a4 4 0 0 1-3.25 3.93v1.32h1.75a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.75v-1.32A4 4 0 0 1 4 7Z" />
+              </svg>
+            </button>
+            {/* Visual only: the button's aria-label already carries this wording,
+                so announcing it again would read the same sentence twice. */}
+            <span
+              aria-hidden="true"
+              data-testid="mic-tooltip"
+              className="pointer-events-none absolute right-0 top-full z-10 mt-1.5 w-max max-w-[13rem] bg-minfy-navy px-2.5 py-1.5 text-right text-[0.75rem] leading-snug text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+            >
+              Speak out your purpose and use case
+            </span>
+          </span>
         )}
       </div>
 
