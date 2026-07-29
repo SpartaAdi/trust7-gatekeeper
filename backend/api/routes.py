@@ -21,9 +21,10 @@ import cancel
 import config
 import llm
 import report
+import share
 import storage
 from agent import pipeline
-from schema import ReviewResult, ReviewStatus
+from schema import ReviewResult, ReviewStatus, ScoreDelta
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -249,6 +250,131 @@ def cancel_review(review_id: str) -> ReviewStatus:
     status.error = ""
     storage.put_status(status)
     return status
+
+
+# --------------------------------------------------------------------------- #
+# Read-only share link
+#
+# One completed review, no findings text, no auth token. See share.py for why the
+# token is derived rather than stored, and why the link outlives a restart but the
+# review behind it does not.
+# --------------------------------------------------------------------------- #
+
+
+class SharedPillar(BaseModel):
+    framework: str
+    pillar_id: str
+    pillar_name: str
+    score: float
+    checks_evaluated: int
+    checks_passed: int
+
+
+class SharedReview(BaseModel):
+    """The scoreboard and its movement — deliberately not the findings.
+
+    A share link bypasses the demo gate, so whatever this returns is readable by
+    anyone holding the URL. Scores and their direction of travel are what a link
+    is for; evidence, rationale and remediation text are the parts of a review
+    most likely to quote a customer's design back, so none of them is here.
+
+    `component_count` rather than the components themselves, for the same reason:
+    the count carries the sense of scale without naming anyone's architecture.
+    """
+
+    review_id: str
+    title: str
+    created_at: str
+    overall_score: float
+    frameworks: list[str] = Field(default_factory=list)
+    pillars: list[SharedPillar] = Field(default_factory=list)
+    open_findings: int
+    high_severity_open: int
+    component_count: int
+    delta: ScoreDelta | None = None
+    expires_note: str = Field(
+        description="Stated, not implied: local-data/ is ephemeral on Render's "
+        "free tier, so the review behind a valid link disappears on restart."
+    )
+
+
+class ShareLink(BaseModel):
+    review_id: str
+    token: str
+    path: str = Field(description="API path a client can fetch the shared review from.")
+    expires_note: str
+
+
+@router.get("/reviews/{review_id}/share", response_model=ShareLink)
+def create_share_link(review_id: str) -> ShareLink:
+    """Mint the share token for a completed review. Gated — issuing is not sharing.
+
+    Deterministic: calling this twice returns the same token, because the token is
+    derived from the review id rather than generated and stored. That is what
+    makes a link survive a restart, and it also means there is nothing to
+    invalidate here — rotating DEMO_ACCESS_TOKEN revokes every link at once.
+    """
+    if not share.sharing_enabled():
+        raise HTTPException(status_code=409, detail=share.SHARING_DISABLED_REASON)
+
+    # Reuses the completed-review lookup, so an unfinished or missing review
+    # cannot be shared: it 404s or 409s exactly as fetching it would.
+    result = get_review(review_id)
+
+    return ShareLink(
+        review_id=result.review_id,
+        token=share.token_for(result.review_id),
+        path=f"/shared/{result.review_id}",
+        expires_note=share.EPHEMERAL_NOTE,
+    )
+
+
+@router.get("/shared/{review_id}", response_model=SharedReview)
+def get_shared_review(review_id: str, t: str = "") -> SharedReview:
+    """A shared review, read-only, authorised by the `t` token rather than the gate.
+
+    Every failure answers 404 with the same message — bad token, unknown id,
+    unfinished review, sharing switched off. Distinguishing them would let anyone
+    holding a link enumerate which review ids exist, which is the one thing an
+    ungated route must not offer.
+    """
+    not_found = HTTPException(status_code=404, detail="No shared review at this link.")
+
+    try:
+        if not share.is_valid(review_id, t):
+            raise not_found
+        result = storage.get_review(review_id)
+    except ValueError:
+        # Malformed id — same answer as a wrong token, for the same reason.
+        raise not_found from None
+    if result is None:
+        raise not_found
+
+    open_findings = [f for f in result.findings if f.status in ("fail", "partial")]
+    return SharedReview(
+        review_id=result.review_id,
+        title=result.title,
+        created_at=result.created_at,
+        overall_score=result.overall_score,
+        frameworks=[framework.framework_name for framework in result.frameworks],
+        pillars=[
+            SharedPillar(
+                framework=pillar.framework,
+                pillar_id=pillar.pillar_id,
+                pillar_name=pillar.pillar_name,
+                score=pillar.score,
+                checks_evaluated=pillar.checks_evaluated,
+                checks_passed=pillar.checks_passed,
+            )
+            for framework in result.frameworks
+            for pillar in framework.pillars
+        ],
+        open_findings=len(open_findings),
+        high_severity_open=sum(1 for f in open_findings if f.severity == "high"),
+        component_count=len(result.components),
+        delta=result.delta,
+        expires_note=share.EPHEMERAL_NOTE,
+    )
 
 
 @router.get("/reviews", response_model=list[ReviewSummary])

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { readShareParams } from './api'
 import { MinfyMark } from './components/MinfyMark'
 import { StepTracker, type Step } from './components/StepTracker'
 import { TokenGate } from './components/TokenGate'
@@ -7,6 +8,7 @@ import { getToken, onTokenCleared } from './token'
 import { AnalyzingView } from './views/AnalyzingView'
 import { HistoryView } from './views/HistoryView'
 import { ResultsView } from './views/ResultsView'
+import { SharedView } from './views/SharedView'
 import { UploadView } from './views/UploadView'
 
 /**
@@ -42,6 +44,12 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>({ name: 'history' })
   const goHistory = () => setPhase({ name: 'history' })
 
+  // Read once, from the URL this page was opened with. A share link is a whole
+  // different entry point rather than a phase of the review flow: the recipient
+  // has no demo token, so this has to be decided BEFORE the gate below, and the
+  // shared view offers no way into the rest of the app.
+  const [shared] = useState(readShareParams)
+
   // The demo gate. `rejected` distinguishes "you have not entered it yet" from
   // "what you entered was refused", which is the only feedback the user gets —
   // the server is the only thing that can judge the token.
@@ -53,6 +61,10 @@ export default function App() {
     () => onTokenCleared(() => setGate({ locked: true, rejected: true })),
     [],
   )
+
+  if (shared) {
+    return <SharedView reviewId={shared.reviewId} token={shared.token} />
+  }
 
   if (gate.locked) {
     return (

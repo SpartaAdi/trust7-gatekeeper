@@ -172,3 +172,41 @@ export interface ReviewAccepted {
   status_url: string
   result_url: string
 }
+
+/**
+ * A single completed review as seen through a read-only share link.
+ *
+ * Deliberately not `ReviewResult`: a share link bypasses the demo gate, so this
+ * carries scores and their movement but no finding text, no evidence and no
+ * remediation. Mirrors `SharedReview` in backend/api/routes.py.
+ */
+export interface SharedPillar {
+  framework: string
+  pillar_id: string
+  pillar_name: string
+  score: number
+  checks_evaluated: number
+  checks_passed: number
+}
+
+export interface SharedReview {
+  review_id: string
+  title: string
+  created_at: string
+  overall_score: number
+  frameworks: string[]
+  pillars: SharedPillar[]
+  open_findings: number
+  high_severity_open: number
+  component_count: number
+  delta: ScoreDelta | null
+  /** Why the link is not permanent. Rendered verbatim — see share.py. */
+  expires_note: string
+}
+
+export interface ShareLink {
+  review_id: string
+  token: string
+  path: string
+  expires_note: string
+}

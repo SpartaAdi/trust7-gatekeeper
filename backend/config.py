@@ -187,6 +187,18 @@ DEMO_TOKEN_HEADER = "X-Demo-Token"
 # has no credentials to send.
 UNGATED_PATHS = frozenset({"/health"})
 
+# Prefixes the demo gate does not cover. Exactly one, and it carries its own
+# credential: a share link is handed to someone who deliberately does NOT have
+# the demo token, so gating it would defeat the point. The route behind this
+# prefix validates an HMAC share token per review and answers 404 without one —
+# ungated here means "the shared secret is not the thing that authorises it",
+# not "anyone may read it".
+#
+# A prefix rather than another exact path because the review id is in the URL.
+# Kept as a tuple of one so adding a second is a visible decision rather than a
+# widening nobody notices.
+UNGATED_PREFIXES: tuple[str, ...] = ("/shared/",)
+
 
 def _required_key(name: str) -> str:
     """Read a credential from the environment, or explain how to supply it.

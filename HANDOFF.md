@@ -260,17 +260,53 @@ synthetic example", before touching every prompt.
 **No real findings have been captured. `local-data/reviews/` is empty and no stored
 review exists anywhere in the repo.** This stays blocked until a real run lands.
 
-### ❌ Trend view / shareable link — not started
+### ✅ Trend view / shareable link — **DONE**
 
-No code, no decisions recorded. Note `local-data/` is on Render's **free-tier
-ephemeral disk**, so any trend feature has to survive that or say it doesn't.
+One completed review, read-only, at `?share=<review_id>&t=<token>`. Backend:
+`backend/share.py` plus `GET /reviews/{id}/share` (gated — minting needs the demo
+token) and `GET /shared/{id}?t=` (ungated — reading does not). Frontend:
+`SharedView`, entered before the demo gate in `App.tsx`.
 
-### ❌ User-supplied API key in settings — not started
+**The token is derived, not stored:** `HMAC(DEMO_ACCESS_TOKEN, review_id)`. That
+is what answers the ephemeral-disk problem — there is no share registry to lose,
+so a link survives a restart with no storage at all. Reusing the gate token as
+the HMAC key adds no configuration and grants nobody anything new: forging a
+share token requires the gate token, and whoever holds that can already read
+every review. The cost is that rotating the gate token revokes every outstanding
+link, which a test pins as a known property.
 
-No code. Flagging the obvious tension for whoever picks it up: an API key entered in
-a browser and forwarded to the backend is a credential in transit and possibly in
-logs, which runs straight into the org guardrail below. Design it so the key is
-never logged, never persisted to `local-data/`, and never echoed back to the client.
+**What does NOT survive is the review behind the link.** `local-data/` is still
+ephemeral, so a valid token answers 404 after a restart. This is stated rather
+than engineered around — `share.EPHEMERAL_NOTE` is returned by both routes and
+rendered verbatim on the page, so the API and UI cannot drift on what is
+promised. Making it durable means a database or object store, both ruled out by
+`CLAUDE.md`.
+
+The payload is deliberately narrower than `ReviewResult`: scores, pillars, delta
+and counts, but **no finding text, evidence or remediation** — an ungated URL is
+a public URL, and those fields are the ones most likely to quote a customer's
+design back.
+
+### ✅ User-supplied API key in settings — **DONE**
+
+Optional, collapsed by default; no key supplied means the server's key and
+unchanged behaviour. It is an **OpenRouter** key — the field names the provider
+on purpose, since an Anthropic key would reach a pipeline that never reads one.
+
+The tension flagged here was the right one, and this is where the key lives:
+
+* **In transit** — an `X-OpenRouter-Key` header, never a body field, because
+  FastAPI's 422 handler echoes a rejected body back to the client.
+* **Server-side** — one ContextVar (`llm._API_KEY`) for the duration of one
+  pipeline run, reset in a `finally`. Never an argument to the `lru_cache`d
+  client factory: a cache keyed on a credential is a credential store.
+* **Browser-side** — module memory with no storage backing at all, unlike the
+  demo token's `sessionStorage`. Browsers write session storage to disk for
+  session restore, which would leave a live billable key in a file outliving the
+  tab. A refresh therefore clears it, which the UI says.
+
+Cancellation still works on a user-key call: the per-call client shares the
+module's one httpx transport, which is what `_abort_transport` closes.
 
 ---
 
@@ -279,9 +315,16 @@ never logged, never persisted to `local-data/`, and never echoed back to the cli
 **Everything passes at `bd86e37`. Nothing is failing and nothing was left mid-fix.**
 
 ```
-backend    374 passed
-frontend   153 passed (9 files)
+backend    407 passed
+frontend   186 passed (12 files)
 ```
+
+Both figures include the share-link and user-key rounds. Note the container this
+was last verified in had **no dependencies installed at all** — `pip install -r
+requirements.txt -r requirements-dev.txt` first, and additionally
+`pip install --ignore-installed cryptography`, because the system
+`dist-packages` copy is broken (`ModuleNotFoundError: _cffi_backend`) and three
+test files fail at collection without it.
 
 Reproduce:
 

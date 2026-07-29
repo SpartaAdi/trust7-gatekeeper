@@ -12,6 +12,8 @@ import type {
   ReviewResult,
   ReviewStatus,
   ReviewSummary,
+  ShareLink,
+  SharedReview,
   UploadTicket,
 } from './types'
 
@@ -205,6 +207,54 @@ export function getReview(reviewId: string): Promise<ReviewResult> {
 /** Past reviews, newest first. Read from stored data; no re-analysis. */
 export function listReviews(): Promise<ReviewSummary[]> {
   return request<ReviewSummary[]>('/reviews')
+}
+
+/**
+ * Mint the read-only share token for a completed review.
+ *
+ * Gated, unlike reading a shared review: issuing a link needs the demo token, so
+ * a recipient cannot mint links for other reviews. Deterministic server-side, so
+ * calling this twice hands back the same link.
+ */
+export function createShareLink(reviewId: string): Promise<ShareLink> {
+  return request<ShareLink>(`/reviews/${encodeURIComponent(reviewId)}/share`)
+}
+
+/**
+ * Read a shared review. This is the one call a recipient makes, and they have no
+ * demo token — the `t` parameter is what authorises it. The server answers 404
+ * for a wrong token, an unknown review, and a review whose file is gone after a
+ * restart, all with the same message.
+ */
+export function getSharedReview(reviewId: string, token: string): Promise<SharedReview> {
+  return request<SharedReview>(
+    `/shared/${encodeURIComponent(reviewId)}?t=${encodeURIComponent(token)}`,
+  )
+}
+
+/** The full URL to hand someone. Read back by `readShareParams` on load. */
+export function shareUrl(link: ShareLink): string {
+  const url = new URL(window.location.href)
+  url.hash = ''
+  url.search = `?share=${encodeURIComponent(link.review_id)}&t=${encodeURIComponent(link.token)}`
+  return url.toString()
+}
+
+/**
+ * The share parameters in the current URL, if this page load is a shared link.
+ *
+ * Query parameters rather than a path segment: the Vercel config rewrites every
+ * path to index.html for the SPA, so a path would work but adds a routing
+ * concept this app does not otherwise have — there is no router here, only a
+ * phase in `App`.
+ */
+export function readShareParams(
+  search: string = window.location.search,
+): { reviewId: string; token: string } | null {
+  const params = new URLSearchParams(search)
+  const reviewId = params.get('share') ?? ''
+  const token = params.get('t') ?? ''
+  return reviewId && token ? { reviewId, token } : null
 }
 
 export interface ReportDownload {

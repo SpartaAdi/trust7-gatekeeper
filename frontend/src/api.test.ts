@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { OPENROUTER_KEY_HEADER, getStatus, submitReview } from './api'
+import {
+  OPENROUTER_KEY_HEADER,
+  getSharedReview,
+  getStatus,
+  readShareParams,
+  shareUrl,
+  submitReview,
+} from './api'
 import { clearApiKey, setApiKey } from './apiKey'
 import { setToken } from './token'
 
@@ -18,22 +25,23 @@ function headersOfLastCall(mock: ReturnType<typeof vi.fn>): Headers {
   return new Headers(init.headers as HeadersInit)
 }
 
+let fetchMock: ReturnType<typeof vi.fn>
+
+beforeEach(() => {
+  setToken('demo-token')
+  fetchMock = vi.fn().mockResolvedValue(
+    jsonResponse({ review_id: 'rev-1', status_url: '/s', result_url: '/r' }),
+  )
+  vi.stubGlobal('fetch', fetchMock)
+})
+
+afterEach(() => {
+  clearApiKey()
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
+
 describe('the reviewer-supplied OpenRouter key on the wire', () => {
-  let fetchMock: ReturnType<typeof vi.fn>
-
-  beforeEach(() => {
-    setToken('demo-token')
-    fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({ review_id: 'rev-1', status_url: '/s', result_url: '/r' }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-  })
-
-  afterEach(() => {
-    clearApiKey()
-    vi.unstubAllGlobals()
-    vi.restoreAllMocks()
-  })
 
   it('sends no key header when the reviewer supplied none', async () => {
     await submitReview({ documentKey: 'uploads/x/sow.md' })
@@ -74,5 +82,55 @@ describe('the reviewer-supplied OpenRouter key on the wire', () => {
     await getStatus('rev-1')
 
     expect(headersOfLastCall(fetchMock).has(OPENROUTER_KEY_HEADER)).toBe(false)
+  })
+})
+
+describe('share link URLs', () => {
+  it('round-trips: a URL built from a link parses back to the same parameters', () => {
+    const link = {
+      review_id: 'rev-1',
+      token: 'a'.repeat(32),
+      path: '/shared/rev-1',
+      expires_note: 'note',
+    }
+
+    const url = shareUrl(link)
+
+    expect(readShareParams(new URL(url).search)).toEqual({
+      reviewId: 'rev-1',
+      token: 'a'.repeat(32),
+    })
+  })
+
+  it('encodes ids and tokens rather than pasting them raw into the URL', () => {
+    const url = shareUrl({
+      review_id: 'a b&c',
+      token: 'x/y?z',
+      path: '',
+      expires_note: '',
+    })
+
+    expect(url).not.toContain('a b&c')
+    expect(readShareParams(new URL(url).search)).toEqual({
+      reviewId: 'a b&c',
+      token: 'x/y?z',
+    })
+  })
+
+  it('reads nothing from a normal page load', () => {
+    expect(readShareParams('')).toBeNull()
+  })
+
+  it('needs both parameters — half a link is not a link', () => {
+    expect(readShareParams('?share=rev-1')).toBeNull()
+    expect(readShareParams('?t=abc')).toBeNull()
+  })
+
+  it('sends the token as the query parameter the server reads', async () => {
+    await getSharedReview('rev-1', 'tok-123')
+
+    const [url] = fetchMock.mock.calls.at(-1) as [string, RequestInit]
+    expect(url).toContain('/shared/rev-1')
+    expect(url).toContain('t=tok-123')
   })
 })

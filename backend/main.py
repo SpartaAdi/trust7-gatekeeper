@@ -50,6 +50,12 @@ async def require_demo_token(request: Request, call_next):
     if request.method == "OPTIONS" or request.url.path in config.UNGATED_PATHS:
         return await call_next(request)
 
+    # Share links carry their own per-review HMAC instead of the shared token —
+    # see config.UNGATED_PREFIXES and share.py. The route itself refuses a bad
+    # or missing one, so skipping the gate here does not make it readable.
+    if request.url.path.startswith(config.UNGATED_PREFIXES):
+        return await call_next(request)
+
     if not config.DEMO_ACCESS_TOKEN:
         return JSONResponse(
             status_code=401,

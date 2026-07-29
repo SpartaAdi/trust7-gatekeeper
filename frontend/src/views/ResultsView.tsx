@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { ApiError, downloadReport, getReview } from '../api'
+import { ApiError, createShareLink, downloadReport, getReview, shareUrl } from '../api'
 import { SeverityMark } from '../components/SeverityMark'
 import {
   MATURITY_BOUND_NOTE,
@@ -185,6 +185,7 @@ export function ResultsView({
         {selectTopActions(result.findings).length > 0 && (
           <CopyFixItPromptButton findings={result.findings} />
         )}
+        <CopyShareLinkButton reviewId={result.review_id} />
         <button
           type="button"
           onClick={onStartOver}
@@ -347,6 +348,65 @@ function CopyFixItPromptButton({ findings }: { findings: Finding[] }) {
           already looking at the button they just pressed. */}
       <span aria-live="polite" className="t-caption text-sev-high">
         {state === 'failed' ? 'Could not copy to the clipboard.' : ''}
+      </span>
+    </span>
+  )
+}
+
+/**
+ * Copies a read-only link to this review.
+ *
+ * Same shape as the fix-it copy button above, deliberately — the failure mode is
+ * identical (clipboard unavailable or refused) and so is the recovery, so this
+ * mirrors it rather than inventing a second idiom. The one addition is that the
+ * link has to be fetched first, which can fail on its own.
+ *
+ * The note under the button is not decoration: the link outlives a restart but
+ * the review it points at does not, and someone about to paste this into an
+ * email should know that before they send it.
+ */
+function CopyShareLinkButton({ reviewId }: { reviewId: string }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [note, setNote] = useState('')
+
+  async function run() {
+    try {
+      const link = await createShareLink(reviewId)
+      await navigator.clipboard.writeText(shareUrl(link))
+      setNote(link.expires_note)
+      setState('copied')
+      window.setTimeout(() => setState('idle'), 2000)
+    } catch (cause) {
+      setNote(cause instanceof Error ? cause.message : '')
+      setState('failed')
+    }
+  }
+
+  return (
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <button
+        type="button"
+        onClick={run}
+        className={`t-body flex w-[13.5rem] items-center justify-center gap-2 border border-minfy-navy px-4 py-2.5 font-semibold transition-colors duration-150 ${
+          state === 'copied'
+            ? 'bg-minfy-navy text-white'
+            : 'text-minfy-navy hover:bg-minfy-navy hover:text-white'
+        }`}
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true" className="size-3.5 fill-current">
+          <path d="M6.6 9.4a3 3 0 0 0 4.2 0l2.2-2.2a3 3 0 0 0-4.2-4.2l-1 1 1 1 1-1a1.6 1.6 0 0 1 2.2 2.2L9.8 8.2a1.6 1.6 0 0 1-2.2 0Z M9.4 6.6a3 3 0 0 0-4.2 0L3 8.8a3 3 0 0 0 4.2 4.2l1-1-1-1-1 1A1.6 1.6 0 0 1 4 9.8l2.2-2.2a1.6 1.6 0 0 1 2.2 0Z" />
+        </svg>
+        {state === 'copied' ? 'Link copied' : 'Copy share link'}
+      </button>
+      <span
+        aria-live="polite"
+        className={`t-caption ${state === 'failed' ? 'text-sev-high' : 'text-ink-faint'}`}
+      >
+        {state === 'failed'
+          ? `Could not copy a share link. ${note}`.trim()
+          : state === 'copied'
+            ? note
+            : ''}
       </span>
     </span>
   )
