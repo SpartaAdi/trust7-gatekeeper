@@ -19,7 +19,9 @@ import { UploadView } from './views/UploadView'
 type Phase =
   | { name: 'history' }
   | { name: 'upload'; previousReviewId?: string; returnToReviewId?: string }
-  | { name: 'analyzing'; reviewId: string }
+  // `startedAt` rides on the phase so the elapsed clock survives re-renders without
+  // a second source of truth. It is set once, by UploadView, and never recomputed.
+  | { name: 'analyzing'; reviewId: string; startedAt: number }
   | { name: 'results'; reviewId: string }
 
 const STEP_FOR: Record<Exclude<Phase['name'], 'history'>, Step> = {
@@ -147,7 +149,9 @@ export default function App() {
             {...(phase.previousReviewId !== undefined && {
               previousReviewId: phase.previousReviewId,
             })}
-            onStarted={(reviewId) => setPhase({ name: 'analyzing', reviewId })}
+            onStarted={(reviewId, startedAt) =>
+              setPhase({ name: 'analyzing', reviewId, startedAt })
+            }
             onCancel={
               phase.returnToReviewId !== undefined
                 ? () =>
@@ -160,6 +164,7 @@ export default function App() {
         {phase.name === 'analyzing' && (
           <AnalyzingView
             reviewId={phase.reviewId}
+            startedAt={phase.startedAt}
             onComplete={() => setPhase({ name: 'results', reviewId: phase.reviewId })}
             onStartOver={() => setPhase({ name: 'upload' })}
           />

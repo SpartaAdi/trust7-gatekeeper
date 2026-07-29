@@ -99,7 +99,7 @@ describe('UploadView', () => {
     await user.upload(fileInput(), [sow()])
     await user.click(screen.getByRole('button', { name: /start review/i }))
 
-    await waitFor(() => expect(onStarted).toHaveBeenCalledWith('rev-doc'))
+    await waitFor(() => expect(onStarted).toHaveBeenCalledWith('rev-doc', expect.any(Number)))
     // Only the file that exists is uploaded.
     expect(uploadFile).toHaveBeenCalledTimes(1)
     expect(submitReview).toHaveBeenCalledWith(
@@ -124,7 +124,7 @@ describe('UploadView', () => {
     await user.upload(fileInput(), [diagram()])
     await user.click(screen.getByRole('button', { name: /start review/i }))
 
-    await waitFor(() => expect(onStarted).toHaveBeenCalledWith('rev-dia'))
+    await waitFor(() => expect(onStarted).toHaveBeenCalledWith('rev-dia', expect.any(Number)))
     expect(uploadFile).toHaveBeenCalledTimes(1)
     expect(submitReview).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -220,7 +220,7 @@ describe('UploadView', () => {
     await user.type(screen.getByLabelText(/review name/i), 'Q3 payments platform')
     await user.click(screen.getByRole('button', { name: /start review/i }))
 
-    await waitFor(() => expect(onStarted).toHaveBeenCalledWith('rev-9'))
+    await waitFor(() => expect(onStarted).toHaveBeenCalledWith('rev-9', expect.any(Number)))
     expect(uploadFile).toHaveBeenCalledTimes(2)
     expect(submitReview).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -229,6 +229,32 @@ describe('UploadView', () => {
         title: 'Q3 payments platform',
       }),
     )
+  })
+
+  it('reports the instant the submission began, not the instant it was accepted', async () => {
+    // The elapsed clock counts from `startedAt`, so it must predate the uploads. On a
+    // slow connection those take seconds, and a clock started after them would under-
+    // report the wait the user actually sat through.
+    let firstUploadAt = 0
+    vi.mocked(uploadFile).mockImplementation(async () => {
+      firstUploadAt = firstUploadAt || Date.now()
+      return 'uploads/a/payments-sow.pdf'
+    })
+    vi.mocked(submitReview).mockResolvedValue({
+      review_id: 'rev-clock',
+      status_url: '',
+      result_url: '',
+    })
+    const onStarted = vi.fn()
+    const user = userEvent.setup()
+
+    render(<UploadView onStarted={onStarted} />)
+    await user.upload(fileInput(), [sow()])
+    await user.click(screen.getByRole('button', { name: /start review/i }))
+
+    await waitFor(() => expect(onStarted).toHaveBeenCalled())
+    const startedAt = onStarted.mock.calls[0]![1] as number
+    expect(startedAt).toBeLessThanOrEqual(firstUploadAt)
   })
 
   it('defaults the review name to the document filename', async () => {

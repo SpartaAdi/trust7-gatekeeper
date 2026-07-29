@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { ApiError, getStatus } from '../api'
+import { elapsedSeconds, formatElapsed } from '../elapsed'
 import { estimateRemainingSeconds, formatRemaining } from '../eta'
 import { STAGE_LABELS, type ReviewStatus, type StageProgress } from '../types'
 
@@ -10,14 +11,35 @@ const MAX_CONSECUTIVE_FAILURES = 5
 
 interface Props {
   reviewId: string
+  /** Epoch ms when the submission began — set by UploadView, never recomputed. */
+  startedAt: number
   onComplete: () => void
   onStartOver: () => void
 }
 
-export function AnalyzingView({ reviewId, onComplete, onStartOver }: Props) {
+export function AnalyzingView({
+  reviewId,
+  startedAt,
+  onComplete,
+  onStartOver,
+}: Props) {
   const [status, setStatus] = useState<ReviewStatus | null>(null)
   const [pollError, setPollError] = useState('')
   const [gaveUp, setGaveUp] = useState(false)
+
+  // One tick drives both the elapsed clock and the estimate, and `frozenMs` is a latch
+  // over it: once set, the displayed instant can never move again. A latch rather than
+  // just tearing the interval down, because teardown is an effect and an effect can
+  // flush a beat after the state change it reacts to — long enough for one more tick
+  // to land past the end of the run.
+  const [tickMs, setTickMs] = useState(() => Date.now())
+  const [frozenMs, setFrozenMs] = useState<number | null>(null)
+  const nowMs = frozenMs ?? tickMs
+
+  /** Stop the clock at this instant. First call wins — a freeze is not revisable. */
+  function freeze() {
+    setFrozenMs((already) => already ?? Date.now())
+  }
 
   // Held in a ref so a re-created callback doesn't restart the poll loop.
   const onCompleteRef = useRef(onComplete)
@@ -37,12 +59,18 @@ export function AnalyzingView({ reviewId, onComplete, onStartOver }: Props) {
         setPollError('')
         setStatus(next)
 
-        // Terminal states stop the loop; nothing further will change.
+        // Terminal states stop the loop; nothing further will change. The clock is
+        // frozen here rather than in an effect reacting to the state change, because
+        // this is the moment the run is known to be over.
         if (next.state === 'complete') {
+          freeze()
           onCompleteRef.current()
           return
         }
-        if (next.state === 'error') return
+        if (next.state === 'error') {
+          freeze()
+          return
+        }
       } catch (caught) {
         if (cancelled) return
         failures += 1
@@ -50,6 +78,7 @@ export function AnalyzingView({ reviewId, onComplete, onStartOver }: Props) {
           caught instanceof ApiError ? caught.message : 'Could not read review status.',
         )
         if (failures >= MAX_CONSECUTIVE_FAILURES) {
+          freeze()
           setGaveUp(true)
           return
         }
@@ -69,16 +98,20 @@ export function AnalyzingView({ reviewId, onComplete, onStartOver }: Props) {
   const failed = status?.state === 'error'
   const percent = stages.length > 0 ? Math.round((doneCount / stages.length) * 100) : 0
 
-  // The estimate has to count down between polls, so it gets its own one-second
-  // tick. It stops as soon as the run settles or we stop polling — an interval
-  // still running on a finished screen is a leak, not a detail.
-  const [nowMs, setNowMs] = useState(() => Date.now())
+  // The tick only runs while the run does — an interval still firing on a finished
+  // screen is a leak, even though the latch above means it could no longer be seen.
   const settling = failed || gaveUp || status?.state === 'complete'
   useEffect(() => {
     if (settling) return
-    const ticker = window.setInterval(() => setNowMs(Date.now()), 1000)
+    const ticker = window.setInterval(() => setTickMs(Date.now()), 1000)
     return () => window.clearInterval(ticker)
   }, [settling])
+
+  // A CLOCK, not an estimate. Latency for one review has ranged from 14 seconds to 44
+  // minutes on the same provider, so elapsed time is the only duration figure that is
+  // always true. It freezes with `nowMs` above: on a failure this screen stays
+  // mounted, and how long the run got before it broke is itself the finding.
+  const elapsed = elapsedSeconds(startedAt, nowMs)
 
   const remainingSeconds = failed ? null : estimateRemainingSeconds(stages, nowMs)
 
@@ -105,6 +138,8 @@ export function AnalyzingView({ reviewId, onComplete, onStartOver }: Props) {
             <span className="t-eyebrow text-ink-muted">Progress</span>
             <span className="tnum t-caption text-ink-muted">
               {doneCount} of {stages.length} stages
+              <span aria-hidden="true"> · </span>
+              <ElapsedClock seconds={elapsed} />
               {remainingSeconds !== null && (
                 <>
                   <span aria-hidden="true"> · </span>
@@ -150,6 +185,18 @@ export function AnalyzingView({ reviewId, onComplete, onStartOver }: Props) {
               />
             </div>
           ))}
+        </div>
+      )}
+
+      {/*
+        The progress block above is hidden on a failure, so the clock is repeated
+        here — the elapsed time up to a failure is information, not decoration, and
+        losing it would mean the one screen that most needs it does not show it.
+      */}
+      {failed && (
+        <div className="mt-8 flex items-baseline justify-between gap-x-4">
+          <span className="t-eyebrow text-ink-muted">Ran for</span>
+          <ElapsedClock seconds={elapsed} />
         </div>
       )}
 
@@ -209,6 +256,26 @@ export function AnalyzingView({ reviewId, onComplete, onStartOver }: Props) {
     </div>
   )
 }
+
+/**
+ * Elapsed wall clock. Deliberately not a bar and not a percentage.
+ *
+ * `aria-live="polite"` rather than assertive: the text changes every second, and an
+ * assertive region would have a screen reader interrupt itself continuously. Existing
+ * tokens only — `tnum` keeps the digits from jittering as they change width.
+ */
+function ElapsedClock({ seconds }: { seconds: number }) {
+  return (
+    <span
+      className="tnum t-caption text-ink-muted"
+      aria-live="polite"
+      data-testid="elapsed"
+    >
+      {formatElapsed(seconds)} elapsed
+    </span>
+  )
+}
+
 
 function StageRow({ stage, index }: { stage: StageProgress; index: number }) {
   const label = STAGE_LABELS[stage.name] ?? stage.name

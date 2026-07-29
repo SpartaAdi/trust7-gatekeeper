@@ -11,7 +11,12 @@ const MAX_CONTEXT_CHARS = 1000
 interface Props {
   /** Set when re-reviewing; the new review is compared against this one. */
   previousReviewId?: string
-  onStarted: (reviewId: string) => void
+  /**
+   * `startedAt` is the instant the submission began, not the instant the review was
+   * accepted — the uploads happen first and can take seconds on a slow connection.
+   * The elapsed clock is only honest if it counts from here.
+   */
+  onStarted: (reviewId: string, startedAt: number) => void
   onCancel?: () => void
 }
 
@@ -85,6 +90,8 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
     // One is enough; only an empty submission is refused.
     if (!documentFile && !diagramFile) return
 
+    const startedAt = Date.now()
+
     try {
       let documentKey = ''
       let diagramKey = ''
@@ -107,7 +114,7 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
         context: diagramOnly ? context.trim() : '',
         previousReviewId,
       })
-      onStarted(accepted.review_id)
+      onStarted(accepted.review_id, startedAt)
     } catch (caught) {
       setError(
         caught instanceof ApiError || caught instanceof Error
