@@ -589,6 +589,79 @@ def prioritize(
     )
 
 
+# Severity order for the backfill below. Not a scoring input — scoring never reads
+# `priority` — purely a deterministic tie-break so two runs over identical findings
+# produce identical ranks.
+_SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
+
+
+def apply_ranking(
+    findings: list[Finding], ranking: list[dict[str, Any]]
+) -> tuple[int, int]:
+    """Write `priority` onto every open finding. Returns (ranked_by_model, backfilled).
+
+    The prompt asks the model to "rank every finding you are given, once each, with
+    consecutive ranks starting at 1". A real run returned 19 entries for 31 open
+    findings, and the previous code did `ranks.get(check_id, 0)` — so the other 12
+    open gaps kept priority 0, which is the same value a PASSING check carries.
+
+    That is not a cosmetic problem. `priority == 0` is read as "unranked" in three
+    places: the frontend prints `·` instead of a number, `selectTopActions` sorts
+    those findings last and loses pillar tie-breaks on them, and the stored array is
+    sorted with passing checks. A partial ranking therefore silently demoted twelve
+    real gaps to the same standing as checks that passed.
+
+    So the ranking is completed here rather than trusted:
+
+    * Entries naming a check that is not an open finding are ignored — a rank for a
+      passing check, or for a check_id the model invented, must not displace a real
+      one. This mirrors how `_to_findings` discards unrecognised check_ids.
+    * Accepted entries are re-numbered 1..k in the order the model put them. The
+      model's own numbers can be non-consecutive or duplicated; the relative order it
+      expressed is the judgement worth keeping, the integers are not.
+    * Every remaining open finding is appended after them, ordered by severity then
+      by position, so the result is always a total order over the open findings with
+      no gaps and no ties.
+
+    Deterministic backfill rather than a retry: this must hold unconditionally, and a
+    retry could return 19 again. It also costs nothing, which matters more than the
+    marginal quality of ranks 20-31.
+    """
+    open_findings = [f for f in findings if f.status in ("fail", "partial")]
+    by_id = {f.check_id: f for f in open_findings}
+    position = {f.check_id: i for i, f in enumerate(open_findings)}
+
+    accepted: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    for item in ranking:
+        check_id = item.get("check_id", "")
+        if check_id not in by_id or check_id in seen:
+            continue
+        seen.add(check_id)
+        rank = item.get("rank")
+        accepted.append((rank if isinstance(rank, int) else len(ranking), check_id))
+
+    # Stable on the model's stated order, then renumbered contiguously.
+    accepted.sort(key=lambda pair: pair[0])
+    for index, (_, check_id) in enumerate(accepted, start=1):
+        by_id[check_id].priority = index
+
+    remaining = sorted(
+        (f for f in open_findings if f.check_id not in seen),
+        key=lambda f: (_SEVERITY_RANK.get(f.severity, 3), position[f.check_id]),
+    )
+    for offset, finding in enumerate(remaining, start=len(accepted) + 1):
+        finding.priority = offset
+
+    # Anything not open is unranked by definition, and 0 is what the UI reads as
+    # "no rank". Reset explicitly so a re-review cannot inherit a stale priority.
+    for finding in findings:
+        if finding.status not in ("fail", "partial"):
+            finding.priority = 0
+
+    return len(accepted), len(remaining)
+
+
 # --------------------------------------------------------------------------- #
 # Stage 4 — generate remediation
 # --------------------------------------------------------------------------- #

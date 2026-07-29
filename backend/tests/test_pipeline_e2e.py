@@ -406,13 +406,37 @@ def test_an_executive_summary_is_produced(journey) -> None:
 
 def test_findings_come_back_in_remediation_order(journey) -> None:
     """The Results page renders them in array order, so the API must sort them:
-    ranked findings first in ascending rank, unranked (priority 0) last."""
+    ranked findings first in ascending rank, then the checks that passed."""
     priorities = [f["priority"] for f in journey["result"]["findings"]]
     ranked = [p for p in priorities if p > 0]
 
     assert ranked, "nothing was ranked, so this proves nothing"
     assert priorities[: len(ranked)] == sorted(ranked), priorities[:10]
     assert all(p == 0 for p in priorities[len(ranked) :])
+
+
+def test_every_open_finding_carries_a_rank(journey) -> None:
+    """The regression. The stub ranks ONE of 31 open findings, exactly as a real run
+    ranked 19 of 31 — and the old code left the rest at priority 0, the same value a
+    PASSING check carries. Nothing in the suite noticed, because no test asserted
+    that open findings are ranked."""
+    findings = journey["result"]["findings"]
+    open_findings = [f for f in findings if f["status"] in ("fail", "partial")]
+    unranked = [f["check_id"] for f in open_findings if f["priority"] == 0]
+
+    assert len(open_findings) > 1, "needs several open findings to be meaningful"
+    assert not unranked, f"open findings left with no rank: {unranked}"
+
+    # A total order: contiguous 1..N over the open findings, no gaps, no ties.
+    assert sorted(f["priority"] for f in open_findings) == list(
+        range(1, len(open_findings) + 1)
+    )
+    # And a passing check is still unranked, which is what 0 means.
+    assert all(
+        f["priority"] == 0
+        for f in findings
+        if f["status"] not in ("fail", "partial")
+    )
 
 
 def test_token_usage_is_accumulated_across_stages(journey) -> None:
@@ -698,3 +722,165 @@ def test_the_empty_shape_really_does_satisfy_the_schema() -> None:
     from agent import stages
 
     llm.enforce_schema(_empty_classification(), stages._CLASSIFY_SCHEMA)
+
+
+# --------------------------------------------------------------------------- #
+# apply_ranking — completing a partial ranking
+#
+# A real run: evaluate found 31 open gaps, prioritize's model returned 19 ranking
+# entries, remediate wrote 31 remediations. The stages were never disconnected —
+# there is one findings list, mutated in place — but 12 open gaps kept priority 0,
+# indistinguishable from a check that passed.
+# --------------------------------------------------------------------------- #
+
+def _open_findings(count: int, severity: str = "high") -> list[Any]:
+    from schema import Finding
+
+    return [
+        Finding(framework="aws_waf", pillar_id="security", check_id=f"c{i}",
+                status="fail", severity=severity, title=f"finding {i}")
+        for i in range(count)
+    ]
+
+
+def test_a_partial_ranking_is_completed_rather_than_accepted() -> None:
+    """Tonight's exact shape: 19 of 31."""
+    from agent import stages
+
+    findings = _open_findings(31)
+    ranking = [{"check_id": f.check_id, "rank": i + 1, "rationale": "r"}
+               for i, f in enumerate(findings[:19])]
+
+    ranked, backfilled = stages.apply_ranking(findings, ranking)
+
+    assert (ranked, backfilled) == (19, 12)
+    assert sorted(f.priority for f in findings) == list(range(1, 32))
+    assert not [f for f in findings if f.priority == 0]
+
+
+def test_the_models_ordering_is_preserved_for_what_it_did_rank() -> None:
+    """The relative order is the judgement worth keeping."""
+    from agent import stages
+
+    findings = _open_findings(4)
+    # Deliberately out of order and non-consecutive.
+    ranking = [
+        {"check_id": "c2", "rank": 50, "rationale": "r"},
+        {"check_id": "c0", "rank": 10, "rationale": "r"},
+    ]
+
+    stages.apply_ranking(findings, ranking)
+    by_id = {f.check_id: f.priority for f in findings}
+
+    assert by_id["c0"] == 1, "lower model rank must come first"
+    assert by_id["c2"] == 2, "ranks are renumbered contiguously"
+    assert {by_id["c1"], by_id["c3"]} == {3, 4}, "the rest follow"
+
+
+def test_the_backfill_orders_by_severity() -> None:
+    """Not scoring — scoring never reads priority — just a defensible tie-break."""
+    from agent import stages
+    from schema import Finding
+
+    findings = [
+        Finding(framework="aws_waf", pillar_id="p", check_id="low1",
+                status="fail", severity="low", title="t"),
+        Finding(framework="aws_waf", pillar_id="p", check_id="high1",
+                status="fail", severity="high", title="t"),
+        Finding(framework="aws_waf", pillar_id="p", check_id="med1",
+                status="partial", severity="medium", title="t"),
+    ]
+
+    stages.apply_ranking(findings, [])
+    by_id = {f.check_id: f.priority for f in findings}
+
+    assert (by_id["high1"], by_id["med1"], by_id["low1"]) == (1, 2, 3)
+
+
+def test_the_backfill_is_deterministic() -> None:
+    """Two runs over identical findings must produce identical ranks."""
+    from agent import stages
+
+    first, second = _open_findings(12), _open_findings(12)
+    stages.apply_ranking(first, [])
+    stages.apply_ranking(second, [])
+
+    assert [f.priority for f in first] == [f.priority for f in second]
+
+
+def test_a_rank_for_a_passing_check_is_ignored() -> None:
+    """It must not displace a real gap, and a passing check stays unranked."""
+    from agent import stages
+    from schema import Finding
+
+    findings = _open_findings(2) + [
+        Finding(framework="aws_waf", pillar_id="p", check_id="passed",
+                status="pass", severity="high", title="t")
+    ]
+
+    ranked, backfilled = stages.apply_ranking(
+        findings, [{"check_id": "passed", "rank": 1, "rationale": "r"}]
+    )
+
+    assert (ranked, backfilled) == (0, 2)
+    assert next(f.priority for f in findings if f.check_id == "passed") == 0
+
+
+def test_an_invented_check_id_is_ignored() -> None:
+    """Mirrors how `_to_findings` discards unrecognised check_ids."""
+    from agent import stages
+
+    findings = _open_findings(3)
+
+    ranked, backfilled = stages.apply_ranking(
+        findings, [{"check_id": "does_not_exist", "rank": 1, "rationale": "r"}]
+    )
+
+    assert (ranked, backfilled) == (0, 3)
+
+
+def test_a_duplicated_check_id_is_counted_once() -> None:
+    from agent import stages
+
+    findings = _open_findings(3)
+    ranking = [
+        {"check_id": "c0", "rank": 1, "rationale": "r"},
+        {"check_id": "c0", "rank": 2, "rationale": "r"},
+    ]
+
+    ranked, backfilled = stages.apply_ranking(findings, ranking)
+
+    assert (ranked, backfilled) == (1, 2)
+    assert sorted(f.priority for f in findings) == [1, 2, 3]
+
+
+def test_a_stale_priority_cannot_survive_a_re_review() -> None:
+    """A finding that was open and ranked, then passes on re-review, must go back to
+    unranked rather than keeping the rank it used to have."""
+    from agent import stages
+
+    findings = _open_findings(2)
+    stages.apply_ranking(findings, [])
+    assert findings[0].priority == 1
+
+    findings[0].status = "pass"
+    stages.apply_ranking(findings, [])
+
+    assert findings[0].priority == 0
+    assert findings[1].priority == 1
+
+
+def test_remediate_receives_the_same_list_prioritize_ranked() -> None:
+    """Disproves the 'silently disconnected stages' hypothesis directly: there is one
+    list, mutated in place, so remediate cannot be reading a different one."""
+    import inspect
+
+    from agent import pipeline
+
+    source = inspect.getsource(pipeline.run)
+    ranking_call = source.index("apply_ranking")
+    remediate_call = source.index("stages.remediate(")
+
+    assert ranking_call < remediate_call, "ranking must be applied before remediate"
+    # remediate's first argument is the same `findings` name the ranking wrote to.
+    assert "stages.remediate(\n            findings," in source

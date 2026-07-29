@@ -148,14 +148,16 @@ def run(
         progress.start("prioritize", "Ranking findings")
         ranking_payload, usage = stages.prioritize(findings, classification)
         usages.append(usage)
-        ranks = {
-            item["check_id"]: item["rank"]
-            for item in ranking_payload.get("ranking", [])
-            if item.get("check_id")
-        }
-        for finding in findings:
-            finding.priority = ranks.get(finding.check_id, 0)
-        progress.finish("prioritize", f"{len(ranks)} findings ranked")
+        ranked, backfilled = stages.apply_ranking(
+            findings, ranking_payload.get("ranking", [])
+        )
+        # The old line printed only what the model returned, which read as though
+        # that were the whole job: "19 findings ranked" against 31 open gaps, with no
+        # hint that 12 were left unranked. It now states the total and the shortfall.
+        detail = f"{ranked + backfilled} findings ranked"
+        if backfilled:
+            detail += f" ({ranked} by the model, {backfilled} by severity)"
+        progress.finish("prioritize", detail)
 
         # ---- score, then remediate ------------------------------------------ #
         # Scoring only needs the findings, so it runs before remediation: the
