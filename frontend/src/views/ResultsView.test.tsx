@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
+import type { Finding } from '../types'
 import { resultFixture } from '../test/fixtures'
 import { ResultsView } from './ResultsView'
 
@@ -1007,6 +1008,9 @@ describe('ResultsView — structured copy', () => {
       />)
 
     const assessment = await screen.findByTestId('assessment')
+    // The "Fix these first" callout lives in this section too and is its own
+    // list; remove it so this counts the assessment's own bullets.
+    screen.getByTestId('priority-focus').remove()
     expect(within(assessment).getAllByRole('listitem')).toHaveLength(3)
     expect(assessment.textContent).not.toContain('- Security')
   })
@@ -1024,6 +1028,7 @@ describe('ResultsView — structured copy', () => {
       />)
 
     const assessment = await screen.findByTestId('assessment')
+    screen.getByTestId('priority-focus').remove()
     expect(within(assessment).queryAllByRole('listitem')).toHaveLength(0)
     expect(assessment).toHaveTextContent(/solid shape, with encryption/i)
   })
@@ -1075,5 +1080,95 @@ describe('ResultsView — structured copy', () => {
     const exec = await screen.findByTestId('executive-summary')
     expect(within(exec).queryAllByRole('listitem')).toHaveLength(0)
     expect(exec.querySelector('p')).not.toBeNull()
+  })
+})
+
+describe('ResultsView — priority focus callout', () => {
+  const spreadFindings = () => {
+    const base = resultFixture().findings[0]!
+    return [
+      { ...base, check_id: 'sec_a', pillar_id: 'security',
+        title: 'No encryption at rest', remediation_effort: 'low' as const },
+      { ...base, check_id: 'ops_a', pillar_id: 'operational_excellence',
+        title: 'No runbook referenced', severity: 'medium' as const,
+        remediation_effort: 'medium' as const },
+      { ...base, check_id: 'rel_a', pillar_id: 'reliability',
+        title: 'Single-AZ deployment', remediation_effort: 'high' as const,
+        affected_components: ['a', 'b'] },
+    ]
+  }
+
+  function mountFocus(findings: Finding[] = spreadFindings()) {
+    getReview.mockResolvedValue(resultFixture({ findings }))
+    return render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+  }
+
+  it('sits inside the assessment, above the pillar heatmaps', async () => {
+    mountFocus()
+
+    const focus = await screen.findByTestId('priority-focus')
+    const assessment = screen.getByTestId('assessment')
+    expect(assessment.contains(focus)).toBe(true)
+    // Before the heatmaps: it is what to do about the scores, so it reads first.
+    expect(
+      focus.compareDocumentPosition(screen.getByText('AWS Well-Architected Framework')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('names the urgent gaps, numbered, with pillar severity and phase', async () => {
+    mountFocus()
+
+    const focus = await screen.findByTestId('priority-focus')
+    expect(focus).toHaveTextContent(/fix these first/i)
+    expect(focus).toHaveTextContent('No encryption at rest')
+    expect(focus).toHaveTextContent(/security · high severity · Immediate/i)
+    expect(within(focus).getAllByRole('listitem').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('shows at most five, so it stays a glance not a second roadmap', async () => {
+    const base = resultFixture().findings[0]!
+    mountFocus(
+      Array.from({ length: 9 }, (_, i) => ({
+        ...base, check_id: `c${i}`, pillar_id: `p${i}`, title: `Gap ${i}`,
+        remediation_effort: 'low' as const,
+      })),
+    )
+
+    const focus = await screen.findByTestId('priority-focus')
+    expect(within(focus).getAllByRole('listitem')).toHaveLength(5)
+  })
+
+  it('hides itself entirely when nothing is open', async () => {
+    mountFocus(
+      resultFixture().findings.map((f) => ({ ...f, status: 'pass' as const })),
+    )
+
+    await screen.findByTestId('assessment')
+    expect(screen.queryByTestId('priority-focus')).not.toBeInTheDocument()
+  })
+
+  it('adds no numbers of its own — every item is a finding already on the page', async () => {
+    mountFocus()
+    const user = userEvent.setup()
+
+    const focus = await screen.findByTestId('priority-focus')
+    // The roadmap starts collapsed, so its rows are not in the DOM until opened.
+    for (const label of [/^Immediate/, /^Short-term/, /^Structural/]) {
+      const header = screen.getByRole('button', { name: label })
+      if (!(header as HTMLButtonElement).disabled) await user.click(header)
+    }
+    const roadmap = screen.getByTestId('roadmap')
+    // Whatever the callout names must also appear in the roadmap below; it is a
+    // curated surface of the same data, not a separate judgement.
+    for (const row of within(focus).getAllByRole('listitem')) {
+      const title = row.querySelector('.font-medium')!.textContent!
+      expect(roadmap.textContent).toContain(title)
+    }
   })
 })

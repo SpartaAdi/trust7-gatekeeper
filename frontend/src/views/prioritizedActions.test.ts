@@ -16,7 +16,12 @@ import { describe, expect, it } from 'vitest'
 
 import type { Finding } from '../types'
 import { FIX_IT_PREAMBLE, buildFixItPrompt } from './ResultsView'
-import { flattenActions, prioritizedActions } from './roadmap'
+import {
+  MAX_FOCUS_ITEMS,
+  flattenActions,
+  prioritizedActions,
+  priorityFocus,
+} from './roadmap'
 
 function finding(over: Partial<Finding> = {}): Finding {
   return {
@@ -281,5 +286,67 @@ describe('buildFixItPrompt', () => {
   it('is empty when there is nothing to act on', () => {
     expect(buildFixItPrompt([])).toBe('')
     expect(buildFixItPrompt([finding({ status: 'pass' })])).toBe('')
+  })
+})
+
+describe('priorityFocus', () => {
+  it('leads with the Immediate phase — urgent work that is cheap to close', () => {
+    const focus = priorityFocus([
+      finding({ pillar_id: 'p1', check_id: 'structural', remediation_effort: 'high' }),
+      finding({ pillar_id: 'p2', check_id: 'immediate', remediation_effort: 'low' }),
+    ])
+
+    expect(focus[0]!.check_id).toBe('immediate')
+  })
+
+  it('caps at five, so it stays a glance', () => {
+    const many = Array.from({ length: 9 }, (_, i) =>
+      finding({ pillar_id: `p${i}`, check_id: `c${i}`, priority: i + 1 }),
+    )
+
+    expect(priorityFocus(many)).toHaveLength(MAX_FOCUS_ITEMS)
+    expect(MAX_FOCUS_ITEMS).toBe(5)
+  })
+
+  /**
+   * A design whose gaps are all structural still deserves a focus list. Without
+   * the top-up it would show an empty box on exactly the reviews that need
+   * direction most.
+   */
+  it('tops up from other phases when Immediate is thin', () => {
+    const focus = priorityFocus([
+      finding({ pillar_id: 'p1', check_id: 'struct_a', remediation_effort: 'high' }),
+      finding({ pillar_id: 'p2', check_id: 'struct_b', remediation_effort: 'high' }),
+    ])
+
+    expect(focus.map((f) => f.check_id).sort()).toEqual(['struct_a', 'struct_b'])
+  })
+
+  it('tops up with high severity only — a low-severity gap is not urgent', () => {
+    const focus = priorityFocus([
+      finding({ pillar_id: 'p1', check_id: 'low_struct', severity: 'low',
+                remediation_effort: 'high' }),
+      finding({ pillar_id: 'p2', check_id: 'high_struct', severity: 'high',
+                remediation_effort: 'high' }),
+    ])
+
+    expect(focus.map((f) => f.check_id)).toEqual(['high_struct'])
+  })
+
+  it('is empty when nothing is open, so the callout can hide itself', () => {
+    expect(priorityFocus([finding({ status: 'pass' })])).toEqual([])
+    expect(priorityFocus([])).toEqual([])
+  })
+
+  it('re-uses the roadmap selection rather than ranking again', () => {
+    const findings = [
+      finding({ pillar_id: 'p1', check_id: 'a' }),
+      finding({ pillar_id: 'p1', check_id: 'b', affected_components: ['x'] }),
+    ]
+
+    // Same pillar, same phase: the roadmap's one-per-pillar dedupe applies here
+    // too, because this reads prioritizedActions rather than the raw findings.
+    expect(priorityFocus(findings)).toHaveLength(1)
+    expect(priorityFocus(findings)[0]!.check_id).toBe('b')
   })
 })

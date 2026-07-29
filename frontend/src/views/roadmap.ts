@@ -195,3 +195,36 @@ function bySeverityThenPriority(a: Finding, b: Finding): number {
   if (rankOf(a) !== rankOf(b)) return rankOf(a) - rankOf(b)
   return `${a.framework}:${a.check_id}`.localeCompare(`${b.framework}:${b.check_id}`)
 }
+
+/** The callout is a glance, not a list. Beyond five it stops being a shortlist. */
+export const MAX_FOCUS_ITEMS = 5
+
+/**
+ * The few things to fix first, for the callout under the assessment.
+ *
+ * A curated surface of data that already exists, not a new computation: it reads
+ * `prioritizedActions`, which is itself a regroup of the stored findings. Nothing
+ * here re-ranks, re-scores, or asks the model anything.
+ *
+ * Immediate first, because that phase is by definition high-severity work that a
+ * configuration or document change closes — the cheapest urgent things there are.
+ * When Immediate is thin the list is topped up from the other phases in severity
+ * order, so a design whose gaps are all structural still gets a focus list rather
+ * than an empty box.
+ */
+export function priorityFocus(
+  findings: readonly Finding[],
+  limit: number = MAX_FOCUS_ITEMS,
+): Finding[] {
+  const grouped = prioritizedActions(findings)
+  const chosen = [...grouped.immediate]
+
+  if (chosen.length < limit) {
+    const rest = [...grouped.short_term, ...grouped.structural]
+      .filter((f) => f.severity === 'high')
+      .sort((a, b) => PHASE_ORDER.indexOf(phaseFor(a)) - PHASE_ORDER.indexOf(phaseFor(b)))
+    chosen.push(...rest)
+  }
+
+  return chosen.slice(0, limit)
+}

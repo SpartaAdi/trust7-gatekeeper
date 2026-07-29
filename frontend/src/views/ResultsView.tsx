@@ -24,7 +24,9 @@ import {
   PHASE_LABEL,
   PHASE_ORDER,
   flattenActions,
+  phaseFor,
   prioritizedActions,
+  priorityFocus,
   type Phase,
 } from './roadmap'
 
@@ -170,6 +172,8 @@ export function ResultsView({
             className="t-body mt-3 max-w-prose text-pretty"
           />
         )}
+        <PriorityFocus findings={result.findings} />
+
         <div className="mt-6 space-y-10">
           {result.frameworks.map((framework) => (
             <FrameworkSection
@@ -761,6 +765,60 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: stri
 const FRAMEWORK_BLOCK: Record<string, string> = {
   aws_waf: 'bg-pastel-sky',
   trust7: 'bg-pastel-mint',
+}
+
+/**
+ * "Fix these first" — the few most urgent gaps, directly under the assessment.
+ *
+ * Curation, not computation. Every item is a finding the review already carries,
+ * selected by `priorityFocus`, which reads the same `prioritizedActions` the
+ * roadmap does. Nothing is re-ranked and nothing is asked of the model.
+ *
+ * It deliberately repeats what the roadmap says lower down. The assessment ends
+ * with a reader who now knows the score and has thirteen pillars in front of
+ * them; naming the handful that matter at that moment is worth the repetition,
+ * and each row says which phase it belongs to so the connection is explicit.
+ */
+function PriorityFocus({ findings }: { findings: Finding[] }) {
+  const focus = priorityFocus(findings)
+  if (focus.length === 0) return null
+
+  return (
+    <section
+      className="mt-6 border-l-2 border-sev-high bg-surface-sunken px-5 py-4.5"
+      data-testid="priority-focus"
+    >
+      <h4 className="t-heading">Fix these first</h4>
+      <p className="t-caption mt-1 text-ink-muted">
+        The most urgent gaps from this review, in the order to take them on.
+      </p>
+      <ol className="mt-3 space-y-2">
+        {focus.map((finding, index) => (
+          <li
+            key={`${finding.framework}-${finding.check_id}`}
+            className="flex items-start gap-3"
+          >
+            <span
+              aria-hidden="true"
+              className="tnum t-body mt-px w-4 shrink-0 text-right font-semibold text-sev-high"
+            >
+              {index + 1}
+            </span>
+            <span className="min-w-0">
+              <span className="t-body block font-medium">{finding.title}</span>
+              <span className="t-caption mt-0.5 block text-ink-muted">
+                {finding.pillar_id.replace(/_/g, ' ')}
+                <span aria-hidden="true"> · </span>
+                {finding.severity} severity
+                <span aria-hidden="true"> · </span>
+                {PHASE_LABEL[phaseFor(finding)]}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
 }
 
 /**
