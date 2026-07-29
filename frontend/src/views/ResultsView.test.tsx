@@ -917,3 +917,69 @@ describe('ResultsView — pillar explain', () => {
     ).toHaveTextContent(/no model governance stated/i)
   })
 })
+
+describe('ResultsView — copy fix-it prompt affordance', () => {
+  function mountWithActions() {
+    getReview.mockResolvedValue(resultFixture())
+    return render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+  }
+
+  it('explains in one line what lands on the clipboard', async () => {
+    mountWithActions()
+
+    const tip = await screen.findByTestId('fix-it-tooltip')
+    expect(tip).toHaveTextContent(/ready-to-paste prompt/i)
+    expect(tip).toHaveTextContent(/revise your architecture diagram/i)
+  })
+
+  /**
+   * The description is supplementary, not a restatement of the label, so it must
+   * reach a screen reader rather than being hidden the way the mic tooltip is.
+   */
+  it('is wired to the button with aria-describedby', async () => {
+    mountWithActions()
+
+    const button = await screen.findByRole('button', { name: /copy fix-it prompt/i })
+    const tip = screen.getByTestId('fix-it-tooltip')
+    expect(button).toHaveAttribute('aria-describedby', tip.id)
+    expect(tip.id).not.toBe('')
+  })
+
+  it('reveals on keyboard focus, not only on hover', async () => {
+    mountWithActions()
+
+    await screen.findByRole('button', { name: /copy fix-it prompt/i })
+    const tip = screen.getByTestId('fix-it-tooltip')
+    // Opacity is driven by group-hover AND group-focus-within, so tabbing to the
+    // button shows the same explanation a mouse user gets.
+    expect(tip.className).toContain('group-focus-within:opacity-100')
+    expect(tip.className).toContain('group-hover:opacity-100')
+  })
+
+  it('names no assistant, matching the prompt it describes', async () => {
+    mountWithActions()
+
+    const tip = await screen.findByTestId('fix-it-tooltip')
+    for (const vendor of ['claude', 'chatgpt', 'gemini', 'copilot', 'anthropic', 'openai']) {
+      expect(tip.textContent?.toLowerCase()).not.toContain(vendor)
+    }
+  })
+
+  it('does not add a second element competing for the tooltip role', async () => {
+    mountWithActions()
+    const user = userEvent.setup()
+
+    await screen.findByTestId('fix-it-tooltip')
+    // Nothing is open yet, so no tooltip role should exist at all.
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /what the maturity tiers mean/i }))
+    // Exactly the one that was opened.
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/maturity tiers/i)
+  })
+})

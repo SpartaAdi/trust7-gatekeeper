@@ -283,22 +283,60 @@ function CopyFixItPromptButton({ findings }: { findings: Finding[] }) {
 
   return (
     <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <button
-        type="button"
-        onClick={run}
-        // Fixed width: the label shortens to "Copied" and back, and without this
-        // the whole action row reflows twice on every click.
-        className={`t-body flex w-[13.5rem] items-center justify-center gap-2 border border-minfy-navy px-4 py-2.5 font-semibold transition-colors duration-150 ${
-          state === 'copied'
-            ? 'bg-minfy-navy text-white'
-            : 'text-minfy-navy hover:bg-minfy-navy hover:text-white'
-        }`}
-      >
-        <svg viewBox="0 0 16 16" aria-hidden="true" className="size-3.5 fill-current">
-          <path d="M5.5 1.5h7A1.5 1.5 0 0 1 14 3v8h-1.5V3h-7Z M2 5h8.5A1.5 1.5 0 0 1 12 6.5v7A1.5 1.5 0 0 1 10.5 15H3.5A1.5 1.5 0 0 1 2 13.5Z" />
-        </svg>
-        {state === 'copied' ? 'Copied' : 'Copy fix-it prompt'}
-      </button>
+      {/*
+        `group` drives the popover on hover; `focus-within` drives it for the
+        keyboard, so the explanation is not mouse-only.
+      */}
+      <span className="group relative">
+        <button
+          type="button"
+          onClick={run}
+          // Supplementary, not a repeat of the label, so it is described rather
+          // than hidden — the mic tooltip in UploadView is aria-hidden precisely
+          // because it says the same words as its aria-label. This one does not.
+          aria-describedby={FIX_IT_TOOLTIP_ID}
+          // Fixed width: the label shortens to "Copied" and back, and without this
+          // the whole action row reflows twice on every click.
+          className={`t-body flex w-[13.5rem] items-center justify-center gap-2 border border-minfy-navy px-4 py-2.5 font-semibold transition-colors duration-150 ${
+            state === 'copied'
+              ? 'bg-minfy-navy text-white'
+              : 'text-minfy-navy hover:bg-minfy-navy hover:text-white'
+          }`}
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true" className="size-3.5 fill-current">
+            <path d="M5.5 1.5h7A1.5 1.5 0 0 1 14 3v8h-1.5V3h-7Z M2 5h8.5A1.5 1.5 0 0 1 12 6.5v7A1.5 1.5 0 0 1 10.5 15H3.5A1.5 1.5 0 0 1 2 13.5Z" />
+          </svg>
+          {state === 'copied' ? 'Copied' : 'Copy fix-it prompt'}
+        </button>
+
+        {/*
+          Says what lands on the clipboard. "Copy fix-it prompt" names the button
+          but not the artefact, and the one question it left open — a prompt for
+          what, containing what — is the one this answers. Wording matches what
+          `buildFixItPrompt` actually produces: the roadmap's actions, not the
+          whole findings list, and no assistant is named because the prompt names
+          none either.
+        */}
+        {/*
+          No `role="tooltip"`: this node is always mounted and only faded in, so
+          the role would put a permanent tooltip in the accessibility tree and
+          make `getByRole('tooltip')` ambiguous against the two disclosure
+          tooltips on this page, which mount only while open. `aria-describedby`
+          is what actually carries the text to a screen reader, and it works
+          whether or not the node is visible.
+        */}
+        <span
+          id={FIX_IT_TOOLTIP_ID}
+          data-testid="fix-it-tooltip"
+          className="pointer-events-none absolute bottom-full left-0 z-10 mb-2 w-64 border border-hairline bg-surface p-2.5 text-left opacity-0 shadow-sm transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+        >
+          <span className="t-caption block text-ink-muted">
+            Copies the prioritized actions as a ready-to-paste prompt asking an AI
+            assistant to revise your architecture diagram.
+          </span>
+        </span>
+      </span>
+
       {/* Polite, not an alert: a copy failure is recoverable and the user is
           already looking at the button they just pressed. */}
       <span aria-live="polite" className="t-caption text-sev-high">
@@ -307,6 +345,9 @@ function CopyFixItPromptButton({ findings }: { findings: Finding[] }) {
     </span>
   )
 }
+
+/** Stable id so the button can point at its description with aria-describedby. */
+const FIX_IT_TOOLTIP_ID = 'fix-it-prompt-description'
 
 /**
  * Copies a read-only link to this review.
