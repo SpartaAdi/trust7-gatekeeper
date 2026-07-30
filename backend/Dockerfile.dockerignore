@@ -1,0 +1,42 @@
+# Exclusions for backend/Dockerfile only.
+#
+# Named `<dockerfile>.dockerignore`, which BuildKit reads in preference to a
+# context-root `.dockerignore`. That is the point: this build takes the REPOSITORY
+# ROOT as its context, and a root-level `.dockerignore` would be a repository-wide
+# file affecting anything else built here. This one cannot reach past this Dockerfile.
+#
+# The first entry is the one that matters. `.env` holds OPENROUTER_API_KEY in local
+# development, `COPY backend/ ./` would otherwise bake it into an image layer, and a
+# credential in a layer survives deletion of the file in a later one.
+**/.env
+**/.env.*
+!**/.env.example
+
+# Runtime data: uploads, stored reviews, status files. Can be large, is never part
+# of a build, and may contain submitted customer designs.
+**/local-data/
+
+# Test suite, fixtures and the standalone scripts. None is imported by the running
+# app — main.py -> api.routes -> agent/ingestion reaches none of them — and the
+# ground-truth fixtures carry labelled designs that have no business in a
+# production image. Note this means the image cannot run pytest; that is deliberate,
+# and CI runs the suite from a checkout rather than from this image.
+backend/tests/
+backend/scripts/
+fixtures/
+docs/
+
+# Frontend, tooling and VCS metadata. Nothing under these is read by the backend.
+frontend/
+scripts/
+.git/
+.github/
+.claude/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.venv/
+**/venv/
+**/node_modules/
+*.md
+!backend/README.md
