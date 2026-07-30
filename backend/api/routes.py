@@ -24,6 +24,7 @@ import report
 import share
 import storage
 from agent import pipeline
+from ingestion import filetype, relevance
 from schema import ReviewResult, ReviewStatus, ScoreDelta
 
 log = logging.getLogger(__name__)
@@ -46,8 +47,25 @@ class UploadResponse(BaseModel):
 
 
 @router.post("/uploads", response_model=UploadResponse)
-async def create_upload(file: UploadFile = File(...)) -> UploadResponse:
-    """Accept a file and return the key to reference it by."""
+async def create_upload(
+    file: UploadFile = File(...), content_length: str = Header(default="")
+) -> UploadResponse:
+    """Accept a file and return the key to reference it by.
+
+    Three gates, cheapest first, and all of them BEFORE `storage.save_upload` — a
+    rejected upload leaves nothing on disk.
+
+    1. Extension, against `_ALLOWED_SUFFIXES`. Needs no bytes at all.
+    2. Declared size, from `Content-Length`, so an oversized upload is refused
+       without buffering it. `file.read()` below pulls the whole body into memory.
+    3. What the bytes actually are, via `ingestion/filetype.py` — the extension
+       says what the file claims to be, and only the signature says what it is.
+
+    Every failure is a 400 or 413 naming the specific problem. That matters more
+    than it looks: without gate 3, a `.png` holding a PDF is accepted here and
+    fails later inside the vision call, where the user is shown a provider error
+    for a mistake that was visible in the first eight bytes.
+    """
     name = pathlib.Path(file.filename or "").name
     suffix = pathlib.Path(name.lower()).suffix
     if suffix not in _ALLOWED_SUFFIXES:
@@ -57,15 +75,24 @@ async def create_upload(file: UploadFile = File(...)) -> UploadResponse:
             f"{', '.join(sorted(_ALLOWED_SUFFIXES))}",
         )
 
+    # Before the read, so an oversized body is refused rather than buffered.
+    try:
+        filetype.check_declared_size(content_length, config.MAX_UPLOAD_BYTES)
+    except filetype.UnsupportedUpload as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+
     data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail=f"{name!r} is empty.")
-    if len(data) > config.MAX_UPLOAD_BYTES:
+
+    try:
+        filetype.validate(name, data, limit=config.MAX_UPLOAD_BYTES)
+    except filetype.UnsupportedUpload as exc:
+        # 413 for the size case, 400 for everything else: an oversized file is a
+        # request too large, a mislabelled one is a bad request, and a client
+        # retrying on the wrong one wastes the upload twice.
+        oversized = len(data) > config.MAX_UPLOAD_BYTES
         raise HTTPException(
-            status_code=413,
-            detail=f"{name!r} is {len(data) // 1_048_576} MB; the limit is "
-            f"{config.MAX_UPLOAD_BYTES // 1_048_576} MB.",
-        )
+            status_code=413 if oversized else 400, detail=str(exc)
+        ) from exc
 
     return UploadResponse(
         key=storage.save_upload(name, data), filename=name, size_bytes=len(data)
@@ -183,6 +210,11 @@ def _start_review(
 def _run_pipeline(**kwargs: str) -> None:
     try:
         pipeline.run(**kwargs)  # type: ignore[arg-type]
+    except relevance.NotReviewable as exc:
+        # Not a failure, so not `log.exception`: the gate did its job and the status
+        # file already carries the user-facing reason. A stack trace here would put a
+        # correctly-working refusal in the logs looking like a crash.
+        log.info("Review %s was not reviewable: %s", kwargs.get("review_id"), exc)
     except Exception:  # noqa: BLE001 — already in the status file; log and move on
         log.exception("Review %s failed", kwargs.get("review_id"))
 
@@ -206,7 +238,11 @@ class ReviewSummary(BaseModel):
     pillars: list[PillarSummary]
 
 
-_TERMINAL_STATES = frozenset({"complete", "error", "cancelled"})
+# `rejected` belongs here for the same reason `cancelled` does: the review is over
+# and will not resume, so cancelling it is a 409 rather than a no-op. Omitting it
+# would let the cancel route mark a finished refusal as `cancelled` and lose the
+# rejection message the submitter needs to read.
+_TERMINAL_STATES = frozenset({"complete", "error", "cancelled", "rejected"})
 
 
 @router.post("/reviews/{review_id}/cancel", response_model=ReviewStatus)
@@ -442,6 +478,16 @@ def get_review(review_id: str) -> ReviewResult:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if result is None:
+        if status is not None and status.state == "rejected":
+            # The reason itself, not "poll the status endpoint". A rejection is the
+            # final answer for this review and the message is written for the person
+            # who uploaded the file, so a client fetching the result should be able
+            # to show it without a second request.
+            raise HTTPException(
+                status_code=422,
+                detail=status.rejection
+                or f"Review {review_id!r} was not a reviewable solution design.",
+            )
         if status is not None and status.state != "complete":
             raise HTTPException(
                 status_code=409,

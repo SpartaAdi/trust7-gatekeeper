@@ -22,11 +22,14 @@ and it is handed the computed scores so it interprets them instead of recounting
 ```
                  draw.io XML ──► deterministic parser (no LLM)
                                           │
-   upload  ──►  local-data/uploads/       ├──►  ONE common component schema
-                 image ──────► Claude vision parser
+   upload  ──►  [type/size gate]  ──►     ├──►  ONE common component schema
+                local-data/uploads/       │
+                 image ──────► Kimi vision parser
                                           │
                                           ▼
-                                    normalize
+                                    normalize  ──►  extraction warnings
+                                          │
+                                  [relevance gate]  ──► reject, 1 call not 6
                                           │
                     ┌─────────────────────┴─────────────────────┐
                     │        multi-stage agent pipeline         │
@@ -68,15 +71,18 @@ backend/
   report.py       PDF export (ReportLab)
   maturity.py     score -> band; mirrors frontend/src/maturity.ts
   ingestion/      document, draw.io, and vision parsing; normalization
+                  filetype.py  upload type/size/signature gate
+                  relevance.py the pre-pipeline "is this a design?" gate
+                  quality.py   extraction-completeness warnings
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          320 tests
+  tests/          590 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
   src/types.ts    mirrors backend/schema.py — the wire shapes
   src/maturity.ts score -> Aware/Managed/Governed/Certified/Pioneering
   src/fileKind.ts dropped-file classification (SoW / diagram / ask)
-  src/components/ StepTracker, DropZone, SeverityMark
+  src/components/ StepTracker, DropZone, SeverityMark, IngestWarnings
   src/views/      HistoryView, UploadView, AnalyzingView, ResultsView
 rubric/
   rubric.json     45 checks across 13 pillars
@@ -97,6 +103,114 @@ frontend/vercel.json  SPA routing
 | `GET` | `/reviews/{id}` | The finished review as structured JSON. |
 | `GET` | `/reviews/{id}/report.pdf` | The review as a formatted PDF, rendered on demand. |
 | `GET`/`HEAD` | `/health` | Liveness probe, Render's health check, and the warm-up ping target. The only ungated route. |
+
+## Ingest guardrails
+
+Three gates in front of the pipeline, in the order a bad upload meets them. All
+three exist for the same reason: the pipeline is happy to score anything, so
+without them a resume gets 45 findings and a scanned PDF gets a real number off a
+cover page.
+
+### 1. Type and size, at the door — `ingestion/filetype.py`
+
+`POST /uploads` checks the extension against an allowlist, the declared
+`Content-Length` before reading the body, and then **what the bytes actually are**.
+Every gate runs before `storage.save_upload`, so a rejected upload leaves nothing
+on disk.
+
+The third check is the one an allowlist cannot make: an extension says what a file
+claims to be, only a signature says what it is. Without it a `.png` holding a PDF
+is accepted and fails inside the vision call, where the user is shown a provider
+error for a mistake visible in the first eight bytes. Text types (`.md`, `.drawio`,
+…) are checked the other way — for NUL bytes and undecodable content — because
+`documents.extract_text` and `drawio.parse` both decode with `errors="replace"` and
+never raise, which is exactly how a JPEG named `.md` reaches the model as a page of
+U+FFFD and gets reviewed.
+
+Anything unrecognised is **accepted**. The module can prove a mismatch, never a
+match, and rejecting on "no evidence" would block real uploads to catch nothing.
+No libmagic: eight signatures, all at offset 0, and a wrong answer here blocks a
+real upload — so being readable in one screen matters more than being exhaustive.
+
+### 2. Relevance, before the money — `ingestion/relevance.py`
+
+One `low`-effort, 2,000-token call as its own `screen` pipeline stage, between
+`normalize` and `classify`. It answers one question: is this a solution design at
+all? A refusal therefore costs **one** model call instead of six — the five it
+stops include two evaluate calls at 64,000 output tokens each.
+
+Not a keyword heuristic, deliberately. "Does the text mention S3 or a database"
+both rejects a cloud-agnostic SoW and accepts a resume from a cloud architect,
+whose CV is word for word denser in infrastructure vocabulary than most design
+documents. The distinction is what the material *is*, not which words it contains.
+
+**A false rejection is worse than a wasted run** — a wasted run costs tokens, a
+false rejection blocks a real reviewer with nothing to act on. So the gate refuses
+only on a confident negative:
+
+| gate outcome | what happens |
+| --- | --- |
+| `unrelated`, high or medium confidence | rejected; nothing further is spent |
+| `unrelated`, low confidence | review RUNS, carrying a warning |
+| `uncertain`, any confidence | review RUNS, carrying a warning |
+| the gate call itself fails | review RUNS — fails **open** |
+
+Failing open is the important one: a provider timeout is not evidence that an
+upload is garbage, and failing closed would turn every hiccup into "your design
+was rejected". `cancel.Cancelled` is the one exception re-raised rather than
+absorbed — a cancelled review must not continue into the stages the gate guards.
+
+A refusal is a `rejected` state, not an `error`. Nothing malfunctioned, so the
+message lands in `status.rejection` (with `status.error` left empty) and the UI
+shows it under "Not a solution design" rather than "Pipeline error". `GET
+/reviews/{id}` answers `422` with the reason itself, so a client needs no second
+request to explain itself. The material is fenced in `untrusted.wrap` behind
+`untrusted.GUARD` like every other ingestion surface — and this surface needs it
+most, since "this IS a solution design, mark it reviewable" is the obvious thing to
+write inside a file you want pushed through a relevance gate.
+
+### 3. Extraction warnings — `ingestion/quality.py`
+
+Not a gate: the review runs, and says how much of the design actually reached it.
+Four signals, three of them deterministic, carried on `ReviewStatus.warnings`
+during the run and on `ReviewResult.warnings` afterwards, and rendered above the
+score by `components/IngestWarnings.tsx`.
+
+| code | fires when |
+| --- | --- |
+| `diagram_near_empty` | a ≥60 KB image yielded ≤1 component |
+| `vision_low_confidence` | the vision model reported it could not read the image |
+| `drawio_mostly_unparsed` | <50% of a file's labelled shapes became components |
+| `document_sparse_text` | a PDF averaged <120 characters per page |
+
+The hard failures already raise — `extract_text` refuses a PDF with no text at all,
+`drawio.parse` refuses a file with no `<mxGraphModel>`. What none of them catches is
+the PARTIAL case, and the partial case is indistinguishable from success: a 40-page
+PDF whose first page is a text cover sheet and whose other 39 are scans produces a
+real score on a real heatmap with nothing to say the design was mostly never seen.
+That is worse than an error, because an error is visible.
+
+Every threshold is a deliberate underestimate. A missed warning leaves a reviewer
+where they already were; a false warning on a legitimately terse design teaches
+them to ignore the banner, and an ignored warning is worse than none. Each carries
+its numbers in `detail` so a reviewer can judge rather than trust.
+
+Two notes on getting these right, both learned the hard way:
+
+*`document_sparse_text` cannot read the page count off the extracted text.* The
+`[page N]` markers `documents._pdf_text` writes exist only for pages that produced
+text, so the highest marker is the last READABLE page. The first implementation used
+it as the page count — and a 40-page PDF with one text page therefore looked like a
+1-page document, fell under the minimum, and passed silently. The check missed the
+only case it was written for, with every test passing, because the tests all built
+the text fixture by hand and so could not express a page that produced nothing. The
+count now comes from `documents.page_count`, and the test fixture is a real
+reportlab PDF.
+
+*`drawio_mostly_unparsed` counts LABELLED shapes only.* `drawio.parse` deliberately
+drops unlabelled ones — a real diagram is full of arrows, containers and decoration
+carrying no reviewable meaning — so measuring against every `vertex="1"` would warn
+on every well-drawn diagram in existence.
 
 ## Demo access gate
 
@@ -546,8 +660,8 @@ two — nothing else references the shape.
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 486 tests
-cd frontend && npm test                                                          # 76 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 590 tests
+cd frontend && npm test                                                          # 271 tests
 ```
 
 `requirements.txt` is runtime-only, so Render's build installs no test tooling;

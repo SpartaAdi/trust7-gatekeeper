@@ -64,6 +64,51 @@ class DesignGraph(BaseModel):
 MAX_CONTEXT_CHARS = 1000
 
 
+# --------------------------------------------------------------------------- #
+# Ingestion warnings
+#
+# A warning is NOT an error and NOT a rejection. It says: the review ran, and
+# here is a reason to distrust how much of the design actually reached it.
+#
+# It exists because the failure it describes is silent. `documents.extract_text`
+# raises when a PDF yields no text at all, but a PDF that yields a little text —
+# a cover page in front of thirty scanned pages — succeeds, and every stage
+# downstream then scores a design it mostly never saw. The score comes out
+# looking exactly like a score for a design that was fully read, which is the
+# worst possible presentation of it.
+#
+# So warnings are carried on the status while the review runs and on the result
+# afterwards, and the results page leads with them. `code` is for tests and for
+# the UI to key on; `message` is user-facing prose; `detail` carries the numbers
+# behind the judgement so a reviewer can decide for themselves.
+# --------------------------------------------------------------------------- #
+
+WarningCode = Literal[
+    # A diagram image produced a graph too sparse for the file it came from.
+    "diagram_near_empty",
+    # The vision model itself reported low confidence in what it transcribed.
+    "vision_low_confidence",
+    # draw.io XML held many shapes but few survived parsing into components.
+    "drawio_mostly_unparsed",
+    # A PDF produced very little text per page — partially scanned, most likely.
+    "document_sparse_text",
+    # The relevance gate was unsure rather than satisfied. See ingestion/relevance.py.
+    "relevance_uncertain",
+]
+
+
+class IngestWarning(BaseModel):
+    """One reason to distrust how completely the design was read."""
+
+    code: WarningCode
+    message: str = Field(description="User-facing prose. Rendered verbatim in the UI.")
+    detail: str = Field(
+        default="",
+        description="The measurements behind the judgement, so a reviewer can weigh "
+        "it rather than take it on trust.",
+    )
+
+
 class NormalizedDesign(BaseModel):
     """Everything the agent pipeline needs, from whichever inputs were supplied."""
 
@@ -71,6 +116,11 @@ class NormalizedDesign(BaseModel):
     title: str = ""
     document_text: str = ""
     graph: DesignGraph = Field(default_factory=DesignGraph)
+
+    # Raised during ingestion, carried through the pipeline, and stored on the
+    # result. Never a reason to stop: a partially-read design is still worth
+    # reviewing, it is just not worth presenting as if it were complete.
+    warnings: list[IngestWarning] = Field(default_factory=list)
 
     # Optional free text the submitter typed, offered only when there is no SoW to
     # carry the same information. UNTRUSTED, exactly like document_text and diagram
@@ -265,6 +315,12 @@ class ReviewResult(BaseModel):
     # a trade-off in something it actually states. Empty is the normal case and
     # is not a failure — see `_REMEDIATE_SYSTEM`.
     use_case_notes: list[UseCaseNote] = Field(default_factory=list)
+
+    # Reasons to distrust how completely the design was read. Empty is the normal
+    # case. Stored on the result and not only on the status, because the status is
+    # transient — a reviewer opening a stored review a day later must still see that
+    # its diagram was barely legible. Defaults to empty so older reviews load.
+    warnings: list[IngestWarning] = Field(default_factory=list)
     delta: ScoreDelta | None = None
     token_usage: dict[str, int] = Field(default_factory=dict)
 
@@ -282,6 +338,11 @@ class ReviewResult(BaseModel):
 STAGES: tuple[str, ...] = (
     "ingest",
     "normalize",
+    # The relevance gate. Its own stage, and placed here deliberately: it is the
+    # first point at which the normalized design exists, and the last point before
+    # the five expensive stages begin. One small model call decides whether the
+    # remaining five are worth making. See ingestion/relevance.py.
+    "screen",
     "classify",
     "evaluate",
     "prioritize",
@@ -290,7 +351,13 @@ STAGES: tuple[str, ...] = (
 
 # `cancelled` marks the stage a deliberate stop interrupted. Distinct from `error`
 # because nothing went wrong, and distinct from `done` because it did not finish.
-StageState = Literal["pending", "running", "done", "error", "cancelled"]
+#
+# `rejected` marks the screen stage refusing the upload. Distinct from `error` for
+# the same reason `cancelled` is: nothing malfunctioned. The pipeline looked at
+# what was submitted, decided it was not a solution design, and stopped before
+# spending anything on it. Presenting that as a crash would send the submitter
+# looking for a fault that does not exist.
+StageState = Literal["pending", "running", "done", "error", "cancelled", "rejected"]
 
 
 class StageProgress(BaseModel):
@@ -303,12 +370,26 @@ class StageProgress(BaseModel):
 
 class ReviewStatus(BaseModel):
     review_id: str
-    # `cancelled` is terminal like `complete` and `error`, and is NOT a kind of
-    # success: no ReviewResult is stored for a cancelled review, so the result
-    # route has nothing to serve and the history list never shows it.
-    state: Literal["queued", "running", "complete", "error", "cancelled"] = "queued"
+    # `cancelled` and `rejected` are terminal like `complete` and `error`, and
+    # neither is a kind of success: no ReviewResult is stored for either, so the
+    # result route has nothing to serve and the history list never shows them.
+    state: Literal[
+        "queued", "running", "complete", "error", "cancelled", "rejected"
+    ] = "queued"
     stages: list[StageProgress] = Field(default_factory=list)
     error: str = ""
+
+    # Why the screen stage refused the upload, in prose written for the person who
+    # uploaded it. Separate from `error` on purpose: `error` is where the pipeline
+    # records `f"{type(exc).__name__}: {exc}"` for a genuine fault, and the UI
+    # renders it under a "Pipeline error" heading. A refusal is neither a fault nor
+    # something to debug, so it gets its own field and its own presentation.
+    rejection: str = ""
+
+    # Populated as ingestion finds them, so a reviewer watching the progress screen
+    # sees "this diagram was barely legible" while the review is still running
+    # rather than only at the end.
+    warnings: list[IngestWarning] = Field(default_factory=list)
     updated_at: str = ""
 
     @classmethod

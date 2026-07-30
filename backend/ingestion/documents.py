@@ -57,6 +57,33 @@ _DOCX_NO_TEXT = (
 )
 
 
+def page_count(data: bytes, filename: str) -> int:
+    """Total pages in a PDF, including pages that yield no text. 0 for anything else.
+
+    Separate from `extract_text` because the extracted text CANNOT answer this. The
+    `[page N]` markers `_pdf_text` writes are emitted only for pages that produced
+    text, so the highest marker is the last READABLE page, not the last page — and a
+    40-page document whose only text is on page 1 looks, from the text alone, exactly
+    like a 1-page document.
+
+    That distinction is the entire signal `quality.document_extraction` needs: the
+    gap between "40 pages" and "1 page produced text" is what identifies a scanned
+    upload. Reading it here costs one more `PdfReader` over bytes already in memory,
+    with no page text extracted, and it never raises — `extract_text` runs first and
+    owns every user-facing failure, so a count that cannot be taken is reported as
+    0 (do not judge) rather than as an error.
+    """
+    if not filename.lower().endswith(".pdf"):
+        return 0
+
+    try:
+        from pypdf import PdfReader
+
+        return len(PdfReader(io.BytesIO(data)).pages)
+    except Exception:  # noqa: BLE001 — a count, never a failure. See above.
+        return 0
+
+
 def extract_text(data: bytes, filename: str) -> str:
     lower = filename.lower()
     if lower.endswith(".pdf"):

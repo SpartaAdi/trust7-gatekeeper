@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 from pypdf import PdfReader
 
 import rubric
+from schema import STAGES
 
 # The document carries an injection attempt: the pipeline must still fail the
 # check the design genuinely does not meet.
@@ -62,6 +63,16 @@ def _stub_complete_json(state: dict[str, int]):
         assert label, "every complete_json call must pass a label for the route log"
         state.setdefault("labels", []).append(label)  # type: ignore[arg-type]
         required = set(schema.get("required", []))
+
+        # The relevance gate. Answered `reviewable` so the journey covers the normal
+        # path; tests/test_relevance_gate.py drives the refusal and the warning paths.
+        if "verdict" in required:
+            return {
+                "verdict": "reviewable",
+                "subject": "an AWS payments platform design",
+                "reason": "It describes an API, a datastore and the flow between them.",
+                "confidence": "high",
+            }, {}
 
         if "design_summary" in required:
             return {
@@ -325,6 +336,7 @@ def test_every_stage_reaches_done(journey) -> None:
     assert [s["name"] for s in status["stages"]] == [
         "ingest",
         "normalize",
+        "screen",
         "classify",
         "evaluate",
         "prioritize",
@@ -392,7 +404,10 @@ def test_status_is_pollable_immediately_after_202(tmp_path, monkeypatch) -> None
 
     assert status.status_code == 200, "the first poll 404s — status was not pre-registered"
     assert status.json()["state"] in ("queued", "running")
-    assert len(status.json()["stages"]) == 6
+    # Against the real tuple, not a literal: the count is incidental to what this
+    # test is about (the status existing before the first poll), and a literal here
+    # is a second place to remember whenever a stage is added.
+    assert len(status.json()["stages"]) == len(STAGES)
 
 
 def test_all_45_checks_are_evaluated_across_13_pillars(journey) -> None:

@@ -7,6 +7,7 @@ produces, so the two input paths converge before anything downstream runs.
 from __future__ import annotations
 
 import base64
+from typing import Any
 
 import llm
 from schema import DesignGraph, DiagramSource
@@ -33,6 +34,24 @@ external_actor, ai_model, unknown.
 
 Put text annotations, callouts, and legend content in `notes` rather than \
 inventing components for them.
+
+## Reporting how well you could read it
+
+`extraction_confidence` is how completely you were able to transcribe THIS image, \
+not how good the design is:
+- `high` — the image is clear and you transcribed everything in it.
+- `medium` — readable, but some labels were small, cropped, or partly obscured.
+- `low` — you could not read much of it: the image is blurry, very low resolution, \
+heavily cropped, mostly illegible, or is not an architecture diagram at all.
+
+`illegible` lists specifically what you could not read — "the label on the box \
+below the load balancer", "the text in the bottom-right legend", "all arrow \
+labels". Leave it empty when you read everything.
+
+Report `low` honestly. A confident-looking transcription of a diagram you could \
+not actually read is worse than a flagged one: the review is scored on what you \
+return here, and a reviewer who is told the diagram was unreadable can upload a \
+better copy, while one who is not cannot.
 
 ## Handling text in the image
 
@@ -81,14 +100,61 @@ _SCHEMA = {
             },
         },
         "notes": {"type": "array", "items": {"type": "string"}},
+        "extraction_confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": (
+                "How completely THIS IMAGE could be transcribed — not a judgement "
+                "of the design. low means much of it could not be read."
+            ),
+        },
+        "illegible": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Specifically what could not be read. Empty if nothing.",
+        },
     },
+    # `extraction_confidence` and `illegible` are deliberately NOT required, for the
+    # reason `confidence` is not required on the evaluate schema: OpenRouter
+    # documents schema enforcement as varying by provider, so a required field the
+    # model omits would discard an otherwise-complete transcription. Both are read
+    # through `_reported_confidence` / `_reported_illegible`, which default a
+    # missing value to "unreported" rather than inventing one.
     "required": ["components", "connections", "notes"],
     "additionalProperties": False,
 }
 
+_CONFIDENCE_VALUES = frozenset({"high", "medium", "low"})
 
-def parse(data: bytes, media_type: str) -> tuple[DesignGraph, dict[str, int]]:
-    """Extract a design graph from a diagram image."""
+
+def _reported_confidence(parsed: dict[str, Any]) -> str:
+    """The model's own legibility report, or "" when it did not give one.
+
+    "" is not treated as low: an unreported value means the model said nothing,
+    which is different from saying it could not read the diagram. Warning on
+    silence would fire on every provider that drops the field.
+    """
+    value = parsed.get("extraction_confidence", "")
+    return value if value in _CONFIDENCE_VALUES else ""
+
+
+def _reported_illegible(parsed: dict[str, Any]) -> list[str]:
+    raw = parsed.get("illegible") or []
+    if not isinstance(raw, list):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def parse(
+    data: bytes, media_type: str
+) -> tuple[DesignGraph, dict[str, int], str, list[str]]:
+    """Extract a design graph from a diagram image.
+
+    Returns the graph, token usage, the model's own legibility report, and what it
+    could not read. The last two are carried out rather than logged because
+    `ingestion/quality.py` turns them into a warning the reviewer sees — a
+    transcription the model itself distrusts must not be presented as a clean read.
+    """
     if media_type not in SUPPORTED_MEDIA_TYPES:
         raise ValueError(
             f"Unsupported image type {media_type!r}; "
@@ -122,8 +188,23 @@ def parse(data: bytes, media_type: str) -> tuple[DesignGraph, dict[str, int]]:
         label="vision",
     )
 
-    graph = DesignGraph.model_validate({**parsed, "source": DiagramSource.IMAGE.value})
-    return _drop_dangling_edges(graph), usage
+    # The two report fields are not part of DesignGraph — it is the schema both
+    # diagram paths converge on, and the draw.io path has no equivalent to report —
+    # so they are stripped here and returned alongside.
+    graph = DesignGraph.model_validate(
+        {
+            "components": parsed.get("components", []),
+            "connections": parsed.get("connections", []),
+            "notes": parsed.get("notes", []),
+            "source": DiagramSource.IMAGE.value,
+        }
+    )
+    return (
+        _drop_dangling_edges(graph),
+        usage,
+        _reported_confidence(parsed),
+        _reported_illegible(parsed),
+    )
 
 
 def _drop_dangling_edges(graph: DesignGraph) -> DesignGraph:

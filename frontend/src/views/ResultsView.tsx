@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { ApiError, createShareLink, downloadReport, getReview, shareUrl } from '../api'
 import { ChangeBadge } from '../components/ChangeBadge'
+import { IngestWarnings } from '../components/IngestWarnings'
 import { SeverityMark } from '../components/SeverityMark'
 import { StructuredText } from '../components/StructuredText'
 import {
@@ -143,6 +144,15 @@ export function ResultsView({
           </p>
         </div>
       </header>
+
+      {/*
+        ABOVE the executive summary and the score, deliberately. A warning says the
+        review may have been scored on a fraction of the design; a reader who meets
+        the 62.4 and the summary first has already formed a view by the time they
+        reach the caveat, and the caveat is the more important of the two. It is also
+        why this is not tucked in at the bottom with the metadata.
+      */}
+      <IngestWarnings warnings={result.warnings ?? []} className="mt-8" />
 
       {result.delta && <DeltaSummary delta={result.delta} />}
 

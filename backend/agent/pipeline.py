@@ -19,8 +19,8 @@ import rubric
 import scoring
 import storage
 from agent import stages
-from ingestion import normalize
-from schema import Finding, ReviewResult, ReviewStatus
+from ingestion import normalize, relevance
+from schema import Finding, IngestWarning, ReviewResult, ReviewStatus
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +68,37 @@ class _Progress:
             if entry.name == stage:
                 entry.state = "error"
                 entry.detail = error
+                entry.finished_at = _now()
+        storage.put_status(self._status)
+
+    def warn(self, warnings: list[IngestWarning]) -> None:
+        """Publish ingestion warnings onto the status the UI is already polling.
+
+        Written as soon as ingest produces them rather than only onto the stored
+        result, so a reviewer watching the progress screen learns the diagram was
+        illegible while the review is still running — at which point stopping it and
+        uploading a better copy is still worth doing.
+        """
+        if not warnings:
+            return
+        self._status.warnings = list(warnings)
+        storage.put_status(self._status)
+
+    def rejected(self, stage: str, message: str) -> None:
+        """Record the screen stage refusing the upload.
+
+        Not `fail`, for the same reason `cancelled` is not: nothing malfunctioned.
+        The message goes in `rejection` rather than `error` so the UI can present it
+        as "we did not review this, and here is why" instead of under a "Pipeline
+        error" heading that sends the submitter hunting for a fault.
+        """
+        self._status.state = "rejected"
+        self._status.error = ""
+        self._status.rejection = message
+        for entry in self._status.stages:
+            if entry.name == stage:
+                entry.state = "rejected"
+                entry.detail = "Not a solution design — not reviewed"
                 entry.finished_at = _now()
         storage.put_status(self._status)
 
@@ -172,6 +203,57 @@ def _run(
         # tracks it and a future non-diagram input would do real work here.
         progress.finish("normalize", f"{len(design.document_text)} characters of document text")
 
+        # Published before the gate below, so a warning about an illegible diagram
+        # reaches the screen even if the gate then rejects the upload — the two are
+        # frequently the same submission seen from two angles.
+        progress.warn(design.warnings)
+
+        # ---- screen --------------------------------------------------------- #
+        #
+        # The cheap gate in front of the expensive stages. One small call decides
+        # whether the next five are worth making: a resume, an invoice or a
+        # photograph is a valid PDF or PNG that no amount of rubric evaluation can
+        # say anything useful about, and the five stages below would spend roughly
+        # thirty times this call's cost proving it.
+        #
+        # It can only ever stop a review it positively identified as unreviewable.
+        # `relevance.screen` absorbs its own failures and returns None, and an
+        # `uncertain` or low-confidence verdict becomes a warning rather than a
+        # refusal — see the conservatism note in ingestion/relevance.py.
+        stage = "screen"
+        progress.start("screen", "Checking the upload is a solution design")
+        assessment, usage = relevance.screen(design)
+        usages.append(usage)
+
+        if assessment is None:
+            progress.finish("screen", "Relevance check unavailable — continuing")
+        elif assessment.rejects:
+            message = relevance.rejection_message(assessment)
+            log.info(
+                "Review %s rejected by the relevance gate: verdict=%s confidence=%s "
+                "subject=%r",
+                review_id, assessment.verdict, assessment.confidence,
+                assessment.subject,
+            )
+            progress.rejected(stage, message)
+            # No result is stored, exactly as for a cancellation: there is no review
+            # to show. `NotReviewable` propagates so the caller sees the refusal, and
+            # `api/routes.py` logs it without treating it as a crash.
+            raise relevance.NotReviewable(message)
+        elif assessment.verdict == "reviewable":
+            detail = f"Recognised as {assessment.subject}" if assessment.subject else "Confirmed"
+            progress.finish("screen", detail)
+        else:
+            # `uncertain`, or `unrelated` the gate was not confident about. The review
+            # proceeds and says so.
+            design.warnings.append(relevance.uncertainty_warning(assessment))
+            progress.warn(design.warnings)
+            progress.finish(
+                "screen",
+                f"Not confirmed as a design ({assessment.confidence} confidence) "
+                f"— continuing with a warning",
+            )
+
         # ---- classify ------------------------------------------------------- #
         stage = "classify"
         progress.start("classify", "Classifying components")
@@ -262,6 +344,10 @@ def _run(
             # what is stored is exactly what the pipeline evaluated.
             context=design.context,
             diagram_key=diagram_key,
+            # Stored on the result, not only on the transient status: a reviewer
+            # opening this review tomorrow must still see that its diagram was barely
+            # legible, and the status file is not what they will be reading.
+            warnings=design.warnings,
             token_usage=_sum(usages),
         )
 
@@ -284,6 +370,13 @@ def _run(
         progress.complete()
         return result
 
+    except relevance.NotReviewable:
+        # Before the generic handler, and deliberately not `fail`. `progress.rejected`
+        # has already written the terminal status with its user-facing message; this
+        # exists so the generic `except` below cannot overwrite that with
+        # `state="error"` and `NotReviewable: <message>` under a "Pipeline error"
+        # heading. Re-raised so the caller knows the review did not run.
+        raise
     except cancel.Cancelled:
         # Deliberately before the generic handler, and deliberately not `fail`:
         # nothing went wrong. No result is stored, so `GET /reviews/{id}` has

@@ -364,7 +364,7 @@ describe('AnalyzingView', () => {
       expect(clock).toHaveTextContent('1m 24s elapsed')
       // Same row as the stage count, so it reads as "how long so far" alongside
       // "what stage it is on" rather than as a separate widget.
-      expect(clock.parentElement).toHaveTextContent('2 of 6 stages')
+      expect(clock.parentElement).toHaveTextContent('3 of 7 stages')
     })
 
     it('ticks while the review is running', async () => {
@@ -543,6 +543,157 @@ describe('AnalyzingView', () => {
       expect(cleared.length).toBeGreaterThan(0)
     })
   })
+
+  describe('a rejected upload', () => {
+    const rejection =
+      'This upload does not look like a solution design, so it was not reviewed ' +
+      'and nothing was charged for it. It appears to be a curriculum vitae.'
+
+    const rejectedFixture = () =>
+      statusFixture({
+        state: 'rejected',
+        rejection,
+        stages: [
+          { name: 'ingest', state: 'done', detail: '', started_at: '', finished_at: '' },
+          { name: 'normalize', state: 'done', detail: '', started_at: '', finished_at: '' },
+          {
+            name: 'screen',
+            state: 'rejected',
+            detail: 'Not a solution design — not reviewed',
+            started_at: '',
+            finished_at: '',
+          },
+          { name: 'classify', state: 'pending', detail: '', started_at: '', finished_at: '' },
+          { name: 'evaluate', state: 'pending', detail: '', started_at: '', finished_at: '' },
+          { name: 'prioritize', state: 'pending', detail: '', started_at: '', finished_at: '' },
+          { name: 'remediate', state: 'pending', detail: '', started_at: '', finished_at: '' },
+        ],
+      })
+
+    it('shows the reason, and does NOT present it as a pipeline error', async () => {
+      // The distinction this whole state exists for. Nothing malfunctioned — the
+      // gate looked at the upload and declined it — so a "Pipeline error" heading
+      // would send the submitter hunting for a fault that is not there.
+      getStatus.mockResolvedValue(rejectedFixture())
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+
+      expect(
+        await screen.findByRole('heading', { name: /not a solution design/i }),
+      ).toBeInTheDocument()
+      const notice = screen.getByRole('status')
+      expect(notice).toHaveTextContent(/curriculum vitae/i)
+      expect(notice).toHaveTextContent(/nothing was charged/i)
+      // A status, not an alert, and never the error panel.
+      expect(screen.queryByText(/pipeline error/i)).toBeNull()
+      expect(screen.queryByRole('alert')).toBeNull()
+    })
+
+    it('never reports a rejected review as complete', async () => {
+      // `onComplete` navigates to the results page, and there is no result to show.
+      const onComplete = vi.fn()
+      getStatus.mockResolvedValue(rejectedFixture())
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={onComplete} onStartOver={vi.fn()} />,
+      )
+      await screen.findByRole('heading', { name: /not a solution design/i })
+
+      expect(onComplete).not.toHaveBeenCalled()
+    })
+
+    it('stops polling, and stops offering to stop the review', async () => {
+      // `rejected` is terminal. A spinner and a stop button on a finished refusal
+      // both imply work is still queued.
+      getStatus.mockResolvedValue(rejectedFixture())
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+      await screen.findByRole('heading', { name: /not a solution design/i })
+      const callsAfterSettling = getStatus.mock.calls.length
+
+      // Fake timers are local to this test — the surrounding describe runs on real
+      // ones, and switching globally would change every test above it.
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      try {
+        await act(async () => {
+          vi.advanceTimersByTime(30_000)
+        })
+        expect(getStatus).toHaveBeenCalledTimes(callsAfterSettling)
+      } finally {
+        vi.useRealTimers()
+      }
+      expect(screen.queryByRole('button', { name: /stop this review/i })).toBeNull()
+    })
+
+    it('marks the screen stage itself as the one that refused', async () => {
+      getStatus.mockResolvedValue(rejectedFixture())
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+
+      expect(await screen.findByRole('img', { name: 'Rejected' })).toBeInTheDocument()
+      expect(screen.getByText(/not a solution design — not reviewed/i)).toBeInTheDocument()
+    })
+
+    it('still shows how long the run got before it was refused', async () => {
+      getStatus.mockResolvedValue(rejectedFixture())
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+      await screen.findByRole('heading', { name: /not a solution design/i })
+
+      expect(screen.getByText(/ran for/i)).toBeInTheDocument()
+    })
+  })
+
+  describe('extraction warnings', () => {
+    const warned = () =>
+      statusFixture({
+        warnings: [
+          {
+            code: 'diagram_near_empty',
+            message:
+              'Almost nothing could be read from the uploaded diagram — 1 component ' +
+              'was extracted from an image of 488 KB.',
+            detail: 'screenshot.png: 500000 bytes, 1 components',
+          },
+        ],
+      })
+
+    it('shows them WHILE the review is still running', async () => {
+      // The whole reason warnings are published onto the status rather than only onto
+      // the stored result: a reviewer who learns now can stop the run and upload a
+      // better copy instead of paying for it and finding out at the end.
+      getStatus.mockResolvedValue(warned())
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+
+      expect(await screen.findByTestId('ingest-warnings')).toBeInTheDocument()
+      expect(screen.getByText(/Almost nothing could be read/)).toBeInTheDocument()
+      // Still running: the stop button is the point of showing this early.
+      expect(screen.getByRole('button', { name: /stop this review/i })).toBeInTheDocument()
+    })
+
+    it('shows no warning panel on a clean run', async () => {
+      getStatus.mockResolvedValue(statusFixture())
+
+      render(
+        <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+      )
+      await screen.findByText('Classifying components')
+
+      expect(screen.queryByTestId('ingest-warnings')).toBeNull()
+    })
+  })
+
 })
 
 describe('AnalyzingView — duration expectation', () => {

@@ -5,6 +5,11 @@ export function statusFixture(overrides: Partial<ReviewStatus> = {}): ReviewStat
     review_id: 'rev-1',
     state: 'running',
     error: '',
+    // Empty by default: a rejection and an extraction warning are both exceptional,
+    // so a test that wants one sets it explicitly rather than every other test
+    // having to opt out of it.
+    rejection: '',
+    warnings: [],
     updated_at: '2026-07-27T10:00:05Z',
     stages: [
       {
@@ -15,6 +20,13 @@ export function statusFixture(overrides: Partial<ReviewStatus> = {}): ReviewStat
         finished_at: '2026-07-27T10:00:02Z',
       },
       { name: 'normalize', state: 'done', detail: '', started_at: '', finished_at: '' },
+      {
+        name: 'screen',
+        state: 'done',
+        detail: 'Recognised as an AWS payments platform design',
+        started_at: '2026-07-27T10:00:02Z',
+        finished_at: '2026-07-27T10:00:03Z',
+      },
       {
         // Detail text deliberately differs from the stage's own label, so a test
         // asserting on one cannot accidentally match the other.
@@ -48,6 +60,7 @@ export function resultFixture(overrides: Partial<ReviewResult> = {}): ReviewResu
     token_usage: { input_tokens: 1000, output_tokens: 500 },
     context: '',
     use_case_notes: [],
+    warnings: [],
     delta: null,
     frameworks: [
       {

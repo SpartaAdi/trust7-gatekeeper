@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { ApiError, cancelReview, getStatus } from '../api'
 import { elapsedSeconds, formatElapsed } from '../elapsed'
+import { IngestWarnings } from '../components/IngestWarnings'
 import { STAGE_LABELS, type ReviewStatus, type StageProgress } from '../types'
 
 const POLL_INTERVAL_MS = 1500
@@ -78,7 +79,11 @@ export function AnalyzingView({
           onCompleteRef.current()
           return
         }
-        if (next.state === 'error' || next.state === 'cancelled') {
+        if (
+          next.state === 'error' ||
+          next.state === 'cancelled' ||
+          next.state === 'rejected'
+        ) {
           // `cancelled` can arrive without this tab having asked — a second tab, or
           // the reviewer's own click landing between two polls — so it is terminal
           // here as well as on the button's own path.
@@ -142,11 +147,17 @@ export function AnalyzingView({
   // the pipeline only notices at its next stage boundary, but the reviewer's intent
   // is already known and nothing on this screen should keep implying work is queued.
   const cancelled = stopping || status?.state === 'cancelled'
+  // The relevance gate refused the upload. A THIRD outcome, not a kind of failure:
+  // nothing malfunctioned, so it gets its own heading and its own panel rather than
+  // being folded into `failed` and shown as a pipeline error.
+  const rejected = status?.state === 'rejected'
+  const warnings = status?.warnings ?? []
   const percent = stages.length > 0 ? Math.round((doneCount / stages.length) * 100) : 0
 
   // The tick only runs while the run does — an interval still firing on a finished
   // screen is a leak, even though the latch above means it could no longer be seen.
-  const settling = failed || gaveUp || cancelled || status?.state === 'complete'
+  const settling =
+    failed || gaveUp || cancelled || rejected || status?.state === 'complete'
   useEffect(() => {
     if (settling) return
     const ticker = window.setInterval(() => setTickMs(Date.now()), 1000)
@@ -172,14 +183,19 @@ export function AnalyzingView({
         <h2 className="t-display">
           {cancelled
             ? 'Review cancelled'
-            : failed
-              ? 'Analysis stopped'
-              : 'Analyzing the design'}
+            : rejected
+              ? 'Not a solution design'
+              : failed
+                ? 'Analysis stopped'
+                : 'Analyzing the design'}
         </h2>
         <p className="t-body mt-3 text-ink-muted">
           {cancelled ? (
             'You stopped this review. Nothing was scored and no result was saved — ' +
             'submit the design again to start a fresh review.'
+          ) : rejected ? (
+            'This upload was checked before the review ran and does not appear to ' +
+            'be a solution design, so nothing was scored and nothing was charged.'
           ) : failed ? (
             'The pipeline failed at the stage marked below. Nothing was scored.'
           ) : (
@@ -192,7 +208,7 @@ export function AnalyzingView({
         <p className="t-caption mt-1.5 font-mono text-ink-faint">{reviewId}</p>
       </header>
 
-      {stages.length > 0 && !failed && !cancelled && (
+      {stages.length > 0 && !failed && !cancelled && !rejected && (
         <div className="mt-8">
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
             <span className="t-eyebrow text-ink-muted">Progress</span>
@@ -251,7 +267,7 @@ export function AnalyzingView({
         </div>
       )}
 
-      {status === null && !gaveUp && !cancelled && (
+      {status === null && !gaveUp && !cancelled && !rejected && (
         <div className="mt-10 space-y-3" aria-live="polite">
           <p className="t-body text-ink-muted">Starting the pipeline…</p>
           {/* Skeleton rows, so the layout does not jump when the first status lands. */}
@@ -272,12 +288,21 @@ export function AnalyzingView({
         here — the elapsed time up to a failure is information, not decoration, and
         losing it would mean the one screen that most needs it does not show it.
       */}
-      {(failed || cancelled) && (
+      {(failed || cancelled || rejected) && (
         <div className="mt-8 flex items-baseline justify-between gap-x-4">
           <span className="t-eyebrow text-ink-muted">Ran for</span>
           <ElapsedClock seconds={elapsed} />
         </div>
       )}
+
+      {/*
+        Above the stage list and while the run is still going, which is the whole
+        point of publishing warnings onto the status rather than only onto the stored
+        result: a reviewer who learns now that their diagram was unreadable can stop
+        the review and upload a better copy instead of paying for it and finding out
+        at the end.
+      */}
+      <IngestWarnings warnings={warnings} className="mt-8" />
 
       {stages.length > 0 && (
         <ol className="mt-8 divide-y divide-hairline border-y border-hairline">
@@ -285,6 +310,34 @@ export function AnalyzingView({
             <StageRow key={stage.name} stage={stage} index={index} />
           ))}
         </ol>
+      )}
+
+      {rejected && (
+        <div
+          role="status"
+          className="animate-enter mt-8 flex gap-3 border-l-2 border-sev-medium bg-surface-sunken px-4 py-3.5"
+        >
+          {/* An outlined circle-slash: a refusal, not a fault. Deliberately not the
+              filled red triangle the pipeline-error panel below uses. */}
+          <svg viewBox="0 0 16 16" aria-hidden="true" className="mt-0.5 size-4 shrink-0">
+            <circle
+              cx="8"
+              cy="8"
+              r="6.25"
+              className="fill-none stroke-sev-medium"
+              strokeWidth="1.4"
+            />
+            <path d="M4.2 11.8 L11.8 4.2" className="stroke-sev-medium" strokeWidth="1.4" />
+          </svg>
+          <div className="min-w-0">
+            <p className="t-heading">Nothing was reviewed, and nothing was charged</p>
+            <p className="t-caption mt-1 break-words text-ink-muted">
+              {status?.rejection ||
+                'This upload does not appear to be a solution design or an ' +
+                  'architecture diagram.'}
+            </p>
+          </div>
+        </div>
       )}
 
       {failed && status?.error && (
@@ -413,7 +466,9 @@ function StageRow({ stage, index }: { stage: StageProgress; index: number }) {
                   ? 'font-semibold text-sev-high'
                   : stage.state === 'cancelled'
                     ? 'font-semibold text-ink'
-                    : 'text-ink-faint',
+                    : stage.state === 'rejected'
+                      ? 'font-semibold text-sev-medium'
+                      : 'text-ink-faint',
           ].join(' ')}
         >
           {label}
@@ -460,6 +515,23 @@ function StageMarker({ state }: { state: StageProgress['state'] }) {
     return (
       <span aria-label="Stopped" role="img" className={`${base} border border-minfy-navy`}>
         <span className="size-2 bg-minfy-navy" />
+      </span>
+    )
+  }
+  if (state === 'rejected') {
+    // A circle-slash, amber: this stage refused the upload. Not the red `!` an error
+    // gets — nothing malfunctioned — and not the square a cancellation gets, because
+    // the reviewer did not choose this.
+    return (
+      <span aria-label="Rejected" role="img" className={`${base} border border-sev-medium`}>
+        <svg viewBox="0 0 12 12" aria-hidden="true" className="size-3">
+          <path
+            d="M2.6 9.4 L9.4 2.6"
+            className="stroke-sev-medium"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        </svg>
       </span>
     )
   }

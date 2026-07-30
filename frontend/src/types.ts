@@ -105,6 +105,29 @@ export interface UseCaseNote {
   grounded_in: string
 }
 
+/**
+ * Mirrors `IngestWarning` in backend/schema.py.
+ *
+ * A reason to distrust how completely the design was read. NOT an error and NOT a
+ * rejection — the review ran. It exists because the failure it describes is
+ * otherwise silent: a mostly-scanned PDF or a barely-legible diagram produces a
+ * real score on a real heatmap with nothing to say most of the design was never
+ * seen. `code` is what the UI and tests key on; `message` is prose to render
+ * verbatim; `detail` carries the numbers behind the judgement.
+ */
+export type WarningCode =
+  | 'diagram_near_empty'
+  | 'vision_low_confidence'
+  | 'drawio_mostly_unparsed'
+  | 'document_sparse_text'
+  | 'relevance_uncertain'
+
+export interface IngestWarning {
+  code: WarningCode
+  message: string
+  detail: string
+}
+
 export interface ReviewResult {
   review_id: string
   created_at: string
@@ -120,6 +143,8 @@ export interface ReviewResult {
   /** The submitter's own purpose/use-case text; empty when none was given. */
   context: string
   use_case_notes: UseCaseNote[]
+  /** Reasons to distrust how completely the design was read. Empty is normal. */
+  warnings: IngestWarning[]
   delta: ScoreDelta | null
   token_usage: Record<string, number>
 }
@@ -128,6 +153,7 @@ export interface ReviewResult {
 export const STAGE_NAMES = [
   'ingest',
   'normalize',
+  'screen',
   'classify',
   'evaluate',
   'prioritize',
@@ -140,6 +166,7 @@ export type StageName = (typeof STAGE_NAMES)[number]
 export const STAGE_LABELS: Record<StageName, string> = {
   ingest: 'Reading uploads',
   normalize: 'Normalizing to common schema',
+  screen: 'Checking the upload is a design',
   classify: 'Classifying components',
   evaluate: 'Evaluating against rubric',
   prioritize: 'Prioritizing findings',
@@ -151,7 +178,18 @@ export const STAGE_LABELS: Record<StageName, string> = {
  * stopped at. Distinct from `error` because nothing went wrong, and from `done`
  * because it did not finish.
  */
-export type StageState = 'pending' | 'running' | 'done' | 'error' | 'cancelled'
+export type StageState =
+  | 'pending'
+  | 'running'
+  | 'done'
+  | 'error'
+  | 'cancelled'
+  /**
+   * The screen stage refused the upload — it is not a solution design. Distinct
+   * from `error` because nothing malfunctioned, so it must not be shown under a
+   * "Pipeline error" heading that sends the submitter hunting for a fault.
+   */
+  | 'rejected'
 
 export interface StageProgress {
   name: StageName
@@ -166,9 +204,19 @@ export interface ReviewStatus {
   // `cancelled` is terminal like `complete` and `error`, and is not a kind of
   // success: no result is stored for a cancelled review, so `getReview` 409s and
   // the history list never shows it.
-  state: 'queued' | 'running' | 'complete' | 'error' | 'cancelled'
+  // `cancelled` and `rejected` are terminal like `complete` and `error`, and
+  // neither is a kind of success: no result is stored for either, so `getReview`
+  // does not 200 and the history list never shows them.
+  state: 'queued' | 'running' | 'complete' | 'error' | 'cancelled' | 'rejected'
   stages: StageProgress[]
   error: string
+  /**
+   * Why the upload was refused, in prose for the person who uploaded it. Populated
+   * only when `state === 'rejected'`; `error` stays empty in that case.
+   */
+  rejection: string
+  /** Surfaced while the review is still running, so a bad upload can be stopped. */
+  warnings: IngestWarning[]
   updated_at: string
 }
 

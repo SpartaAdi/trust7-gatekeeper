@@ -1298,4 +1298,63 @@ describe('ResultsView — use-case notes', () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
   })
+
+  describe('extraction warnings on a stored review', () => {
+    const nearEmpty = {
+      code: 'diagram_near_empty' as const,
+      message:
+        'Almost nothing could be read from the uploaded diagram — 1 component was ' +
+        'extracted from an image of 488 KB.',
+      detail: 'screenshot.png: 500000 bytes, 1 components',
+    }
+
+    it('shows the warning above the score and the executive summary', async () => {
+      // Order is the point. A warning says the review may have been scored on a
+      // fraction of the design; a reader who meets the score and the summary first
+      // has already formed a view by the time they reach the caveat.
+      getReview.mockResolvedValue(resultFixture({ warnings: [nearEmpty] }))
+
+      render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />)
+
+      const panel = await screen.findByTestId('ingest-warnings')
+      const summary = screen.getByTestId('executive-summary')
+      expect(panel.compareDocumentPosition(summary)).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      )
+    })
+
+    it('still renders the full review — a warning is not a failure', async () => {
+      getReview.mockResolvedValue(resultFixture({ warnings: [nearEmpty] }))
+
+      render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />)
+
+      expect(await screen.findByTestId('ingest-warnings')).toBeInTheDocument()
+      // The score and the summary are both still there — 62.5 appears in more than
+      // one place on this page, so the assertion targets the headline figure.
+      expect(screen.getByTestId('executive-summary')).toBeInTheDocument()
+      expect(screen.getByText('/100')).toBeInTheDocument()
+    })
+
+    it('shows no panel on a clean review', async () => {
+      getReview.mockResolvedValue(resultFixture())
+
+      render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />)
+      await screen.findByTestId('executive-summary')
+
+      expect(screen.queryByTestId('ingest-warnings')).toBeNull()
+    })
+
+    it('survives an older stored review that has no warnings field at all', async () => {
+      // Reviews written before this field existed load with it absent, and the view
+      // reads `result.warnings ?? []` for exactly that reason.
+      const { warnings: _dropped, ...older } = resultFixture()
+      getReview.mockResolvedValue(older)
+
+      render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />)
+
+      expect(await screen.findByTestId('executive-summary')).toBeInTheDocument()
+      expect(screen.queryByTestId('ingest-warnings')).toBeNull()
+    })
+  })
+
 })
