@@ -286,7 +286,12 @@ def test_a_graph_containing_the_image_text_scores_high() -> None:
 
 
 @requires_ocr
-def test_an_empty_graph_against_a_text_heavy_image_scores_low_and_recommends_review() -> None:
+def test_an_empty_graph_against_a_text_heavy_image_scores_low_but_triggers_nothing() -> None:
+    """A real OCR pass, a genuinely low figure — and NO automated recommendation.
+
+    The figure is still reported and still labelled an estimate. What it no longer
+    does is pull a lever on its own.
+    """
     image = _png(["CloudFront", "DynamoDB", "ApiGateway", "SecretsManager"])
 
     proxy = fidelity.ocr_coverage_proxy(DesignGraph(), image)
@@ -294,7 +299,7 @@ def test_an_empty_graph_against_a_text_heavy_image_scores_low_and_recommends_rev
     assert proxy.available is True
     assert proxy.percent < schema.COVERAGE_REVIEW_THRESHOLD
     assert proxy.sample_unmatched, "the unmatched sample is how a reviewer judges this"
-    assert DataFidelity(ocr_proxy=proxy).review_recommended() is True
+    assert DataFidelity(ocr_proxy=proxy).review_recommended() is False
 
 
 @requires_ocr
@@ -462,6 +467,84 @@ def test_the_review_threshold_is_applied_to_structural_coverage(percent, expecte
     )
 
     assert measured.review_recommended() is expected
+
+
+# --------------------------------------------------------------------------- #
+# Only the EXACT figure may fire an automated recommendation
+#
+# The OCR proxy used to, and does not any more. The reason is calibration, not
+# taste: a title, a legend or a region label is text in the image and is not a
+# component, so a diagram extracted PERFECTLY still scores well under any useful
+# threshold — a complete five-box extraction measured 83% in testing purely because
+# OCR also read the diagram's title. An automated flag that fires on correct work
+# gets dismissed, and then it is worth less than nothing.
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("percent", [0.0, 8.3, 37.5, 50.0, 94.9])
+def test_a_low_ocr_proxy_alone_never_recommends_review(percent) -> None:
+    """The headline of this change, across the whole range below the threshold."""
+    measured = DataFidelity(
+        ocr_proxy=OcrCoverageProxy(
+            available=True, ocr_tokens=100,
+            matched_tokens=int(percent), percent=percent,
+        )
+    )
+
+    assert measured.review_recommended() is False
+
+
+@pytest.mark.parametrize("percent", [0.0, 8.3, 37.5, 50.0, 94.9])
+def test_a_low_structural_figure_alone_still_recommends_review(percent) -> None:
+    """The other half, and the reason the two are asserted side by side: this change
+    must not have disabled the trigger, only narrowed what can pull it."""
+    measured = DataFidelity(
+        structural=StructuralCoverage(
+            parsed_elements=1, total_elements=100, percent=percent
+        )
+    )
+
+    assert measured.review_recommended() is True
+
+
+def test_a_low_ocr_proxy_does_not_suppress_a_low_structural_figure() -> None:
+    """Both low: the exact one still decides, and the estimate neither adds nor
+    subtracts from it."""
+    measured = DataFidelity(
+        structural=StructuralCoverage(parsed_elements=2, total_elements=25, percent=8.0),
+        ocr_proxy=OcrCoverageProxy(available=True, ocr_tokens=24, matched_tokens=2,
+                                   percent=8.3),
+    )
+
+    assert measured.review_recommended() is True
+
+
+def test_a_healthy_structural_figure_is_not_overridden_by_a_low_estimate() -> None:
+    """The case the old behaviour got wrong. A perfectly parsed .drawio cannot have
+    an OCR proxy at all — but a design carrying BOTH a diagram and an image would,
+    and the estimate must not flag a review the exact figure says is fine."""
+    measured = DataFidelity(
+        structural=StructuralCoverage(parsed_elements=19, total_elements=19, percent=100.0),
+        ocr_proxy=OcrCoverageProxy(available=True, ocr_tokens=6, matched_tokens=5,
+                                   percent=83.3),
+    )
+
+    assert measured.review_recommended() is False
+
+
+def test_review_recommended_reads_only_the_structural_field() -> None:
+    """A source-level assertion, because the parametrised tests above pass for any
+    implementation that happens to ignore the proxy today. This fails if the field is
+    referenced in the predicate at all."""
+    import inspect
+
+    source = inspect.getsource(DataFidelity.review_recommended)
+    body = source.split('"""')[-1]  # past the docstring, which discusses both
+
+    assert "ocr_proxy" not in body, (
+        "review_recommended references ocr_proxy again; the estimate must not gate"
+    )
+    assert "grounding" not in body
+    assert "structural" in body
 
 
 def test_review_recommended_is_computed_rather_than_stored() -> None:

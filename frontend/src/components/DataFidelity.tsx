@@ -12,9 +12,11 @@ import { COVERAGE_REVIEW_THRESHOLD, type DataFidelity as Fidelity } from '../typ
  * computes across them.
  *
  * The panel is `CaveatPanel` — the same component `IngestWarnings` uses — so this
- * introduces no new panel style. Tone is the only variable: `caution` when a
- * coverage figure falls under the review threshold, `neutral` when it is a
- * measurement worth reporting rather than a problem.
+ * introduces no new panel style. Tone is the only variable, and only the STRUCTURAL
+ * figure can set it: `caution` when that exact ratio falls under the review
+ * threshold, `neutral` everywhere else. The OCR proxy is always neutral because it
+ * is an estimate, and the grounding count is always neutral because a caught claim
+ * is the filter working — see `review_recommended` in backend/schema.py.
  */
 export function DataFidelity({
   fidelity,
@@ -91,7 +93,13 @@ export function DataFidelity({
 
       {ocr && ocr.available && (
         <CaveatPanel
-          tone={ocr.percent < COVERAGE_REVIEW_THRESHOLD ? 'caution' : 'neutral'}
+          /*
+            ALWAYS neutral, whatever the figure. This panel deliberately does not
+            carry the caution tone at any percentage: the tone IS the automated
+            recommendation, and an estimate that reads 83% on a perfectly-extracted
+            diagram must not pull that lever. See review_recommended in schema.py.
+          */
+          tone="neutral"
           testId="fidelity-ocr"
           title={`Diagram text coverage: ~${ocr.percent}% (estimated)`}
           body={
@@ -104,14 +112,15 @@ export function DataFidelity({
               in the extracted design. There is no ground truth for what an image
               really contains, so a low figure means the two readers disagree — not
               which one is right, and OCR invents words as often as it misses them.
-              {ocr.percent < COVERAGE_REVIEW_THRESHOLD && (
-                <>
-                  {' '}
-                  It is under {COVERAGE_REVIEW_THRESHOLD}%, so{' '}
-                  <strong>checking this review by hand is recommended</strong> — but
-                  weigh it as the estimate it is.
-                </>
-              )}
+              {/*
+                No "review recommended" clause at any figure, deliberately. A title,
+                a legend or a region label is text in the image and not a component,
+                so a diagram extracted perfectly still scores well under any useful
+                threshold — an automated flag driven by this would fire on correct
+                work. It is here to be weighed, not to gate.
+              */}{' '}
+              A low figure is worth a look, not a verdict; it does not on its own
+              mean anything was missed.
               {ocr.sample_unmatched.length > 0 && (
                 <>
                   {' '}

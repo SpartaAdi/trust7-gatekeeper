@@ -131,8 +131,10 @@ class IngestWarning(BaseModel):
 # --------------------------------------------------------------------------- #
 
 # Below this, extraction lost enough of the design that a human should look.
-# Applied to the structural ratio, which is exact, and to the OCR proxy, which is
-# not — see `OcrCoverageProxy` for why the same threshold means less there.
+#
+# Applied to the STRUCTURAL ratio only. It was applied to the OCR proxy too and no
+# longer is: see `DataFidelity.review_recommended` for why an estimate that reads
+# 83% on a perfectly-extracted diagram cannot be allowed to fire an automated flag.
 COVERAGE_REVIEW_THRESHOLD = 95.0
 
 
@@ -181,6 +183,12 @@ class OcrCoverageProxy(BaseModel):
     So every surface that shows this must label it an estimate. `is_estimate` is
     always True and exists to make that non-optional in the UI rather than a
     convention someone can forget.
+
+    And it triggers NOTHING automatically. `DataFidelity.review_recommended` does not
+    read this field, and the UI never renders this panel at the caution tone. It is a
+    figure for a human to weigh, not a gate — because it sits under any useful
+    threshold on diagrams that were extracted perfectly, so an automated flag driven
+    by it would fire on correct work and teach reviewers to ignore the panel.
     """
 
     available: bool = Field(
@@ -246,18 +254,30 @@ class DataFidelity(BaseModel):
         """Whether a coverage figure is low enough that a human should look.
 
         Computed, not stored, so it cannot drift from the numbers it describes.
-        The grounding count is NOT an input: removing an ungrounded claim is the
-        filter working, not a reason to distrust the review.
+
+        **Only `structural` can set this.** The other two are deliberately excluded,
+        for different reasons:
+
+        * `ocr_proxy` is an ESTIMATE against a second fallible reader, and it does
+          not clear the bar for firing an automated recommendation. In testing, a
+          COMPLETE extraction of a five-box diagram measured 83% purely because OCR
+          also read the diagram's title — and titles, legends and region labels are
+          in every real diagram, so the estimate sits under any useful threshold on
+          inputs that were read perfectly. An automated flag that fires on correct
+          work trains people to dismiss it, and then it is worth less than nothing.
+          The number stays visible and stays labelled an estimate; it just does not
+          pull a lever on its own.
+        * `grounding` is a count of what the filter REMOVED. Removing an ungrounded
+          claim is the filter working, so feeding it in here would penalise a run
+          for being filtered well.
+
+        `structural` is the one input because it is the only one that is exact: the
+        draw.io XML enumerates its own elements, so a figure under the threshold
+        means elements were genuinely lost, not that two readers disagreed.
         """
-        if self.structural and self.structural.percent < COVERAGE_REVIEW_THRESHOLD:
-            return True
-        if (
-            self.ocr_proxy
-            and self.ocr_proxy.available
-            and self.ocr_proxy.percent < COVERAGE_REVIEW_THRESHOLD
-        ):
-            return True
-        return False
+        return bool(
+            self.structural and self.structural.percent < COVERAGE_REVIEW_THRESHOLD
+        )
 
 
 class NormalizedDesign(BaseModel):

@@ -76,7 +76,7 @@ backend/
                   quality.py   extraction-completeness warnings
                   fidelity.py  structural + OCR-proxy coverage metrics
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          641 tests
+  tests/          654 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
@@ -228,9 +228,18 @@ measured. `schema.DataFidelity` has no composite field and
 | OCR coverage | image | **Estimate.** Second fallible reader | `ingestion/fidelity.py::ocr_coverage_proxy` |
 | Grounding catch count | any, with context | **Count.** Not a rate | `agent/stages.py::_use_case_notes` |
 
-Both coverage figures trigger the review recommendation under
-`COVERAGE_REVIEW_THRESHOLD` (95%). The grounding count never does — removing an
-ungrounded claim is the filter working, not a reason to distrust the review.
+**Only the structural figure can trigger the review recommendation**, under
+`COVERAGE_REVIEW_THRESHOLD` (95%). The other two deliberately cannot:
+
+- The **OCR proxy** is an estimate and does not clear the bar for firing an
+  automated flag. A title, a legend or a region label is text in the image and is
+  not a component, so a diagram extracted *perfectly* still scores well under any
+  useful threshold — a complete five-box extraction measured 83% in testing purely
+  because OCR also read the diagram's title. An automated flag that fires on correct
+  work trains people to dismiss it. The number stays visible and stays labelled an
+  estimate; it just does not pull a lever, and its panel is never amber.
+- The **grounding count** describes what the filter removed, and removing an
+  ungrounded claim is the filter working, not a reason to distrust the review.
 
 ### 1. Structural extraction coverage — exact
 
@@ -265,6 +274,11 @@ and the detail line, deliberately three times:
   complete extraction of a five-box diagram scored 83% because OCR also read the
   diagram's title. Treat the number as a prompt to look, never as a grade.
 
+It fires nothing automatically: `review_recommended()` does not read it and its
+panel never carries the caution tone at any percentage. `test_data_fidelity.py`
+asserts that at the source level, not just behaviourally, so a re-added reference
+fails the suite.
+
 When no OCR engine is reachable the metric is **absent, not zero** — a 0% would
 read as "the vision model missed everything", which is a claim about the model
 rather than about our tooling. That is the state on Render today: the native Python
@@ -295,7 +309,11 @@ dropped and a missing one is recorded as unmet.
 
 `components/DataFidelity.tsx` renders one panel per metric using `CaveatPanel` —
 the same component `IngestWarnings` uses, so there is no second panel style to
-drift. `caution` (amber) tone under the threshold, `neutral` (navy) otherwise.
+drift. `caution` (amber) tone only when the STRUCTURAL figure is under the threshold;
+`neutral` (navy) everywhere else, including every OCR-proxy figure. The tone *is*
+the automated recommendation as a reviewer experiences it, so removing the proxy's
+trigger meant removing its amber tone and its "check by hand" wording too, not just
+the backend predicate.
 Rendered above the score on the results page, for the same reason the warnings are:
 they qualify every number below them.
 
@@ -747,8 +765,8 @@ two — nothing else references the shape.
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 641 tests
-cd frontend && npm test                                                          # 289 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 654 tests
+cd frontend && npm test                                                          # 293 tests
 ```
 
 `requirements.txt` is runtime-only, so Render's build installs no test tooling;

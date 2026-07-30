@@ -114,16 +114,35 @@ describe('DataFidelity', () => {
       expect(panel).toHaveTextContent(/may be OCR noise/)
     })
 
-    it('triggers the same review recommendation below 95%, still labelled estimated', () => {
+    it('fires NO automated recommendation, however low the figure', () => {
+      // The change this test exists for. The caution tone and the "check by hand"
+      // wording ARE the automated recommendation as the reviewer experiences it, so
+      // removing the trigger means removing both — not just the backend predicate.
       render(<DataFidelity fidelity={{ ...EMPTY, ocr_proxy: OCR_LOW }} />)
 
       const panel = screen.getByTestId('fidelity-ocr')
-      expect(panel).toHaveAttribute('data-tone', 'caution')
-      expect(panel).toHaveTextContent(/checking this review by hand is recommended/)
-      expect(panel).toHaveTextContent(/weigh it as the estimate it is/)
+      expect(panel).toHaveAttribute('data-tone', 'neutral')
+      expect(panel).not.toHaveTextContent(/recommended/)
+      expect(panel).not.toHaveTextContent(/should be checked/)
+      // The figure itself is still there, still labelled an estimate.
+      expect(panel).toHaveTextContent(/~37.5% \(estimated\)/)
+      expect(panel).toHaveTextContent(/worth a look, not a verdict/)
     })
 
-    it('stays neutral at or above the threshold but keeps the estimate label', () => {
+    it('is neutral at every figure from 0 to 100', () => {
+      // Parametrised by hand rather than left to the one case above: the tone must be
+      // unconditional, and a `percent < X` that happens to be false for one fixture
+      // would pass a single-case test.
+      for (const percent of [0, 8.3, 37.5, 94.9, 95, 100]) {
+        const { unmount } = render(
+          <DataFidelity fidelity={{ ...EMPTY, ocr_proxy: { ...OCR_LOW, percent } }} />,
+        )
+        expect(screen.getByTestId('fidelity-ocr')).toHaveAttribute('data-tone', 'neutral')
+        unmount()
+      }
+    })
+
+    it('keeps the estimate label at a healthy figure too', () => {
       render(<DataFidelity fidelity={{ ...EMPTY, ocr_proxy: OCR_HEALTHY }} />)
 
       const panel = screen.getByTestId('fidelity-ocr')
@@ -216,6 +235,42 @@ describe('DataFidelity', () => {
       )
 
       expect(screen.getByTestId('fidelity-grounding')).toHaveAttribute('data-tone', 'neutral')
+    })
+  })
+
+  describe('only the exact figure may recommend a review', () => {
+    it('a low OCR proxy alone raises no caution panel anywhere', () => {
+      render(<DataFidelity fidelity={{ ...EMPTY, ocr_proxy: OCR_LOW }} />)
+
+      expect(screen.queryByTestId('fidelity-ocr')).toHaveAttribute('data-tone', 'neutral')
+      expect(
+        screen.getByTestId('data-fidelity').querySelectorAll('[data-tone="caution"]'),
+      ).toHaveLength(0)
+    })
+
+    it('a low structural figure still raises one', () => {
+      // The other half. This change narrowed what can pull the lever; it must not
+      // have disabled the lever.
+      render(<DataFidelity fidelity={{ ...EMPTY, structural: LOW_STRUCTURAL }} />)
+
+      expect(
+        screen.getByTestId('data-fidelity').querySelectorAll('[data-tone="caution"]'),
+      ).toHaveLength(1)
+      expect(screen.getByTestId('fidelity-structural')).toHaveTextContent(/checked by hand/)
+    })
+
+    it('with both low, exactly one caution panel appears — the structural one', () => {
+      render(
+        <DataFidelity
+          fidelity={{ ...EMPTY, structural: LOW_STRUCTURAL, ocr_proxy: OCR_LOW }}
+        />,
+      )
+
+      const cautions = screen
+        .getByTestId('data-fidelity')
+        .querySelectorAll('[data-tone="caution"]')
+      expect(cautions).toHaveLength(1)
+      expect(cautions[0]).toHaveAttribute('data-testid', 'fidelity-structural')
     })
   })
 
