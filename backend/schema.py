@@ -8,7 +8,7 @@ downstream can tell which path a design arrived through.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -62,6 +62,18 @@ class DesignGraph(BaseModel):
 # diagram label. 1000 characters is a paragraph or two — enough to say what a system
 # does and who uses it, not enough to smuggle in a second document.
 MAX_CONTEXT_CHARS = 1000
+
+# Cap on the free-text feedback a re-review carries.
+#
+# Larger than MAX_CONTEXT_CHARS because it is doing more work: a reviewer
+# correcting a review writes prose about several checks, quotes the design back,
+# and explains what was misread. 4000 characters is a page of that.
+#
+# Still capped, and for the same two reasons the context field is: it rides in the
+# prompt of every evaluate call (twice — once per framework) plus remediate, so
+# cost scales with it; and it is submitter-typed text, which makes it the most
+# direct injection surface in the system. See `agent/untrusted.py`.
+MAX_FEEDBACK_CHARS = 4000
 
 
 # --------------------------------------------------------------------------- #
@@ -502,6 +514,80 @@ class ReviewResult(BaseModel):
     # written before this existed still load, with all three fields None — which
     # reads correctly as "not measured" rather than as zero coverage.
     fidelity: DataFidelity = Field(default_factory=DataFidelity)
+
+    # ----------------------------------------------------------------------- #
+    # The design this review was scored against, retained so a follow-up
+    # re-review can resume from it.
+    #
+    # Stored rather than re-derived, and that is the whole point. A feedback-only
+    # re-review must "skip re-ingest entirely" — so the material has to be HERE,
+    # not behind a second parse of `diagram_key`. Re-deriving it would also make a
+    # follow-up depend on the uploads still being on disk, and Render's free-tier
+    # disk is ephemeral: the design would silently come back empty after a restart
+    # and the re-review would score nothing while looking like it worked.
+    #
+    # `document_text` is already capped at 400,000 characters by
+    # `ingestion/documents.MAX_CHARS`, so this bounds the record rather than
+    # opening it up. Both default empty, so every review stored before this field
+    # existed still loads — a re-review of one of those has no design to resume
+    # from, and `pipeline.re_review` refuses it explicitly rather than scoring air.
+    # ----------------------------------------------------------------------- #
+    graph: DesignGraph | None = Field(
+        default=None,
+        description="The component graph this review was scored against. None on "
+        "reviews stored before re-review existed.",
+    )
+    document_text: str = Field(
+        default="",
+        description="The normalized document text this review was scored against.",
+    )
+    classification: dict[str, Any] = Field(
+        default_factory=dict,
+        description="The classify stage's raw payload for this review, retained so a "
+        "feedback-only re-review can skip classify as well as ingest. Its `absent` "
+        "list is what the evaluate prompt calls the most important part of the "
+        "inventory, so reconstructing a stand-in from `components` would quietly "
+        "degrade every re-review.",
+    )
+
+    # ----------------------------------------------------------------------- #
+    # Version linkage
+    #
+    # A re-review is a NEW record with its own `review_id`, not an edit of this
+    # one. Nothing overwrites anything: the original file on disk is never
+    # rewritten, so every version stays independently retrievable through the
+    # existing `GET /reviews/{id}` with no new read path.
+    #
+    # `root_review_id` is the whole chain's identity and is what makes the set
+    # discoverable from any member. It is "" on an original — deliberately, rather
+    # than self-referential, so "is this a re-review?" is a truthiness check and
+    # older records answer it correctly without a migration.
+    # ----------------------------------------------------------------------- #
+    version: int = Field(
+        default=1, description="1 for an original review; 2+ for each re-review."
+    )
+    root_review_id: str = Field(
+        default="",
+        description="The original review this chain descends from. Empty on the "
+        "original itself.",
+    )
+    based_on_review_id: str = Field(
+        default="",
+        description="The specific version this one was produced from — the latest "
+        "in the chain at the time. Empty on an original.",
+    )
+    feedback: str = Field(
+        default="",
+        description="The reviewer's free-text feedback that prompted this version. "
+        "UNTRUSTED: fenced by `untrusted.wrap()` at every prompt it reaches, and "
+        "never treated as evidence that can move a verdict by assertion.",
+    )
+
+    @field_validator("feedback")
+    @classmethod
+    def _cap_feedback(cls, value: str) -> str:
+        """Truncate at the cap, on the model so every entry point inherits it."""
+        return value.strip()[:MAX_FEEDBACK_CHARS]
     delta: ScoreDelta | None = None
     token_usage: dict[str, int] = Field(default_factory=dict)
 

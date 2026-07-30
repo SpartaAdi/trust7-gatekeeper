@@ -20,7 +20,14 @@ import scoring
 import storage
 from agent import stages
 from ingestion import normalize, relevance
-from schema import Finding, IngestWarning, ReviewResult, ReviewStatus
+from schema import (
+    DesignGraph,
+    Finding,
+    IngestWarning,
+    NormalizedDesign,
+    ReviewResult,
+    ReviewStatus,
+)
 
 log = logging.getLogger(__name__)
 
@@ -359,6 +366,13 @@ def _run(
             # opening this review tomorrow must still see that its diagram was barely
             # legible, and the status file is not what they will be reading.
             warnings=design.warnings,
+            # The pipeline state a follow-up re-review resumes from. Stored rather
+            # than re-derived so a feedback-only round can genuinely skip ingest AND
+            # classify, and so a round still works after Render's ephemeral disk has
+            # taken the original uploads with it. See the field notes in schema.py.
+            graph=design.graph,
+            document_text=design.document_text,
+            classification=classification,
             # PRE-EXISTING BUG, found while instrumenting the grounding filter and
             # fixed here because that metric is misleading without it: these were
             # unpacked from `remediate` and then never stored, so the results page's
@@ -422,3 +436,405 @@ def _sum(usages: list[dict[str, int]]) -> dict[str, int]:
 
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+# --------------------------------------------------------------------------- #
+# Re-review: a follow-up round on an existing review
+#
+# A NEW versioned record every time, never an edit. The base review's file on disk
+# is not rewritten, so the original and every version stay independently
+# retrievable through the existing `GET /reviews/{id}` — there is no new read path
+# and no migration.
+#
+# Two shapes, and the difference is what gets re-ingested:
+#
+#   * WITH a new attachment — ingest, screen and classify run on ONLY the new
+#     attachment. A new diagram's graph REPLACES the previous graph outright; it is
+#     never structurally merged, and the previous graph is passed to the model as
+#     read-only reference so it can see what changed. A new document's text
+#     replaces the previous text the same way.
+#   * WITHOUT one — none of those three stages runs at all. The base review's
+#     graph, document text and classification are reused verbatim from the stored
+#     record, which is why they are stored (see the field notes in schema.py).
+#
+# Evaluate and remediate ALWAYS run. That is the point of the feature: a reviewer
+# correcting a misread check changes the findings without changing the design, and
+# a round that skipped evaluation could not express that.
+# --------------------------------------------------------------------------- #
+
+
+class ReReviewNotPossible(ValueError):
+    """The base review cannot be followed up. The message is user-facing."""
+
+
+def re_review(
+    *,
+    review_id: str,
+    based_on_review_id: str,
+    feedback: str,
+    document_key: str = "",
+    diagram_key: str = "",
+    api_key: str = "",
+) -> ReviewResult:
+    """Run one follow-up round and persist it as a new version. Raises on failure.
+
+    Same wrapper as `run` and for the same three reasons — a cancel must reach the
+    request on the wire, a reviewer's own key must be scoped to this round, and the
+    cancel registry must not grow. `review_id` is the NEW version's id, minted by
+    the route; `based_on_review_id` is the version this round starts from.
+    """
+    with llm.cancellation(lambda: cancel.is_cancelled(review_id)), llm.api_key_override(
+        api_key
+    ):
+        try:
+            return _re_review(
+                review_id=review_id,
+                based_on_review_id=based_on_review_id,
+                feedback=feedback,
+                document_key=document_key,
+                diagram_key=diagram_key,
+            )
+        finally:
+            cancel.clear(review_id)
+
+
+def _resume_design(base: ReviewResult, feedback: str) -> NormalizedDesign:
+    """The base review's design, rebuilt from what was stored on it.
+
+    Raises `ReReviewNotPossible` when the record predates the fields that make this
+    possible. That is an honest refusal rather than a degraded round: without a
+    stored graph and document text there is nothing to evaluate except the feedback,
+    and scoring 45 checks against a sentence would produce a real-looking review of
+    nothing.
+    """
+    if base.graph is None and not base.document_text:
+        raise ReReviewNotPossible(
+            f"Review {base.review_id!r} was created before follow-up re-reviews were "
+            f"supported, so the design it was scored against was not retained and "
+            f"cannot be re-evaluated. Submit the design again as a new review, then "
+            f"follow up on that one."
+        )
+    return NormalizedDesign(
+        review_id=base.review_id,
+        title=base.title,
+        document_text=base.document_text,
+        graph=base.graph or DesignGraph(),
+        context=base.context,
+        # Warnings and fidelity belong to the round that measured them. A feedback-only
+        # round re-measures nothing, so carrying the base's forward would restate a
+        # measurement this round did not take.
+    )
+
+
+def _re_review(
+    *,
+    review_id: str,
+    based_on_review_id: str,
+    feedback: str,
+    document_key: str,
+    diagram_key: str,
+) -> ReviewResult:
+    base = storage.get_review(based_on_review_id)
+    if base is None:
+        raise ReReviewNotPossible(f"No review {based_on_review_id!r} to follow up on.")
+
+    status = storage.get_status(review_id) or ReviewStatus.initial(review_id)
+    progress = _Progress(status)
+    usages: list[dict[str, int]] = []
+    has_attachment = bool(document_key or diagram_key)
+    stage = "ingest"
+
+    try:
+        if has_attachment:
+            design, reference_graph, classification, usage = _ingest_new_attachment(
+                review_id=review_id,
+                base=base,
+                progress=progress,
+                document_key=document_key,
+                diagram_key=diagram_key,
+            )
+            usages.extend(usage)
+        else:
+            # Nothing is read, nothing is parsed, no model call is made for any of
+            # the first four stages. They are marked done with a detail that says
+            # SKIPPED — `StageState` has no `skipped` member, and adding one would
+            # need a frontend change that is out of scope for this round, so the
+            # detail line carries the truth rather than the state.
+            design = _resume_design(base, feedback)
+            reference_graph = None
+            classification = base.classification or _classification_from(base)
+            for skipped, detail in (
+                ("ingest", "Skipped — no new attachment, reusing the stored design"),
+                ("normalize", "Skipped — no new attachment"),
+                ("screen", "Skipped — no new attachment to screen"),
+                ("classify", f"Skipped — reusing {len(base.components)} components"),
+            ):
+                progress.finish(skipped, detail)
+
+        # ---- evaluate — ALWAYS, even on feedback alone ----------------------- #
+        stage = "evaluate"
+        frameworks = [f.key for f in rubric.load()]
+        progress.start("evaluate", f"Re-evaluating {len(rubric.all_checks())} checks")
+        findings: list[Finding] = []
+        for index, framework_key in enumerate(frameworks, 1):
+            framework = next(f for f in rubric.load() if f.key == framework_key)
+            progress.detail(
+                "evaluate", f"{framework.name} ({index} of {len(frameworks)})"
+            )
+            framework_findings, usage = stages.evaluate(
+                design,
+                classification,
+                framework_key,
+                feedback=feedback,
+                reference_graph=reference_graph,
+            )
+            findings.extend(framework_findings)
+            usages.append(usage)
+        open_count = sum(1 for f in findings if f.status in ("fail", "partial"))
+        progress.finish(
+            "evaluate", f"{open_count} gaps found across {len(findings)} checks"
+        )
+
+        # ---- prioritize ----------------------------------------------------- #
+        stage = "prioritize"
+        progress.start("prioritize", "Ranking findings")
+        ranking_payload, usage = stages.prioritize(findings, classification)
+        usages.append(usage)
+        ranked, backfilled = stages.apply_ranking(
+            findings, ranking_payload.get("ranking", [])
+        )
+        detail = f"{ranked + backfilled} findings ranked"
+        if backfilled:
+            detail += f" ({ranked} by the model, {backfilled} by severity)"
+        progress.finish("prioritize", detail)
+
+        overall, framework_scores = scoring.score(findings)
+
+        # ---- remediate — ALWAYS ---------------------------------------------- #
+        stage = "remediate"
+        progress.start("remediate", "Regenerating remediation and summary")
+        (
+            remediations,
+            efforts,
+            executive_summary,
+            use_case_notes,
+            usage,
+            grounding,
+        ) = stages.remediate(
+            findings,
+            classification,
+            scoring.scoreboard(overall, framework_scores, findings),
+            context=design.context,
+            feedback=feedback,
+            reference_graph=reference_graph,
+        )
+        usages.append(usage)
+        design.fidelity.grounding = grounding
+        for finding in findings:
+            finding.remediation = remediations.get(finding.check_id, "")
+            finding.remediation_effort = efforts.get(finding.check_id, "")  # type: ignore[assignment]
+        progress.finish("remediate", f"{len(remediations)} remediations written")
+
+        # ---- persist as a NEW version --------------------------------------- #
+        findings.sort(key=lambda f: (f.priority == 0, f.priority))
+
+        result = ReviewResult(
+            review_id=review_id,
+            created_at=_now(),
+            title=design.title,
+            overall_score=overall,
+            frameworks=framework_scores,
+            findings=findings,
+            components=stages.classified_components(classification),
+            summary=ranking_payload.get("summary", ""),
+            executive_summary=executive_summary,
+            context=design.context,
+            # The diagram this VERSION was scored against — the new one when an
+            # attachment replaced it, otherwise the base's, so the PDF appendix and
+            # the share view keep working on either shape.
+            diagram_key=diagram_key or base.diagram_key,
+            warnings=design.warnings,
+            graph=design.graph,
+            document_text=design.document_text,
+            classification=classification,
+            use_case_notes=use_case_notes,
+            fidelity=design.fidelity,
+            token_usage=_sum(usages),
+            # ---- the version linkage ---------------------------------------- #
+            version=base.version + 1,
+            # The chain's identity. The base's root when it has one, otherwise the
+            # base itself — which is how version 2 establishes the root that every
+            # later version inherits.
+            root_review_id=base.root_review_id or base.review_id,
+            based_on_review_id=base.review_id,
+            feedback=feedback,
+        )
+
+        # A delta against the version this round started from, so "what did my
+        # feedback change" is answerable without diffing two records by hand. Free:
+        # `scoring.delta` is the same arithmetic the re-analyze flow already uses.
+        result.delta = scoring.delta(base, result)
+
+        cancel.check(review_id)
+        storage.put_review(result)
+        progress.complete()
+        return result
+
+    except relevance.NotReviewable:
+        # `progress.rejected` has already written the terminal status. Re-raised so
+        # the caller knows the round did not run — and note what has NOT happened:
+        # no result was stored, so the base review and every earlier version are
+        # exactly as they were.
+        raise
+    except cancel.Cancelled:
+        log.info("Re-review %s cancelled during %s", review_id, stage)
+        progress.cancelled(stage)
+        raise
+    except Exception as exc:  # noqa: BLE001 — recorded for the UI, then re-raised
+        log.exception("Re-review %s failed during %s", review_id, stage)
+        progress.fail(stage, f"{type(exc).__name__}: {exc}")
+        raise
+
+
+def _ingest_new_attachment(
+    *,
+    review_id: str,
+    base: ReviewResult,
+    progress: _Progress,
+    document_key: str,
+    diagram_key: str,
+) -> tuple[NormalizedDesign, object | None, dict, list[dict[str, int]]]:
+    """Ingest, screen and classify the NEW attachment only.
+
+    Returns the design to evaluate, the previous graph when it was replaced (as
+    reference for the prompt, nothing more), the fresh classification, and the token
+    usage of each call made.
+
+    The replacement rule, stated once:
+
+    * a new attachment that yields a graph REPLACES the previous graph outright, and
+      the previous one becomes read-only reference context;
+    * a new attachment that yields document text REPLACES the previous text;
+    * a surface the new attachment did not provide carries forward from the base
+      unchanged — a new diagram does not erase the SoW that was reviewed with it.
+
+    Nothing is structurally merged. Two graphs are never combined into one, which is
+    the failure mode that would let a stale component from an old diagram be scored
+    as though it were still in the design.
+    """
+    usages: list[dict[str, int]] = []
+
+    progress.start("ingest", "Reading the new attachment")
+    fresh, ingest_usage = normalize.ingest(
+        review_id=review_id,
+        title=base.title,
+        document_key=document_key,
+        diagram_key=diagram_key,
+        # Carried forward verbatim: it is the submitter's own purpose statement for
+        # the same system, and it is fenced at every prompt exactly as before.
+        context=base.context,
+    )
+    usages.append(ingest_usage)
+    progress.finish(
+        "ingest",
+        f"{len(fresh.graph.components)} components from {fresh.graph.source.value}",
+    )
+
+    # The new attachment replaced the graph only if it actually produced one.
+    replaced_graph = bool(fresh.graph.components or fresh.graph.notes)
+    reference_graph = base.graph if replaced_graph else None
+
+    design = NormalizedDesign(
+        review_id=review_id,
+        title=base.title,
+        document_text=fresh.document_text or base.document_text,
+        graph=fresh.graph if replaced_graph else (base.graph or DesignGraph()),
+        context=base.context,
+        # Warnings and fidelity are this round's own measurements, on this round's
+        # attachment. The base's are not restated.
+        warnings=fresh.warnings,
+        fidelity=fresh.fidelity,
+    )
+
+    progress.start("normalize", "Converging the new attachment on the common schema")
+    progress.finish(
+        "normalize",
+        f"{len(design.document_text)} characters of document text"
+        + (", diagram replaced" if replaced_graph else ", diagram carried forward"),
+    )
+    progress.warn(design.warnings)
+
+    # ---- the same relevance gate the original upload went through ----------- #
+    #
+    # No exception for a re-review: a new attachment is an upload like any other, and
+    # "it is a follow-up" is not evidence that a photograph of a cat is a design. A
+    # refusal here stops the round before evaluate, so it costs one model call rather
+    # than five, and leaves every existing version untouched.
+    progress.start("screen", "Checking the new attachment is a solution design")
+    assessment, usage = relevance.screen(design)
+    usages.append(usage)
+
+    if assessment is None:
+        progress.finish("screen", "Relevance check unavailable — continuing")
+    elif assessment.rejects:
+        message = relevance.rejection_message(assessment)
+        log.info(
+            "Re-review %s rejected by the relevance gate: verdict=%s confidence=%s "
+            "subject=%r",
+            review_id, assessment.verdict, assessment.confidence, assessment.subject,
+        )
+        progress.rejected("screen", message)
+        raise relevance.NotReviewable(message)
+    elif assessment.verdict == "reviewable":
+        progress.finish(
+            "screen",
+            f"Recognised as {assessment.subject}" if assessment.subject else "Confirmed",
+        )
+    else:
+        design.warnings.append(relevance.uncertainty_warning(assessment))
+        progress.warn(design.warnings)
+        progress.finish(
+            "screen",
+            f"Not confirmed as a design ({assessment.confidence} confidence) "
+            f"— continuing with a warning",
+        )
+
+    # ---- classify the new material ----------------------------------------- #
+    progress.start("classify", "Classifying the revised design")
+    classification, usage = stages.classify(design)
+    usages.append(usage)
+    components = stages.classified_components(classification)
+    progress.finish("classify", f"{len(components)} components classified")
+
+    return design, reference_graph, classification, usages
+
+
+def _classification_from(base: ReviewResult) -> dict:
+    """A stand-in classification for a review stored before one was retained.
+
+    Deliberately thin, and it loses `absent` — which the evaluate prompt calls the
+    most important part of the inventory, because it is what lets the stage tell
+    silence apart from absence. So this is a fallback for older records rather than
+    a supported path, and `_resume_design` already refuses the records where it
+    would matter most (no graph and no document text at all).
+    """
+    return {
+        "design_summary": base.summary or base.executive_summary or "",
+        "components": [
+            {
+                "id": component.id,
+                "label": component.label,
+                "kind": component.kind,
+                "provider": component.provider,
+                "service": component.service,
+                "attributes": [
+                    {"name": name, "value": value}
+                    for name, value in component.attributes.items()
+                ],
+            }
+            for component in base.components
+        ],
+        "data_flows": [],
+        "observations": [],
+        "absent": [],
+    }

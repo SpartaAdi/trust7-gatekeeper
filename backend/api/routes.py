@@ -15,7 +15,9 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from pydantic import BaseModel, Field
+from typing import Annotated
+
+from pydantic import BaseModel, Field, StringConstraints
 
 import cancel
 import config
@@ -25,7 +27,7 @@ import share
 import storage
 from agent import pipeline
 from ingestion import filetype, relevance
-from schema import ReviewResult, ReviewStatus, ScoreDelta
+from schema import MAX_FEEDBACK_CHARS, ReviewResult, ReviewStatus, ScoreDelta
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -122,6 +124,64 @@ class ReviewAccepted(BaseModel):
     result_url: str
 
 
+class ReReviewRequest(BaseModel):
+    """A follow-up round on an existing review.
+
+    `feedback` is REQUIRED and is the whole point: a re-review with nothing to say
+    is a re-run, which `/reviews/{id}/reanalyze` already does.
+
+    The constraint is `strip_whitespace` BEFORE `min_length`, and that order is the
+    whole of it: a bare `min_length=1` measures the raw string, so `"   "` is three
+    characters and passes — a "required" field that accepts a space. Found by the
+    test that asserts otherwise.
+
+    The attachment is OPTIONAL and is given as upload KEYS, exactly like `/reviews`
+    — which is what puts it through the same `POST /uploads` extension, size and
+    content-signature gates rather than a second, weaker path.
+    """
+
+    feedback: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True, min_length=1, max_length=MAX_FEEDBACK_CHARS
+        ),
+    ] = Field(
+        description="Free text: what the previous version got wrong, or what has "
+        "changed. UNTRUSTED — fenced at every prompt and never treated as evidence "
+        "that can move a verdict by assertion.",
+    )
+    document_key: str = Field(
+        default="",
+        description="Optional new SoW / solution document, from POST /uploads.",
+    )
+    diagram_key: str = Field(
+        default="",
+        description="Optional new diagram or screenshot, from POST /uploads.",
+    )
+
+
+class ReviewVersion(BaseModel):
+    """One entry in a review's version chain."""
+
+    review_id: str
+    version: int
+    created_at: str
+    overall_score: float
+    open_findings: int
+    feedback: str = Field(
+        description="The feedback that produced this version. Empty on the original."
+    )
+    based_on_review_id: str
+    is_original: bool
+    result_url: str
+
+
+class ReviewVersions(BaseModel):
+    root_review_id: str
+    latest_review_id: str
+    versions: list[ReviewVersion]
+
+
 # A reviewer's own OpenRouter key, spent instead of the server's for their reviews.
 #
 # A HEADER and not a body field, deliberately. FastAPI answers a malformed body
@@ -150,6 +210,152 @@ def reanalyze(
         request.model_copy(update={"previous_review_id": review_id}),
         background,
         x_openrouter_key,
+    )
+
+
+@router.post(
+    "/reviews/{review_id}/re-review", response_model=ReviewAccepted, status_code=202
+)
+def create_re_review(
+    review_id: str,
+    request: ReReviewRequest,
+    background: BackgroundTasks,
+    x_openrouter_key: str = Header(default=""),
+) -> ReviewAccepted:
+    """Follow up on a review with feedback, and optionally a new attachment.
+
+    Distinct from `/reviews/{id}/reanalyze`, which re-runs the whole pipeline on
+    fresh uploads and produces an unrelated review carrying a delta. This one
+    appends a VERSION to an existing review's chain, carries the reviewer's own
+    words into the evaluation, and can run on feedback alone with no new upload.
+
+    `{review_id}` may be any member of the chain — the original or any version. The
+    round is built on the LATEST version in that chain, which is what makes
+    repeatedly POSTing the original id produce v2, v3, v4 rather than three
+    competing v2s.
+
+    Returns 202 with the NEW version's id. Nothing about the base review changes,
+    including if this round fails or is rejected.
+    """
+    latest = _latest_in_chain(review_id)
+
+    for key in (request.document_key, request.diagram_key):
+        if key and not storage.object_exists(key):
+            raise HTTPException(status_code=400, detail=f"No uploaded object at {key!r}.")
+
+    # Refused here rather than in the background task, so the caller learns
+    # immediately instead of polling a status that will only ever say it failed.
+    if latest.graph is None and not latest.document_text:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Review {latest.review_id!r} was created before follow-up "
+                f"re-reviews were supported, so the design it was scored against was "
+                f"not retained and cannot be re-evaluated. Submit the design again as "
+                f"a new review, then follow up on that one."
+            ),
+        )
+
+    version_id = str(uuid.uuid4())
+    storage.put_status(ReviewStatus.initial(version_id))
+
+    background.add_task(
+        _run_re_review,
+        review_id=version_id,
+        based_on_review_id=latest.review_id,
+        feedback=request.feedback,
+        document_key=request.document_key,
+        diagram_key=request.diagram_key,
+        api_key=x_openrouter_key.strip(),
+    )
+
+    return ReviewAccepted(
+        review_id=version_id,
+        status_url=f"/reviews/{version_id}/status",
+        result_url=f"/reviews/{version_id}",
+    )
+
+
+def _run_re_review(**kwargs: str) -> None:
+    try:
+        pipeline.re_review(**kwargs)  # type: ignore[arg-type]
+    except relevance.NotReviewable as exc:
+        # The gate working, not a fault. Same handling as the first-pass path: the
+        # status file carries the user-facing reason and a stack trace here would
+        # file a correct refusal in the logs as a crash.
+        log.info(
+            "Re-review %s was not reviewable: %s", kwargs.get("review_id"), exc
+        )
+    except Exception:  # noqa: BLE001 — already in the status file; log and move on
+        log.exception("Re-review %s failed", kwargs.get("review_id"))
+
+
+def _chain_of(review_id: str) -> list[ReviewResult]:
+    """Every version of the review `review_id` belongs to, oldest first.
+
+    Resolves from ANY member. The chain's identity is `root_review_id`, and an
+    original carries "" there — so the root is found by reading the requested record
+    and taking its root if it has one, or itself if it does not.
+
+    A linear scan of stored reviews, which is what `storage.list_reviews` already
+    does for the history page. There is no index, and at the scale this runs at
+    (local JSON files, one reviewer) building one would be the wrong trade.
+    """
+    requested = get_review(review_id)  # reuses the 404/409/400/422 handling
+    root_id = requested.root_review_id or requested.review_id
+
+    versions: list[ReviewResult] = []
+    for summary in storage.list_reviews():
+        candidate = storage.get_review(str(summary["review_id"]))
+        if candidate is None:
+            continue
+        if candidate.review_id == root_id or candidate.root_review_id == root_id:
+            versions.append(candidate)
+
+    # By version, then by timestamp — a tie is only possible if two rounds were
+    # started against the same base concurrently, and ordering them by creation
+    # keeps the list stable rather than arbitrary.
+    return sorted(versions, key=lambda r: (r.version, r.created_at))
+
+
+def _latest_in_chain(review_id: str) -> ReviewResult:
+    """The newest version of whichever chain `review_id` belongs to."""
+    chain = _chain_of(review_id)
+    # `_chain_of` always finds at least the requested record, since `get_review`
+    # raised otherwise.
+    return chain[-1]
+
+
+@router.get("/reviews/{review_id}/versions", response_model=ReviewVersions)
+def get_review_versions(review_id: str) -> ReviewVersions:
+    """Every version of this review, oldest first. Answers from any member.
+
+    The original and every re-review are separate records with their own ids, so
+    each is already retrievable through `GET /reviews/{id}`. This exists so a client
+    can DISCOVER the set from any one of them without having kept the ids.
+    """
+    chain = _chain_of(review_id)
+    root_id = chain[0].review_id
+
+    return ReviewVersions(
+        root_review_id=root_id,
+        latest_review_id=chain[-1].review_id,
+        versions=[
+            ReviewVersion(
+                review_id=version.review_id,
+                version=version.version,
+                created_at=version.created_at,
+                overall_score=version.overall_score,
+                open_findings=sum(
+                    1 for f in version.findings if f.status in ("fail", "partial")
+                ),
+                feedback=version.feedback,
+                based_on_review_id=version.based_on_review_id,
+                is_original=version.review_id == root_id,
+                result_url=f"/reviews/{version.review_id}",
+            )
+            for version in chain
+        ],
     )
 
 
