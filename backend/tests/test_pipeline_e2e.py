@@ -58,7 +58,7 @@ def _stub_complete_json(state: dict[str, int]):
     without one, since the label has no effect on the response.
     """
 
-    def fake(*, system, content, schema, effort, max_tokens, label=""):
+    def fake(*, system, content, schema, effort, max_tokens, label="", temperature=None):
         assert label, "every complete_json call must pass a label for the route log"
         state.setdefault("labels", []).append(label)  # type: ignore[arg-type]
         required = set(schema.get("required", []))

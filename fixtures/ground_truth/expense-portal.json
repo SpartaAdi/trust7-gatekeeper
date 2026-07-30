@@ -1,0 +1,247 @@
+{
+  "id": "expense-portal",
+  "title": "Internal expense claim portal",
+  "provenance": "SYNTHETIC. Invented for this repository; no client content. Labels authored here from statements the SoW makes explicitly — see `why` on each. Replace with the tester's own labelled designs; this exists so the harness has something to run against.",
+  "document": "expense-portal.sow.md",
+  "diagram": "expense-portal.drawio",
+  "context": "",
+  "why_this_design": [
+    "A deliberately weak, deliberately non-AI design. It is the harness's N/A case:",
+    "the SoW states outright that no model or AI component is used, which makes 18 of",
+    "TRUST-7's 19 checks inapplicable and six of its seven pillars WHOLLY inapplicable.",
+    "That is the shape backend/tests/test_scoring.py pins arithmetically, and this is",
+    "the design that would expose it end to end if scoring ever counted an n/a pillar",
+    "as a zero: TRUST-7 would read ~14 instead of resting on its one applicable check.",
+    "",
+    "The diagram is draw.io, so it is parsed deterministically and makes no model call.",
+    "Diagram and document agree, so a verdict cannot be blamed on reconciling them."
+  ],
+  "labels": {
+    "oe_iac": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'Infrastructure is created by hand in the cloud console. Nothing is defined as code.'"
+    },
+    "oe_observability": {
+      "status": "partial",
+      "confidence": "clear",
+      "why": "Logging exists (request bodies to a log group) but the SoW states there is no alerting and no dashboard. Logging without alerting is part of the check, not all of it."
+    },
+    "oe_incident_response": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'no on-call runbook'. No incident process is referenced anywhere."
+    },
+    "oe_change_mgmt": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'no staging environment; changes deploy straight to production, and there is no documented rollback path.'"
+    },
+    "sec_least_privilege": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'Receipt images are written to a bucket that is readable by the whole account.' Account-wide read on a PII-bearing store is the opposite of least privilege."
+    },
+    "sec_encryption_at_rest": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'Nothing in this design states an encryption-at-rest setting', against records holding bank account numbers. Silence is not a pass."
+    },
+    "sec_encryption_transit": {
+      "status": "partial",
+      "confidence": "clear",
+      "why": "HTTPS from the browser to the load balancer, 'plain HTTP on the internal network' from there to the API. One hop encrypted, one not."
+    },
+    "sec_secrets_mgmt": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'credentials are read from a configuration file deployed with the application. There is no secrets store.'"
+    },
+    "sec_network_perimeter": {
+      "status": "partial",
+      "confidence": "borderline",
+      "why": "The API sits behind a load balancer rather than being exposed directly, which is 'fronted appropriately'. But no segmentation, subnet layout or boundary is described. Reasonable reviewers split between partial and fail here."
+    },
+    "sec_identity_auth": {
+      "status": "partial",
+      "confidence": "clear",
+      "why": "Authentication is defined (username and password) so it is not absent, but 'no SSO, no MFA, and no role model beyond employee and finance', and nothing covers system-facing access."
+    },
+    "sec_audit_logging": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "The only logging described is request bodies to a log group — not security-relevant actions, and nothing about tamper resistance."
+    },
+    "rel_redundancy": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'one instance runs continuously' and 'The database runs in a single availability zone.' Two single points of failure."
+    },
+    "rel_dr_plan": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'Out of scope: Disaster recovery to a second region. No RTO or RPO has been agreed.'"
+    },
+    "rel_failure_isolation": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'Out of scope: Retries, timeouts, or circuit breakers between the API and its dependencies.'"
+    },
+    "rel_backup": {
+      "status": "partial",
+      "confidence": "clear",
+      "why": "'Database backups are taken manually before each release' — a backup strategy exists — but 'No restore has been documented or attempted', and the check requires a defined restore process."
+    },
+    "perf_right_sizing": {
+      "status": "partial",
+      "confidence": "borderline",
+      "why": "'one instance ... sized for the 400-user population' ties the choice to the workload, so it is not blind over-provisioning. But no access pattern or load profile is given to justify it."
+    },
+    "perf_caching": {
+      "status": "partial",
+      "confidence": "borderline",
+      "why": "A CDN caches the static SPA. Nothing caches repeated reads of claim data. Caching is present but not where the repeated reads are."
+    },
+    "perf_data_store_fit": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "Relational store for relational claim records with an approval workflow; receipt images in an object store rather than in the database. Both fit their access pattern."
+    },
+    "perf_global_delivery": {
+      "status": "pass",
+      "confidence": "borderline",
+      "why": "A CDN fronts the SPA, and all 400 users are internal to one country, so there is no wider geographic distribution to account for. Defensible as not_applicable instead — this label is one of the deliberately hard ones."
+    },
+    "cost_visibility": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'Costs are not currently tracked per environment or per team.'"
+    },
+    "cost_elasticity": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'No autoscaling is configured; one instance runs continuously.' Fixed capacity."
+    },
+    "cost_storage_lifecycle": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'Out of scope: Any formal data retention or deletion schedule.' Receipts and logs accumulate indefinitely."
+    },
+    "cost_provisioning_model": {
+      "status": "fail",
+      "confidence": "borderline",
+      "why": "The workload is stated to be continuous and predictable, which is the case reserved capacity exists for, and no provisioning model is discussed at all. Fail on silence; a reviewer could argue partial because the load profile itself is stated."
+    },
+    "sus_managed_services": {
+      "status": "partial",
+      "confidence": "clear",
+      "why": "Managed CDN, managed relational database, managed object store and managed logs — but the API runs on a self-managed instance sized for peak and never idle."
+    },
+    "sus_data_minimization": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "No retention schedule at all, and 'Logging writes the full request body, including form fields' — the footprint grows without bound and captures more than is needed."
+    },
+    "sus_region_awareness": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'The region the workload runs in is not stated anywhere in this document.' No region choice is shown, so no awareness can be."
+    },
+
+    "tf_explainability": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "'No model, AI, or machine-learning component is used anywhere in this system.' There are no AI-driven decisions to explain."
+    },
+    "tf_fairness": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "No AI outputs exist to evaluate for variation across populations."
+    },
+    "tf_hallucination_control": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "No LLM output exists to ground."
+    },
+    "tf_privacy": {
+      "status": "not_applicable",
+      "confidence": "borderline",
+      "why": "The check is scoped to 'PII flowing through AI components', and there are none — the design's very real PII problems are caught by sec_encryption_at_rest and sec_least_privilege instead. A reviewer who reads the check as general PII protection would say fail, which makes this a useful disagreement to measure."
+    },
+    "rr_ai_threat_model": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "No AI component, so no prompt injection, data poisoning or model extraction surface exists."
+    },
+    "rr_incident_response_ai": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "No AI failures to have an incident path for. General incident response is covered by oe_incident_response, which is labelled fail."
+    },
+    "rr_validation_before_prod": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "No models or model outputs to validate before production."
+    },
+    "ue_cost_per_unit": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "The check asks for cost per AI call or decision. There are none. General cost visibility is cost_visibility, labelled fail."
+    },
+    "ue_model_routing": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "No models, so nothing to route between."
+    },
+    "ue_caching_ai": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "No AI queries to cache."
+    },
+    "ss_data_residency": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "The ONE applicable TRUST-7 check: it is not AI-specific. 'The region ... is not stated anywhere in this document, and no data residency requirement has been recorded', against records holding bank account numbers."
+    },
+    "ss_provider_dependency": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "The check is scoped to foundation model and AI vendor dependency. There is no model."
+    },
+    "ss_abstraction": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "No AI provider calls to abstract."
+    },
+    "ta_human_in_loop": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "'Every decision in the workflow is made by a person.' There is no autonomous AI decision to retain a review point over."
+    },
+    "ta_user_training": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "The check asks about understanding an AI system's outputs. There are none."
+    },
+    "sai_inference_efficiency": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "No inference happens, so there is no inference energy footprint."
+    },
+    "gov_model_inventory": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "No AI models to inventory or assign an owner to."
+    },
+    "gov_audit_trail": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "No AI decisions or outputs to reconstruct. General audit logging is sec_audit_logging, labelled fail."
+    },
+    "gov_accountability": {
+      "status": "not_applicable",
+      "confidence": "clear",
+      "why": "No AI outputs, so no question of who is accountable for an incorrect one."
+    }
+  }
+}

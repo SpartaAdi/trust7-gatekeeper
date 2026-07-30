@@ -26,7 +26,7 @@ OTHER_TOKEN = "a-different-gate-token"
 def _stub_complete_json():
     usage = {"input_tokens": 900, "output_tokens": 200}
 
-    def fake(*, system, content, schema, effort, max_tokens, label=""):
+    def fake(*, system, content, schema, effort, max_tokens, label="", temperature=None):
         required = set(schema.get("required", []))
         if "design_summary" in required:
             return {

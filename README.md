@@ -236,6 +236,48 @@ OpenRouter is automatic and takes no breakpoints, so the explicit `cache_control
 on the rubric prefix is dropped on this path. The prefix is still byte-identical
 between reviews, which is what implicit caching keys on.
 
+### Sampling temperature — greedy on evaluate, absent everywhere else
+
+`temperature: 0.0` is sent on the evaluate stage and on **nothing else**. It is
+set at one call site, `agent/stages.py` in `evaluate()`, from the constant
+`llm.GREEDY_TEMPERATURE`, and reaches the wire as a top-level `temperature` on the
+OpenAI-compatible request. `0.0` is the floor of OpenRouter's documented 0.0–2.0
+range for the parameter and is greedy decoding on every endpoint in the routing
+order.
+
+*Only evaluate, because only evaluate's output is arithmetic input.* `scoring.py`
+reads those 45 statuses and nothing else, so sampling variance there moves the
+overall score, moves the pillar heatmap, and moves a re-review delta that is
+supposed to mean the design changed. The other three stages produce prose and an
+ordering; varying wording between runs is not a correctness problem there, and
+constraining it would buy nothing.
+
+*Absent, not defaulted, everywhere else.* The parameter is omitted from the request
+entirely unless a caller asks for it, so classify, prioritize, remediate and the
+vision call send the same body they sent before it existed — which keeps the
+implicit prompt cache warm and keeps `require_parameters: true` from narrowing
+their routable endpoints for a parameter they do not use.
+
+*It narrows routing slightly, in a useful direction.* With
+`require_parameters: true`, an endpoint that does not advertise `temperature`
+cannot serve the request. CoreWeave, Decart and Inceptron — the whole configured
+order — all advertise it. The one endpoint this excludes is Moonshot AI direct,
+which advertises no `temperature` at all; excluding it is welcome, since falling
+through to it at 1.5× the prompt price is what the provider lock exists to prevent.
+`test_the_pinned_providers_all_advertise_temperature` states that dependency so
+adding a fourth slug without checking the endpoint metadata fails loudly.
+
+*It reduces variance; it does not remove it.* Batching, quantized kernels (the
+pinned endpoints serve fp4 and int4) and MoE expert routing all leave a served
+response non-reproducible at temperature 0. This is a floor on sampling noise, not
+a determinism claim — measuring what remains is what the accuracy harness below is
+for.
+
+On `LLM_PROVIDER=anthropic` the parameter is deliberately **not** plumbed through:
+that path sends `thinking: {type: "adaptive"}`, and the Anthropic API rejects any
+non-default temperature while extended thinking is on. Accepting the argument and
+dropping it would read as applied and change nothing.
+
 ### The output-token squeeze
 
 `OPENROUTER_MAX_COMPLETION_TOKENS` (default 128000) caps every request, and
@@ -504,7 +546,7 @@ two — nothing else references the shape.
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 320 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 486 tests
 cd frontend && npm test                                                          # 76 tests
 ```
 
@@ -541,7 +583,65 @@ is never printed — only a length and a SHA-256 prefix.
 Backend tests cover the deterministic parts — draw.io parsing, scoring, delta
 computation, and prompt-injection defences — without any model call.
 `not_applicable` checks are excluded from the score rather than counted as
-failures, so an irrelevant check neither helps nor hurts.
+failures, so an irrelevant check neither helps nor hurts. A pillar whose checks are
+**all** inapplicable is excluded from its framework's denominator entirely rather
+than averaged in as a zero, which is the normal case for a design with no AI
+component: six of TRUST-7's seven pillars ask exclusively about AI, so counting
+them as zeroes would score a clean non-AI design near zero on that framework.
+`tests/test_scoring.py` pins that at pillar, framework and overall level, including
+the invariant every consumer downstream relies on — a `score` of `0.0` is a
+sentinel when and only when `checks_evaluated` is `0`.
+
+### Accuracy against ground truth
+
+`real_api_e2e.py` proves the pipeline *runs*. Whether its verdicts are *right* is a
+different question, and a separate script:
+
+```bash
+cd backend
+python scripts/accuracy_harness.py --check-labels        # validate fixtures, no API call
+python scripts/accuracy_harness.py --repeats 3          # the real thing, real cost
+python scripts/accuracy_harness.py --repeats 1 --designs expense-portal
+python scripts/accuracy_harness.py --base-url https://... --demo-token ...
+```
+
+It reads the labelled designs in `fixtures/ground_truth/` (see the README there for
+the format and for what the shipped set is and is not), runs each through
+`POST /uploads` → `POST /reviews` → `GET /reviews/{id}` on the real app with real
+model calls, and diffs every check's verdict against its label. Output is a
+markdown and a JSON report; both are gitignored, since they are run output rather
+than fixtures.
+
+What it reports, and deliberately does not: raw numbers, with no threshold and no
+interpretation anywhere in the script. Three cuts, because one number cannot carry
+it — per-class precision/recall/F1 one-vs-rest over the four statuses, macro and
+micro averages, and a coarse `fail|partial` vs `pass|not_applicable` "was the gap
+found at all" binary. Plus a per-pillar breakout, a confusion matrix, a per-check
+diff, and every figure repeated with the fixture's `borderline` labels excluded.
+
+The `not_applicable` row is the one worth watching. `expense-portal` is labelled
+n/a on 18 of TRUST-7's 19 checks, so an evaluator that never says n/a can post a
+respectable overall accuracy and a perfect open-gap recall while being wrong about
+an entire framework. Only the per-class row shows that.
+
+`--repeats` runs each design N times and reports the variance: how many checks
+returned an identical verdict every time, which ones moved and in what sequence,
+and how far the overall and per-pillar scores drifted. That is the measurement the
+temperature change above is judged by, and it is kept separate from accuracy on
+purpose — a pipeline can be stably wrong or unstably right, and only one of those
+is fixed by turning the sampling down.
+
+The harness itself is covered by `tests/test_accuracy_harness.py`: the metric
+arithmetic against hand-worked values, the variance and majority-verdict logic, and
+the end-to-end plumbing driven through the real routes with the model stubbed. An
+eval harness reports numbers nobody can check by eye, so a bug in one does not
+surface as a failure — it surfaces as a plausible wrong figure that gets quoted in
+a decision.
+
+Cost is real: `--repeats 3` over two designs is 6 reviews and 36 model calls, 12 of
+them the evaluate stage's 64,000-token request. `--repeats`, `--designs` and
+`--check-labels` exist for that reason. Like `real_api_e2e.py` it exits `2` without
+spending anything when no key is configured.
 
 Frontend tests are deliberately shallow: each view renders with mocked API
 responses and must not crash, plus one interaction test covering the upload path.

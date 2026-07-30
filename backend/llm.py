@@ -46,6 +46,30 @@ log = logging.getLogger(__name__)
 # ones get less; see agent/stages.py for the per-stage choice.
 Effort = str
 
+# --------------------------------------------------------------------------- #
+# Sampling temperature
+#
+# Opt-in per call, and absent from the request unless a caller asks for it. That
+# matters twice over: the four stages that do not ask send a byte-identical body
+# to the one they sent before this existed, and `provider.require_parameters` is
+# only made stricter for the stage that actually needs the parameter.
+#
+# GREEDY is 0.0 — the floor of OpenRouter's documented 0.0-2.0 range for this
+# parameter, and greedy decoding on every endpoint currently pinned. It is the
+# closest thing to determinism the provider exposes; it is NOT a determinism
+# guarantee, because batching, quantized kernels, and MoE expert routing all make
+# a served response non-reproducible even at temperature 0. The accuracy harness
+# in scripts/accuracy_harness.py measures what remains rather than assuming none.
+#
+# Checked against the live endpoint metadata for moonshotai/kimi-k2.6: CoreWeave,
+# Decart and Inceptron — the three providers in OPENROUTER_PROVIDER_ORDER — all
+# advertise `temperature`, so sending it does not narrow the routing lock. The
+# one endpoint it does exclude is Moonshot AI direct, which advertises no
+# `temperature` at all; excluding it is welcome, since falling through to it is
+# the exact 1.5x-price route the lock exists to prevent.
+# --------------------------------------------------------------------------- #
+GREEDY_TEMPERATURE = 0.0
+
 # Structured outputs live on the beta endpoint in anthropic 0.75.0 — `output_config`
 # is not a parameter of the non-beta `messages.create` at all — and the server
 # gates it behind this flag. Anthropic path only; OpenRouter uses response_format.
@@ -205,11 +229,17 @@ def complete_json(
     effort: Effort = "high",
     max_tokens: int = 16000,
     label: str = "",
+    temperature: float | None = None,
 ) -> tuple[dict[str, Any], dict[str, int]]:
     """Run one structured-output request and return (parsed JSON, token usage).
 
     `label` names the call in the route log — it identifies which of the pipeline's
     calls a log line belongs to and is otherwise unused.
+
+    `temperature` is omitted from the request entirely when None, which is the
+    default and what every stage except evaluate uses. Pass `GREEDY_TEMPERATURE`
+    to ask for the least sampling variance the provider offers. OpenRouter path
+    only — see `_anthropic_complete` for why the fallback provider cannot take it.
 
     `system` blocks are passed through verbatim on the Anthropic path so callers
     can place their own `cache_control` breakpoint on the stable prefix. On the
@@ -221,6 +251,7 @@ def complete_json(
         parsed, usage = _openrouter_complete(
             system=system, content=content, schema=schema,
             effort=effort, max_tokens=max_tokens, label=label,
+            temperature=temperature,
         )
     else:
         parsed, usage = _anthropic_complete(
@@ -555,6 +586,7 @@ def _openrouter_request(
     schema: dict[str, Any],
     effort: Effort,
     max_tokens: int,
+    temperature: float | None = None,
 ) -> dict[str, Any]:
     capped = min(max_tokens, config.OPENROUTER_MAX_COMPLETION_TOKENS)
     if capped > config.OPENROUTER_LOWEST_ENDPOINT_COMPLETION_CAP:
@@ -583,7 +615,7 @@ def _openrouter_request(
     if config.OPENROUTER_IGNORE_PROVIDERS:
         provider["ignore"] = list(config.OPENROUTER_IGNORE_PROVIDERS)
 
-    return {
+    request: dict[str, Any] = {
         "model": config.MODEL,
         "messages": [
             {"role": "system", "content": _system_text(system)},
@@ -610,6 +642,15 @@ def _openrouter_request(
             "reasoning": {"effort": effort, "exclude": True},
         },
     }
+
+    # Set only when the caller asked for it, so a stage that did not ask sends the
+    # same body it sent before this parameter existed — which keeps the implicit
+    # prompt cache warm and keeps `require_parameters` from narrowing the routable
+    # endpoints for stages that gain nothing from it. See GREEDY_TEMPERATURE.
+    if temperature is not None:
+        request["temperature"] = temperature
+
+    return request
 
 
 def _record_route(response: Any, label: str, seconds: float) -> ServedCall:
@@ -695,6 +736,7 @@ def _openrouter_complete(
     effort: Effort,
     max_tokens: int,
     label: str = "",
+    temperature: float | None = None,
 ) -> tuple[dict[str, Any], dict[str, int]]:
     """One attempt, then at most one more at lower effort.
 
@@ -715,11 +757,17 @@ def _openrouter_complete(
     be treating a symptom the fault does not have. Either branch makes at most one
     extra attempt and never chains into the other: two attempts total, then the
     failure stands.
+
+    `temperature` is carried unchanged into both retries. Effort is what gets traded
+    away here; the sampling temperature is a property of the STAGE — evaluate is
+    greedy because its verdicts have to be reproducible — so a retry that quietly
+    raised it would return a differently-sampled answer under the same label.
     """
     try:
         return _openrouter_attempt(
             system=system, content=content, schema=schema,
             effort=effort, max_tokens=max_tokens, label=label,
+            temperature=temperature,
         )
     except ProviderStreamError as exc:
         log.warning(
@@ -732,6 +780,7 @@ def _openrouter_complete(
             system=system, content=content, schema=schema,
             effort=effort, max_tokens=max_tokens,
             label=f"{label or 'unlabelled'}:retry-transient",
+            temperature=temperature,
         )
     except (CallDeadlineExceeded, TruncatedResponse) as exc:
         lower = _EFFORT_STEP_DOWN.get(effort)
@@ -747,6 +796,7 @@ def _openrouter_complete(
             # The retry is labelled so the route log shows it happened rather than
             # showing one call that mysteriously took twice as long.
             label=f"{label or 'unlabelled'}:retry@{lower}",
+            temperature=temperature,
         )
 
 
@@ -758,10 +808,11 @@ def _openrouter_attempt(
     effort: Effort,
     max_tokens: int,
     label: str = "",
+    temperature: float | None = None,
 ) -> tuple[dict[str, Any], dict[str, int]]:
     request = _openrouter_request(
         system=system, content=content, schema=schema,
-        effort=effort, max_tokens=max_tokens,
+        effort=effort, max_tokens=max_tokens, temperature=temperature,
     )
     started = time.monotonic()
     response = _openrouter_create_with_retry(request)
@@ -914,6 +965,20 @@ def _anthropic_complete(
     effort: Effort,
     max_tokens: int,
 ) -> tuple[dict[str, Any], dict[str, int]]:
+    """No `temperature` here, and deliberately not plumbed in.
+
+    `complete_json` takes the parameter and this adapter does not receive it, which
+    is the honest shape rather than an oversight: this path sends
+    `thinking: {"type": "adaptive"}`, and the Anthropic API rejects any temperature
+    other than the default while extended thinking is on. Accepting the argument
+    and dropping it would read as applied and change nothing, which is the failure
+    mode the max_tokens ceiling note in config.py already records once.
+
+    So on `LLM_PROVIDER=anthropic` the evaluate stage samples at the API default.
+    That is a real difference in behaviour between the two providers, stated here
+    because the Anthropic path is vestigial (see CLAUDE.md) and not the thing the
+    accuracy work is measured against.
+    """
     request: dict[str, Any] = {
         "model": config.ANTHROPIC_MODEL,
         "max_tokens": max_tokens,

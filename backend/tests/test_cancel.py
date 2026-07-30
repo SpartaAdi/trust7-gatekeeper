@@ -102,7 +102,7 @@ def _stub_llm(monkeypatch, on_call) -> list[str]:
     """
     seen: list[str] = []
 
-    def fake(*, system, content, schema, effort, max_tokens, label=""):
+    def fake(*, system, content, schema, effort, max_tokens, label="", temperature=None):
         seen.append(label)
         on_call(label)
         required = set(schema.get("required", []))

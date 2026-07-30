@@ -377,6 +377,21 @@ def evaluate(
         schema=_EVALUATE_SCHEMA,
         # The stage that decides the score. Worth the tokens.
         effort="high",
+        # Greedy decoding, and ONLY on this stage.
+        #
+        # This is the one call whose output is arithmetic input: `scoring.score`
+        # reads these 45 statuses and nothing else, so sampling variance here moves
+        # the score, moves the pillar heatmap, and moves a re-review delta that is
+        # supposed to mean the design changed. The other three stages produce prose
+        # and an ordering; varying wording between runs is not a correctness
+        # problem there, and paying to suppress it would buy nothing.
+        #
+        # It reduces variance, it does not remove it. Batching, quantized kernels
+        # (the pinned endpoints serve fp4 and int4) and MoE routing all leave a
+        # served response non-reproducible at temperature 0, so this is a floor on
+        # sampling noise rather than a determinism claim. What remains is what
+        # scripts/accuracy_harness.py exists to measure.
+        temperature=llm.GREEDY_TEMPERATURE,
         # Raised from 32000, which truncated in a real run: finish_reason "length"
         # with 32000/32000 consumed, so a framework's findings never completed.
         #

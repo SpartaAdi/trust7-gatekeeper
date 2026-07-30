@@ -1,0 +1,49 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Policy Document Triage Assistant">
+    <mxGraphModel dx="900" dy="640" grid="1" pageWidth="850" pageHeight="1100">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="intake" value="Document intake bucket (SSE-KMS, customer-managed key)" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="78" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="queue" value="Processing queue (encrypted, DLQ after 3 attempts)" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sqs" vertex="1" parent="1">
+          <mxGeometry x="200" y="40" width="78" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="worker" value="Triage service (containers, 3 AZ, autoscale 2-20, private subnet)" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.fargate" vertex="1" parent="1">
+          <mxGeometry x="360" y="40" width="78" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="model" value="Hosted foundation model, ap-south-1 endpoint (classifier + summariser)" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker" vertex="1" parent="1">
+          <mxGeometry x="520" y="40" width="78" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="index" value="Policy handbook retrieval index" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.opensearch" vertex="1" parent="1">
+          <mxGeometry x="520" y="200" width="78" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="docdb" value="Extracted fields store (encrypted, private subnet)" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.dynamodb" vertex="1" parent="1">
+          <mxGeometry x="360" y="200" width="78" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="audit" value="Append-only audit log (prompt, model version, passages, output, decision; 7 year retention)" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudwatch" vertex="1" parent="1">
+          <mxGeometry x="200" y="200" width="78" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="alb" value="Handler console load balancer (public, TLS 1.2+)" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.application_load_balancer" vertex="1" parent="1">
+          <mxGeometry x="40" y="360" width="78" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="console" value="Handler console (SSO + MFA, roles: handler, supervisor)" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ec2" vertex="1" parent="1">
+          <mxGeometry x="200" y="360" width="78" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="handler" value="Human handler — accepts, edits or rejects every draft" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.user" vertex="1" parent="1">
+          <mxGeometry x="360" y="360" width="78" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="f1" value="new document" style="endArrow=block" edge="1" parent="1" source="intake" target="queue"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f2" value="poll" style="endArrow=block" edge="1" parent="1" source="queue" target="worker"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f3" value="TLS, document text incl. policyholder PII, unmasked" style="endArrow=block" edge="1" parent="1" source="worker" target="model"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f4" value="retrieve grounding passages" style="endArrow=block" edge="1" parent="1" source="worker" target="index"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f5" value="schema-validated fields" style="endArrow=block" edge="1" parent="1" source="worker" target="docdb"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f6" value="every call + cost" style="endArrow=block" edge="1" parent="1" source="worker" target="audit"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f7" value="TLS" style="endArrow=block" edge="1" parent="1" source="alb" target="console"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f8" value="draft + retrieved passages" style="endArrow=block" edge="1" parent="1" source="console" target="handler"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f9" value="accept / edit / reject, logged to user id" style="endArrow=block" edge="1" parent="1" source="handler" target="audit"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

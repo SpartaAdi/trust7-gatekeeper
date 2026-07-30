@@ -1,0 +1,247 @@
+{
+  "id": "claims-triage-ai",
+  "title": "Policy document triage assistant",
+  "provenance": "SYNTHETIC. Invented for this repository; no client content. Labels authored here from statements the SoW makes explicitly — see `why` on each. Replace with the tester's own labelled designs; this exists so the harness has something to run against.",
+  "document": "claims-triage-ai.sow.md",
+  "diagram": "claims-triage-ai.drawio",
+  "context": "",
+  "why_this_design": [
+    "The counterpart to expense-portal: an AI-bearing design, so all 19 TRUST-7",
+    "checks are genuinely applicable and none can be answered with not_applicable.",
+    "Together the two cover the whole rubric at both extremes of the N/A axis.",
+    "",
+    "Deliberately MIXED rather than uniformly bad. expense-portal fails nearly",
+    "everything, and a set where the answer is almost always `fail` would let a",
+    "degenerate always-fail evaluator score well. Here the security, reliability and",
+    "governance controls are genuinely present and the gaps are stated in their own",
+    "section, so precision and recall have something to separate."
+  ],
+  "labels": {
+    "oe_iac": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'All infrastructure is defined in Terraform. Console changes are not permitted and are blocked by policy.'"
+    },
+    "oe_observability": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'Dashboards and alerts cover queue depth, model error rate, model latency, and the handler rejection rate.' Monitoring, logging and alerting on the workload's key signals."
+    },
+    "oe_incident_response": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'An on-call runbook covers queue backlog and provider outage.'"
+    },
+    "oe_change_mgmt": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'No deployment rollback path is documented, and there is no staged or progressive rollout.'"
+    },
+    "sec_least_privilege": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'a short-lived task role scoped to a single model id. No long-lived keys exist anywhere.'"
+    },
+    "sec_encryption_at_rest": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'Documents are encrypted at rest with a customer-managed key. The queue and the document database are encrypted at rest.' Every PII-bearing store is covered."
+    },
+    "sec_encryption_transit": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'TLS 1.2 or higher is required on every hop, including the call to the model provider.'"
+    },
+    "sec_secrets_mgmt": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'the provider credential is held in a managed secrets store', and no long-lived keys exist."
+    },
+    "sec_network_perimeter": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'The container service and the document database sit in private subnets. Only the load balancer is reachable from outside the VPC.'"
+    },
+    "sec_identity_auth": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'corporate SSO provider with MFA enforced. Two roles exist: handler and supervisor.' Plus a short-lived task role for system-facing access."
+    },
+    "sec_audit_logging": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'an append-only audit log' carrying the handler's decision against their user id, retained seven years. Append-only is the tamper-resistance the check asks for."
+    },
+    "rel_redundancy": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'across three availability zones behind a managed load balancer, autoscaling from 2 to 20 tasks.' No single point of failure in the processing path."
+    },
+    "rel_dr_plan": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'There is no disaster recovery plan and no RTO or RPO has been agreed.'"
+    },
+    "rel_failure_isolation": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'dead-letter queue after three delivery attempts. Model calls use a 30-second timeout and two retries with backoff.' Three of the four mechanisms the check names."
+    },
+    "rel_backup": {
+      "status": "partial",
+      "confidence": "clear",
+      "why": "'Backups of the document database are automated daily' but 'No database restore has ever been tested.' A backup strategy without a proven restore process."
+    },
+    "perf_right_sizing": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "Autoscaling 2-20 tasks on queue depth matches a bursty 8,000-document-a-day queue rather than provisioning for peak."
+    },
+    "perf_caching": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'Identical documents are re-processed from scratch. No response caching of any kind exists.' Repeated expensive computation is exactly the case the check names."
+    },
+    "perf_data_store_fit": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "Document database for extracted per-document fields, a retrieval index for passage search, an object store for the documents themselves. Each store matches its access pattern."
+    },
+    "perf_global_delivery": {
+      "status": "not_applicable",
+      "confidence": "borderline",
+      "why": "Residency pins everything to one region and the users are internal, so there is no geographic distribution to account for — the check says 'where relevant'. A reviewer could equally read the region pinning as a deliberate regional deployment and call it pass."
+    },
+    "cost_visibility": {
+      "status": "partial",
+      "confidence": "clear",
+      "why": "'The per-document model cost is recorded ... and rolled up daily per queue' but 'Cost tagging exists per environment but not per team', so spend is not fully attributable."
+    },
+    "cost_elasticity": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'autoscaling from 2 to 20 tasks on queue depth' scales down with demand. The check asks for scale-down 'or to zero', not necessarily to zero."
+    },
+    "cost_storage_lifecycle": {
+      "status": "partial",
+      "confidence": "clear",
+      "why": "The audit log has a defined seven-year retention, but 'No lifecycle or expiry policy exists on the document bucket; documents are kept indefinitely.' One store governed, one not."
+    },
+    "cost_provisioning_model": {
+      "status": "partial",
+      "confidence": "borderline",
+      "why": "On-demand autoscaling fits a variable queue-driven load, and the floor of 2 tasks is a predictable baseline that is never discussed for reserved capacity. Defensible as pass."
+    },
+    "sus_managed_services": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "Managed queue, managed load balancer, managed document database, container service, hosted model, managed retrieval index. Nothing self-managed and idle."
+    },
+    "sus_data_minimization": {
+      "status": "partial",
+      "confidence": "borderline",
+      "why": "The audit log has a bounded seven-year retention justified by a regulator's requirement, which is not indefinite-by-default. But documents are kept indefinitely and full prompts including PII are retained for seven years."
+    },
+    "sus_region_awareness": {
+      "status": "partial",
+      "confidence": "borderline",
+      "why": "The region choice is explicit and deliberate, but made on residency grounds with no energy or carbon consideration shown. The check allows for other constraints taking precedence, which residency does here."
+    },
+
+    "tf_explainability": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'the console shows the retrieved passages beside the draft so the handler can see what the summary was built from', and the audit log keeps prompt, model version, passages and output."
+    },
+    "tf_fairness": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'Summary drafts are not evaluated for variation in quality across document languages or across regions.'"
+    },
+    "tf_hallucination_control": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "Retrieval grounding over the handbook, JSON-schema validation, and 'Any field the model cannot ground in a retrieved passage is returned empty rather than guessed.'"
+    },
+    "tf_privacy": {
+      "status": "partial",
+      "confidence": "clear",
+      "why": "The PII is identified ('name, address, and policy number appear in every document') and protected in transit and at rest, but 'no masking, redaction or minimization step exists before the model call' and the prompts are retained seven years. Protection without minimization."
+    },
+    "rr_ai_threat_model": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'No prompt-injection review has been carried out on document text, even though that text is supplied by outside parties.' The AI-specific threat surface is unexamined."
+    },
+    "rr_incident_response_ai": {
+      "status": "partial",
+      "confidence": "clear",
+      "why": "The runbook covers queue backlog and provider outage — infrastructure failures — and the handler rejection rate is alerted on, which is a bad-output signal. But no incident path is defined for a bad or hallucinated output itself."
+    },
+    "rr_validation_before_prod": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'No red-teaming or pre-production evaluation of the model has been run. The model was selected on the vendor's published benchmarks.'"
+    },
+    "ue_cost_per_unit": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'The per-document model cost is recorded alongside each audit log entry and rolled up daily per queue.' Cost per decision is knowable."
+    },
+    "ue_model_routing": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'A smaller, cheaper model performs the six-way queue classification. The larger model is used only for the drafted summary.'"
+    },
+    "ue_caching_ai": {
+      "status": "fail",
+      "confidence": "clear",
+      "why": "'Identical documents are re-processed from scratch. No response caching of any kind exists.'"
+    },
+    "ss_data_residency": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'No document may leave India; this is a contractual requirement and is enforced by the region pinning above', including the in-region model endpoint. Explicit and enforced by design, which is what the check asks."
+    },
+    "ss_provider_dependency": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'one implementation per provider, so a second provider can be added without changing any call site. A second provider has been identified as an exit path.'"
+    },
+    "ss_abstraction": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'The model provider is called through an internal LlmClient interface', not a vendor SDK spread through the codebase."
+    },
+    "ta_human_in_loop": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'Model outputs are never actioned automatically. A handler accepts, edits, or rejects each draft.'"
+    },
+    "ta_user_training": {
+      "status": "partial",
+      "confidence": "clear",
+      "why": "'Handlers received a one-hour demonstration' — a path exists — but 'No written guidance on interpreting or overriding a draft exists', so it is not a durable one."
+    },
+    "sai_inference_efficiency": {
+      "status": "partial",
+      "confidence": "borderline",
+      "why": "Routing the six-way classification to a smaller model is exactly the cost choice that incidentally cuts inference energy. Working against it: no caching and no batching, and identical documents are re-inferred from scratch."
+    },
+    "gov_model_inventory": {
+      "status": "partial",
+      "confidence": "clear",
+      "why": "Both models have a clear stated purpose — classifier and summariser — but 'No owner is named for either model.' The check asks for owner AND purpose."
+    },
+    "gov_audit_trail": {
+      "status": "pass",
+      "confidence": "clear",
+      "why": "'the prompt, the model version, the retrieved passages, the returned output' — every element the check names for reconstructing a decision later."
+    },
+    "gov_accountability": {
+      "status": "fail",
+      "confidence": "borderline",
+      "why": "'no individual or team is recorded as accountable for an incorrect model output.' Against it: every output passes a named handler whose decision is logged to their user id, which a reviewer could read as partial."
+    }
+  }
+}

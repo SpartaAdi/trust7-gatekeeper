@@ -188,7 +188,7 @@ def _stub_complete_json(seen_keys: list[str], watch: dict[str, Any] | None = Non
     until this ran mid-flight.
     """
 
-    def fake(*, system, content, schema, effort, max_tokens, label=""):
+    def fake(*, system, content, schema, effort, max_tokens, label="", temperature=None):
         seen_keys.append(llm._API_KEY.get())
         if watch is not None:
             data_dir = watch["data_dir"]

@@ -126,6 +126,10 @@ def sent_request(monkeypatch, *, content: str = '{"ok": true}',
         schema=schema or MINIMAL_SCHEMA,
         effort=kwargs.pop("effort", "high"),
         max_tokens=kwargs.pop("max_tokens", 16000),
+        # Anything left over is forwarded rather than dropped. `temperature` is the
+        # first optional parameter to arrive, and a helper that silently swallowed
+        # it would make a test asserting it was sent pass while sending nothing.
+        **kwargs,
     )
     return captured
 
@@ -230,6 +234,158 @@ def test_reasoning_text_is_excluded_from_the_response(monkeypatch) -> None:
 def test_reasoning_effort_is_not_sent_as_a_top_level_parameter(monkeypatch) -> None:
     """The parameter kimi-k2.6 does not support must not be the one we send."""
     assert "reasoning_effort" not in sent_request(monkeypatch)
+
+
+# --------------------------------------------------------------------------- #
+# 3b. Sampling temperature — greedy on evaluate, absent everywhere else
+#
+# Evaluate's 45 statuses are the sole input to `scoring.score`, so sampling
+# variance there moves the score and corrupts the re-review delta, which is
+# supposed to mean the design changed. These tests pin three separate things,
+# because each could break without the others noticing:
+#
+#   * the value evaluate asks for is the floor of the parameter's range;
+#   * it reaches the wire as a top-level `temperature`, not buried in extra_body
+#     where the provider would never read it;
+#   * every other stage still sends NO temperature key at all — an unasked-for
+#     default appearing here would change four request bodies that are meant to
+#     stay byte-identical for the implicit prompt cache.
+# --------------------------------------------------------------------------- #
+
+def test_no_temperature_is_sent_unless_the_caller_asks(monkeypatch) -> None:
+    """Absent, not defaulted: the four other stages send the body they always sent."""
+    assert "temperature" not in sent_request(monkeypatch)
+
+
+def test_a_requested_temperature_is_sent_as_a_top_level_parameter(monkeypatch) -> None:
+    request = sent_request(monkeypatch, temperature=llm.GREEDY_TEMPERATURE)
+
+    assert request["temperature"] == 0.0
+    assert "temperature" not in request["extra_body"], (
+        "temperature is an OpenAI-compatible top-level parameter; inside extra_body "
+        "it would be forwarded as an unknown provider option"
+    )
+
+
+def test_greedy_is_the_floor_of_the_documented_range() -> None:
+    """OpenRouter documents temperature as 0.0-2.0, so 0.0 is as close to
+    deterministic as this parameter goes. Anything above it is a regression."""
+    assert llm.GREEDY_TEMPERATURE == 0.0
+
+
+def test_the_greedy_temperature_binds_to_the_installed_openai_signature(
+    monkeypatch,
+) -> None:
+    """`temperature` must be a real parameter of the method we send it to."""
+    client = openai.OpenAI(api_key="test-key-not-used", base_url=config.OPENROUTER_BASE_URL)
+
+    inspect.signature(client.chat.completions.create).bind(
+        **sent_request(monkeypatch, temperature=llm.GREEDY_TEMPERATURE)
+    )
+
+
+def test_only_the_evaluate_stage_asks_for_a_temperature() -> None:
+    """Read from source, across every model call site in the pipeline.
+
+    The instruction this implements was explicit that classify, ingest and
+    remediate keep their sampling untouched. A request-level test cannot show that,
+    because it only sees the stage it drives — so this enumerates the call sites
+    instead, and fails if a temperature appears at a new one.
+    """
+    import inspect as inspect_module
+
+    from agent import stages
+    from ingestion import vision
+
+    asking = {
+        name
+        for module, name in (
+            (stages, "classify"),
+            (stages, "_classify_once"),
+            (stages, "evaluate"),
+            (stages, "prioritize"),
+            (stages, "remediate"),
+            (vision, "parse_image"),
+        )
+        if (function := getattr(module, name, None)) is not None
+        and "temperature=" in inspect_module.getsource(function)
+    }
+
+    assert asking == {"evaluate"}, (
+        f"temperature is set at {sorted(asking)}; only evaluate may set it — "
+        f"ingest/vision, classify and remediate sample at the provider default"
+    )
+
+
+def test_evaluate_asks_for_the_greedy_temperature() -> None:
+    """The literal at the call site, so a future edit to a non-zero value fails."""
+    import inspect as inspect_module
+    import re
+
+    from agent import stages
+
+    source = inspect_module.getsource(stages.evaluate)
+    found = re.search(r"temperature=([\w.]+)", source)
+
+    assert found, "evaluate no longer passes a temperature"
+    assert found.group(1) == "llm.GREEDY_TEMPERATURE", found.group(1)
+
+
+def test_a_lower_effort_retry_keeps_the_same_temperature(monkeypatch) -> None:
+    """Effort is what a deadline retry trades away — sampling is not.
+
+    Evaluate's retry carries the same label prefix, so a retry that sampled at the
+    provider default would return a differently-sampled set of verdicts under a
+    name that claims to be the same call.
+    """
+    sent: list[dict[str, Any]] = []
+
+    class FakeCompletions:
+        def create(self, **request: Any) -> _Response:
+            sent.append(request)
+            if len(sent) == 1:
+                raise openai.APITimeoutError(request=httpx.Request("POST", "http://x"))
+            return _Response('{"ok": true}')
+
+    fake = type(
+        "FakeClient", (), {"chat": type("Chat", (), {"completions": FakeCompletions()})()}
+    )()
+    monkeypatch.setattr(llm, "_openrouter_client", lambda: fake)
+
+    llm.complete_json(
+        system=[{"type": "text", "text": "s"}],
+        content=[{"type": "text", "text": "u"}],
+        schema=MINIMAL_SCHEMA,
+        effort="high",
+        max_tokens=16000,
+        label="evaluate:aws_waf",
+        temperature=llm.GREEDY_TEMPERATURE,
+    )
+
+    assert len(sent) == 2, "expected the transient retry to have fired"
+    assert [request["temperature"] for request in sent] == [0.0, 0.0]
+
+
+def test_the_pinned_providers_all_advertise_temperature() -> None:
+    """`require_parameters: True` means an unsupported parameter drops an endpoint.
+
+    Sending temperature narrows the routable set to endpoints advertising it. The
+    three in OPENROUTER_PROVIDER_ORDER do — verified against
+    /api/v1/models/moonshotai/kimi-k2.6/endpoints — and this test states that
+    dependency so it is a visible assumption rather than a silent one. It reads the
+    configured order, not the network: a slug added without checking the endpoint
+    metadata should be a deliberate edit here too.
+    """
+    verified_to_support_temperature = {"coreweave", "decart", "inceptron"}
+
+    unverified = set(config.OPENROUTER_PROVIDER_ORDER) - verified_to_support_temperature
+    assert not unverified, (
+        f"provider(s) {sorted(unverified)} are in the routing order but are not "
+        f"among those verified to advertise `temperature`. With "
+        f"require_parameters: True, an endpoint that does not support it cannot "
+        f"serve the evaluate stage at all — check "
+        f"/api/v1/models/{config.OPENROUTER_MODEL}/endpoints before adding it."
+    )
 
 
 # --------------------------------------------------------------------------- #
