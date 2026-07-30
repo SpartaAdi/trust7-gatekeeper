@@ -109,6 +109,157 @@ class IngestWarning(BaseModel):
     )
 
 
+# --------------------------------------------------------------------------- #
+# Data fidelity
+#
+# THREE SEPARATE NUMBERS, deliberately never combined. Each measures a different
+# thing against a different kind of reference, and each is trustworthy to a
+# different degree:
+#
+#   * structural coverage is a REAL, deterministic ratio — the draw.io XML is the
+#     ground truth and we can count both sides exactly;
+#   * OCR coverage is an ESTIMATE against a second fallible reader, not against
+#     truth. Nothing here knows what is "really" in an image;
+#   * the grounding filter is a COUNT of what was removed, and says nothing
+#     whatever about what survived.
+#
+# Averaging them would produce a single "accuracy %" that is arithmetic on three
+# incompatible quantities, and would launder the estimate's uncertainty and the
+# count's silence into a figure that looks measured. There is deliberately no
+# composite field on `DataFidelity`, and `tests/test_data_fidelity.py` asserts
+# none appears.
+# --------------------------------------------------------------------------- #
+
+# Below this, extraction lost enough of the design that a human should look.
+# Applied to the structural ratio, which is exact, and to the OCR proxy, which is
+# not — see `OcrCoverageProxy` for why the same threshold means less there.
+COVERAGE_REVIEW_THRESHOLD = 95.0
+
+
+class StructuralCoverage(BaseModel):
+    """How much of a draw.io file's diagram survived into the DesignGraph.
+
+    EXACT, not an estimate: the XML lists its own elements, so both sides of the
+    ratio are counted rather than inferred. No model call.
+
+    `dropped` itemises what did not survive and why. It is the difference between
+    "82% — something is wrong" and "82% — six unlabelled decorative shapes were
+    skipped, which is correct behaviour", and without it the percentage is not
+    actionable.
+    """
+
+    parsed_elements: int = Field(description="Components + connections + notes.")
+    total_elements: int = Field(
+        description="Diagram elements in the XML: vertices and edges, including "
+        "object/UserObject wrappers. Excludes draw.io's mandatory root and layer "
+        "cells, which are container scaffolding and never diagram content."
+    )
+    percent: float
+    dropped: list[str] = Field(
+        default_factory=list,
+        description="Why elements did not survive, most common first. Counted.",
+    )
+
+
+class OcrCoverageProxy(BaseModel):
+    """An ESTIMATE of how much of an image's text reached the DesignGraph.
+
+    A second, independent reader (Tesseract) transcribes the image, and this
+    reports what fraction of the words it found also appear somewhere in the
+    graph. That is a proxy and nothing more:
+
+    * OCR is itself wrong, in both directions. It misses rotated and low-contrast
+      text, and it invents words out of icons and hatching. A token it invented
+      and the graph does not contain looks identical here to a label the vision
+      model genuinely missed.
+    * There is no ground truth for what is "really" in an image. This compares two
+      fallible readers with each other, so a low number means they disagree — not
+      which of them is right.
+    * A diagram whose meaning is carried by shapes and arrows rather than words
+      can score low while having been read correctly.
+
+    So every surface that shows this must label it an estimate. `is_estimate` is
+    always True and exists to make that non-optional in the UI rather than a
+    convention someone can forget.
+    """
+
+    available: bool = Field(
+        description="False when no OCR engine is installed. The metric is then "
+        "absent rather than zero — see `unavailable_reason`."
+    )
+    unavailable_reason: str = ""
+    is_estimate: bool = Field(
+        default=True,
+        description="Always True. A proxy against a second fallible reader, never "
+        "a measurement against ground truth.",
+    )
+    ocr_tokens: int = 0
+    matched_tokens: int = 0
+    percent: float = 0.0
+    sample_unmatched: list[str] = Field(
+        default_factory=list,
+        description="A few words OCR read that the graph does not contain. Either "
+        "missed labels or OCR noise — this cannot tell which.",
+    )
+
+
+class GroundingFilter(BaseModel):
+    """How many ungrounded claims the quote-verification filter removed this run.
+
+    A COUNT of what was caught, and deliberately not a rate. `removed` is the
+    number of use-case recommendations discarded because the phrase the model
+    said it was relying on is not in the submitted context.
+
+    It says nothing about what survived. A run with 3 removed and 2 kept does not
+    mean the 2 are correct — it means their quotes were verifiable, which is a
+    much weaker claim. Reporting this as "60% grounded" would invert that: it
+    would read as a confidence figure for the output when it is only a tally of
+    rejections, so `percent` is deliberately absent from this model.
+    """
+
+    checked: int = Field(description="Candidate recommendations the model returned.")
+    removed: int = Field(description="Discarded: the grounding quote was not found.")
+    incomplete: int = Field(
+        default=0,
+        description="Discarded for a missing field rather than a failed quote. A "
+        "different failure, counted separately rather than folded into `removed`.",
+    )
+    removed_for: list[str] = Field(
+        default_factory=list,
+        description="The components the removed claims concerned, for the audit trail.",
+    )
+
+
+class DataFidelity(BaseModel):
+    """The three fidelity numbers. Never blended — see the note above.
+
+    Each is None when it does not apply: structural coverage only exists for a
+    draw.io upload, the OCR proxy only for an image, and the grounding filter only
+    when the submitter supplied context for notes to be grounded in.
+    """
+
+    structural: StructuralCoverage | None = None
+    ocr_proxy: OcrCoverageProxy | None = None
+    grounding: GroundingFilter | None = None
+
+    def review_recommended(self) -> bool:
+        """Whether a coverage figure is low enough that a human should look.
+
+        Computed, not stored, so it cannot drift from the numbers it describes.
+        The grounding count is NOT an input: removing an ungrounded claim is the
+        filter working, not a reason to distrust the review.
+        """
+        if self.structural and self.structural.percent < COVERAGE_REVIEW_THRESHOLD:
+            return True
+        if (
+            self.ocr_proxy
+            and self.ocr_proxy.available
+            and self.ocr_proxy.percent < COVERAGE_REVIEW_THRESHOLD
+        ):
+            return True
+        return False
+
+
 class NormalizedDesign(BaseModel):
     """Everything the agent pipeline needs, from whichever inputs were supplied."""
 
@@ -121,6 +272,11 @@ class NormalizedDesign(BaseModel):
     # result. Never a reason to stop: a partially-read design is still worth
     # reviewing, it is just not worth presenting as if it were complete.
     warnings: list[IngestWarning] = Field(default_factory=list)
+
+    # Measured during ingestion, when the raw bytes and the parsed graph are both
+    # still in hand — the only point where either ratio can be computed. The
+    # grounding count is filled in later, by the remediate stage.
+    fidelity: DataFidelity = Field(default_factory=DataFidelity)
 
     # Optional free text the submitter typed, offered only when there is no SoW to
     # carry the same information. UNTRUSTED, exactly like document_text and diagram
@@ -321,6 +477,11 @@ class ReviewResult(BaseModel):
     # transient — a reviewer opening a stored review a day later must still see that
     # its diagram was barely legible. Defaults to empty so older reviews load.
     warnings: list[IngestWarning] = Field(default_factory=list)
+
+    # The three fidelity numbers. Defaults to an empty DataFidelity so reviews
+    # written before this existed still load, with all three fields None — which
+    # reads correctly as "not measured" rather than as zero coverage.
+    fidelity: DataFidelity = Field(default_factory=DataFidelity)
     delta: ScoreDelta | None = None
     token_usage: dict[str, int] = Field(default_factory=dict)
 

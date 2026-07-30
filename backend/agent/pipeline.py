@@ -314,12 +314,23 @@ def _run(
 
         stage = "remediate"
         progress.start("remediate", "Generating remediation and summary")
-        remediations, efforts, executive_summary, use_case_notes, usage = stages.remediate(
+        (
+            remediations,
+            efforts,
+            executive_summary,
+            use_case_notes,
+            usage,
+            grounding,
+        ) = stages.remediate(
             findings,
             classification,
             scoring.scoreboard(overall, framework_scores, findings),
             context=design.context,
         )
+        # The third fidelity number, and the only one not measured at ingestion:
+        # the grounding filter can only be counted where it runs. Left as None when
+        # the stage made no call, so "not measured" stays distinct from "0 caught".
+        design.fidelity.grounding = grounding
         usages.append(usage)
         for finding in findings:
             finding.remediation = remediations.get(finding.check_id, "")
@@ -348,6 +359,17 @@ def _run(
             # opening this review tomorrow must still see that its diagram was barely
             # legible, and the status file is not what they will be reading.
             warnings=design.warnings,
+            # PRE-EXISTING BUG, found while instrumenting the grounding filter and
+            # fixed here because that metric is misleading without it: these were
+            # unpacked from `remediate` and then never stored, so the results page's
+            # "For your stated use case" section — which reads exactly this field —
+            # has always rendered empty in production. Reporting "2 ungrounded claims
+            # caught and removed" while silently discarding the claims that PASSED
+            # the filter would describe a feature that does not reach the screen.
+            use_case_notes=use_case_notes,
+            # Three separate numbers, carried as measured. Nothing between here and
+            # the screen combines them — see the note on DataFidelity in schema.py.
+            fidelity=design.fidelity,
             token_usage=_sum(usages),
         )
 

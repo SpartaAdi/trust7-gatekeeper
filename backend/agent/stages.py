@@ -17,7 +17,7 @@ from typing import Any
 import llm
 import rubric
 from agent import untrusted
-from schema import Component, Finding, NormalizedDesign, UseCaseNote
+from schema import Component, Finding, GroundingFilter, NormalizedDesign, UseCaseNote
 
 log = logging.getLogger(__name__)
 
@@ -831,7 +831,14 @@ def remediate(
     classification: dict[str, Any],
     scoreboard: str = "",
     context: str = "",
-) -> tuple[dict[str, str], dict[str, str], str, list[UseCaseNote], dict[str, int]]:
+) -> tuple[
+    dict[str, str],
+    dict[str, str],
+    str,
+    list[UseCaseNote],
+    dict[str, int],
+    GroundingFilter | None,
+]:
     """Generate remediation guidance and the executive summary.
 
     The summary rides along with this stage rather than costing a fifth API
@@ -841,10 +848,12 @@ def remediate(
     """
     open_findings = [f for f in findings if f.status in ("fail", "partial")]
     if not open_findings:
+        # No model call was made, so the grounding filter never ran — None rather
+        # than a zeroed filter, which would claim it had looked and found nothing.
         return {}, {}, (
             "Every applicable check passed. No high-severity findings block "
             "deployment."
-        ), [], {}
+        ), [], {}, None
 
     payload, usage = llm.complete_json(
         system=[
@@ -937,16 +946,22 @@ def remediate(
                 len(still_missing), len(wanted), ", ".join(still_missing),
             )
 
+    notes, grounding = _use_case_notes(payload, context)
     return (
         text,
         effort,
         payload.get("executive_summary", ""),
-        _use_case_notes(payload, context),
+        notes,
         usage,
+        # Appended rather than inserted, so every existing positional meaning is
+        # unchanged for the twenty call sites that unpack this.
+        grounding,
     )
 
 
-def _use_case_notes(payload: dict[str, Any], context: str) -> list[UseCaseNote]:
+def _use_case_notes(
+    payload: dict[str, Any], context: str
+) -> tuple[list[UseCaseNote], GroundingFilter | None]:
     """Keep only notes that are demonstrably grounded in the submitted context.
 
     The prompt asks the model to quote the phrase it is relying on. This checks
@@ -962,17 +977,36 @@ def _use_case_notes(payload: dict[str, Any], context: str) -> list[UseCaseNote]:
     Matching is case-insensitive on collapsed whitespace, because a model
     re-typing a quoted phrase reliably changes spacing and capitalisation and
     just as reliably keeps the words.
+
+    Also returns what it caught, as a `GroundingFilter`. The filter was already
+    doing this work and logging it at INFO, where nobody sees it; the count is the
+    one honest thing that can be said about grounding, so it is surfaced.
+
+    It is a COUNT and never a rate. Three removed out of five does not make the
+    remaining two correct — it makes their quotes verifiable, which is a far weaker
+    claim — so `GroundingFilter` carries no percentage and nothing here computes
+    one. `None` when there was no context, because a filter that could not run
+    caught nothing and reporting "0 caught" would imply it had looked.
     """
     if not context:
-        return []
+        return [], None
 
     haystack = " ".join(context.lower().split())
     notes: list[UseCaseNote] = []
-    for raw in payload.get("use_case_notes", []):
+    candidates = payload.get("use_case_notes", []) or []
+    removed_for: list[str] = []
+    incomplete = 0
+
+    for raw in candidates:
         quote = " ".join(str(raw.get("grounded_in", "")).lower().split())
         component = str(raw.get("component", "")).strip()
         recommendation = str(raw.get("recommendation", "")).strip()
         if not quote or not component or not recommendation:
+            # A malformed entry, not a failed quote check. Counted separately: one
+            # is the model returning nonsense, the other is the model making a claim
+            # it cannot support, and folding them together would overstate how much
+            # ungrounded assertion the filter is actually catching.
+            incomplete += 1
             continue
         if quote not in haystack:
             log.info(
@@ -980,6 +1014,7 @@ def _use_case_notes(payload: dict[str, Any], context: str) -> list[UseCaseNote]:
                 "submitted context (component=%r)",
                 component,
             )
+            removed_for.append(component)
             continue
         notes.append(
             UseCaseNote(
@@ -988,7 +1023,13 @@ def _use_case_notes(payload: dict[str, Any], context: str) -> list[UseCaseNote]:
                 grounded_in=str(raw.get("grounded_in", "")).strip(),
             )
         )
-    return notes
+
+    return notes, GroundingFilter(
+        checked=len(candidates),
+        removed=len(removed_for),
+        incomplete=incomplete,
+        removed_for=removed_for,
+    )
 
 
 def _collect_remediations(

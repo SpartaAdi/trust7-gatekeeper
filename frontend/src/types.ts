@@ -128,6 +128,62 @@ export interface IngestWarning {
   detail: string
 }
 
+/**
+ * Three data-fidelity numbers, mirroring `DataFidelity` in backend/schema.py.
+ *
+ * NEVER COMBINED. Each measures a different thing against a different kind of
+ * reference: `structural` is an exact ratio against the draw.io XML, `ocr_proxy` is
+ * an estimate against a second fallible reader, and `grounding` is a count of what
+ * was removed that says nothing about what remains. There is deliberately no
+ * composite "accuracy" field, and there must not be one added — averaging them
+ * would launder the estimate's uncertainty into a figure that looks measured.
+ */
+
+/** EXACT. draw.io uploads only; the XML enumerates its own elements. */
+export interface StructuralCoverage {
+  parsed_elements: number
+  total_elements: number
+  percent: number
+  /** Why elements did not survive, counted, most common first. */
+  dropped: string[]
+}
+
+/**
+ * AN ESTIMATE. Image uploads only.
+ *
+ * `is_estimate` is always true and exists so the UI cannot present this as a
+ * measurement by omission. `available: false` means no OCR engine was reachable —
+ * the metric is then ABSENT, not zero, and a zero would wrongly read as "the vision
+ * model missed everything".
+ */
+export interface OcrCoverageProxy {
+  available: boolean
+  unavailable_reason: string
+  is_estimate: boolean
+  ocr_tokens: number
+  matched_tokens: number
+  percent: number
+  /** Words OCR read that the graph lacks. Missed labels or OCR noise — cannot tell. */
+  sample_unmatched: string[]
+}
+
+/** A COUNT of ungrounded claims removed. Deliberately carries no percentage. */
+export interface GroundingFilter {
+  checked: number
+  removed: number
+  incomplete: number
+  removed_for: string[]
+}
+
+export interface DataFidelity {
+  structural: StructuralCoverage | null
+  ocr_proxy: OcrCoverageProxy | null
+  grounding: GroundingFilter | null
+}
+
+/** Mirrors `COVERAGE_REVIEW_THRESHOLD` in backend/schema.py. */
+export const COVERAGE_REVIEW_THRESHOLD = 95.0
+
 export interface ReviewResult {
   review_id: string
   created_at: string
@@ -145,6 +201,8 @@ export interface ReviewResult {
   use_case_notes: UseCaseNote[]
   /** Reasons to distrust how completely the design was read. Empty is normal. */
   warnings: IngestWarning[]
+  /** The three fidelity numbers. Absent on reviews stored before they existed. */
+  fidelity?: DataFidelity
   delta: ScoreDelta | null
   token_usage: Record<string, number>
 }

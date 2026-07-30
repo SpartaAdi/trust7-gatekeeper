@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { ApiError, createShareLink, downloadReport, getReview, shareUrl } from '../api'
 import { ChangeBadge } from '../components/ChangeBadge'
+import { DataFidelity } from '../components/DataFidelity'
 import { IngestWarnings } from '../components/IngestWarnings'
 import { SeverityMark } from '../components/SeverityMark'
 import { StructuredText } from '../components/StructuredText'
@@ -153,6 +154,13 @@ export function ResultsView({
         why this is not tucked in at the bottom with the metadata.
       */}
       <IngestWarnings warnings={result.warnings ?? []} className="mt-8" />
+
+      {/*
+        Directly under the warnings and still above the score. Same reasoning: these
+        qualify every number below them, and a reader who meets the 62.5 first has
+        already formed a view by the time they reach the caveat.
+      */}
+      <DataFidelity fidelity={result.fidelity} className="mt-3" />
 
       {result.delta && <DeltaSummary delta={result.delta} />}
 

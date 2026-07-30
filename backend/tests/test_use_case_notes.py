@@ -68,7 +68,7 @@ def test_a_grounded_note_is_kept(monkeypatch) -> None:
         }
     ]))
 
-    _, _, _, notes, _ = stages.remediate([finding()], {}, "sb", context=CONTEXT)
+    _, _, _, notes, _, _grounding = stages.remediate([finding()], {}, "sb", context=CONTEXT)
 
     assert len(notes) == 1
     assert notes[0].component == "Claims lookup store"
@@ -87,7 +87,7 @@ def test_a_note_quoting_something_never_written_is_discarded(monkeypatch, caplog
     ]))
 
     with caplog.at_level(logging.INFO):
-        _, _, _, notes, _ = stages.remediate([finding()], {}, "sb", context=CONTEXT)
+        _, _, _, notes, _, _grounding = stages.remediate([finding()], {}, "sb", context=CONTEXT)
 
     assert notes == []
     assert "grounding quote is not in the submitted context" in caplog.text
@@ -101,7 +101,7 @@ def test_no_context_means_no_notes_however_many_the_model_returns(monkeypatch) -
          "grounded_in": "something"}
     ]))
 
-    _, _, _, notes, _ = stages.remediate([finding()], {}, "sb", context="")
+    _, _, _, notes, _, _grounding = stages.remediate([finding()], {}, "sb", context="")
 
     assert notes == []
 
@@ -117,7 +117,7 @@ def test_matching_survives_reformatting_of_the_quote(monkeypatch) -> None:
         }
     ]))
 
-    _, _, _, notes, _ = stages.remediate([finding()], {}, "sb", context=CONTEXT)
+    _, _, _, notes, _, _grounding = stages.remediate([finding()], {}, "sb", context=CONTEXT)
 
     assert len(notes) == 1
 
@@ -131,7 +131,7 @@ def test_an_incomplete_note_is_dropped(monkeypatch) -> None:
         {"component": "Store", "recommendation": "Fine.", "grounded_in": ""},
     ]))
 
-    _, _, _, notes, _ = stages.remediate([finding()], {}, "sb", context=CONTEXT)
+    _, _, _, notes, _, _grounding = stages.remediate([finding()], {}, "sb", context=CONTEXT)
 
     assert notes == []
 
@@ -140,7 +140,7 @@ def test_notes_are_absent_when_the_model_returns_none(monkeypatch) -> None:
     """An empty array is the expected answer, not a failure."""
     stub(monkeypatch, payload([]))
 
-    _, _, _, notes, _ = stages.remediate([finding()], {}, "sb", context=CONTEXT)
+    _, _, _, notes, _, _grounding = stages.remediate([finding()], {}, "sb", context=CONTEXT)
 
     assert notes == []
 
@@ -219,3 +219,67 @@ def test_the_notes_round_trip_through_storage(monkeypatch, tmp_path) -> None:
     assert loaded is not None
     assert loaded.context == CONTEXT
     assert loaded.use_case_notes[0].component == "Store"
+
+def test_grounded_notes_actually_reach_the_stored_review(monkeypatch, tmp_path) -> None:
+    """A REGRESSION TEST for a bug that shipped silently.
+
+    `use_case_notes` was unpacked from `remediate` in `pipeline._run` and then never
+    passed to `ReviewResult`, so the results page's "For your stated use case"
+    section — which reads exactly this field — rendered empty for every review ever
+    run. Every test in this file passed throughout, because they all called
+    `stages.remediate` directly and never asked whether the pipeline stored what it
+    returned.
+
+    So this one goes through the whole pipeline and asserts on the STORED result.
+    """
+    import importlib
+
+    from fastapi.testclient import TestClient
+
+    import config
+    import main
+    import rubric
+    import storage
+
+    monkeypatch.setenv("LOCAL_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    importlib.reload(storage)
+    monkeypatch.setattr(config, "DEMO_ACCESS_TOKEN", "notes-e2e")
+
+    def fake(*, system, content, schema, effort, max_tokens, label="", temperature=None):
+        required = set(schema.get("required", []))
+        if "verdict" in required:
+            return {"verdict": "reviewable", "subject": "d", "reason": "r",
+                    "confidence": "high"}, {}
+        if "design_summary" in required:
+            return {"design_summary": "x", "components": [], "data_flows": [],
+                    "observations": [], "absent": []}, {}
+        if "findings" in required:
+            return {"findings": [
+                {"check_id": c.check_id, "status": "fail", "severity": c.severity,
+                 "severity_rationale": "s", "title": c.description, "evidence": "e",
+                 "affected_components": []} for c in rubric.all_checks()]}, {}
+        if "ranking" in required:
+            return {"summary": "- s", "ranking": []}, {}
+        return {"executive_summary": "s", "remediations": [], "use_case_notes": [
+            {"component": "storage", "recommendation": "Object storage suits this.",
+             "grounded_in": "read-heavy access pattern"},
+        ]}, {}
+
+    monkeypatch.setattr(llm, "complete_json", fake)
+    client = TestClient(main.app, headers={config.DEMO_TOKEN_HEADER: "notes-e2e"})
+
+    key = client.post(
+        "/uploads", files={"file": ("sow.md", b"# Design\n\nA system.\n", "text/markdown")}
+    ).json()["key"]
+    review_id = client.post(
+        "/reviews",
+        json={"document_key": key, "context": "It has a read-heavy access pattern."},
+    ).json()["review_id"]
+
+    stored = client.get(f"/reviews/{review_id}").json()
+
+    assert [n["component"] for n in stored["use_case_notes"]] == ["storage"], (
+        "a grounded note did not survive into the stored review"
+    )
+    assert stored["use_case_notes"][0]["grounded_in"] == "read-heavy access pattern"

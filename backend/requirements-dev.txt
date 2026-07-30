@@ -4,3 +4,10 @@
 
 pytest==9.1.1
 httpx==0.28.1        # FastAPI's TestClient transport
+
+# OCR for the image-path coverage PROXY (ingestion/fidelity.py). Dev/harness only,
+# and deliberately not in requirements.txt: it needs the `tesseract` binary, which
+# Render's native Python runtime cannot install (buildCommand is pip only). The
+# metric reports itself unavailable rather than zero where the engine is absent, so
+# the deployed service degrades honestly instead of breaking.
+pytesseract==0.3.13

@@ -76,7 +76,7 @@ def test_a_short_answer_is_completed_by_one_retry(monkeypatch) -> None:
         calls,
     )
 
-    text, effort, summary, _notes, _ = stages.remediate(findings, {}, "scoreboard")
+    text, effort, summary, _notes, _, _grounding = stages.remediate(findings, {}, "scoreboard")
 
     assert calls == ["remediate", "remediate-missing"]
     assert set(text) == {f.check_id for f in findings}
@@ -129,7 +129,7 @@ def test_a_still_incomplete_answer_is_reported_not_hidden(monkeypatch, caplog) -
     )
 
     with caplog.at_level(logging.ERROR):
-        text, _, _, _notes, _ = stages.remediate(findings, {}, "scoreboard")
+        text, _, _, _notes, _, _grounding = stages.remediate(findings, {}, "scoreboard")
 
     assert set(text) == {"c0", "c1"}
     assert "still missing 2 of 4" in caplog.text
@@ -172,7 +172,7 @@ def test_both_calls_are_counted_in_the_token_usage(monkeypatch) -> None:
         return {"remediations": entries("c1")}, {"input_tokens": 30, "output_tokens": 10}
 
     monkeypatch.setattr(llm, "complete_json", fake)
-    _, _, _, _notes, usage = stages.remediate(findings, {}, "scoreboard")
+    _, _, _, _notes, usage, _grounding = stages.remediate(findings, {}, "scoreboard")
 
     assert usage == {"input_tokens": 130, "output_tokens": 50}
 
@@ -201,7 +201,7 @@ def test_an_empty_remediation_string_is_treated_as_missing(monkeypatch) -> None:
         calls,
     )
 
-    text, _, _, _notes, _ = stages.remediate(findings, {}, "scoreboard")
+    text, _, _, _notes, _, _grounding = stages.remediate(findings, {}, "scoreboard")
 
     assert calls == ["remediate", "remediate-missing"]
     assert text["c0"].strip() != ""
@@ -221,7 +221,7 @@ def test_an_entry_for_a_check_that_is_not_open_is_discarded(monkeypatch) -> None
         ],
     )
 
-    text, _, _, _notes, _ = stages.remediate(findings, {}, "scoreboard")
+    text, _, _, _notes, _, _grounding = stages.remediate(findings, {}, "scoreboard")
 
     assert set(text) == {"c0"}
 
@@ -232,7 +232,7 @@ def test_no_open_findings_makes_no_call_at_all(monkeypatch) -> None:
 
     monkeypatch.setattr(llm, "complete_json", explode)
 
-    text, effort, summary, _notes, usage = stages.remediate(
+    text, effort, summary, _notes, usage, _grounding = stages.remediate(
         [finding("ok", status="pass")], {}, "scoreboard"
     )
 

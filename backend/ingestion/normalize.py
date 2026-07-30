@@ -5,8 +5,8 @@ from __future__ import annotations
 import pathlib
 
 import storage
-from ingestion import documents, drawio, quality, vision
-from schema import DesignGraph, IngestWarning, NormalizedDesign
+from ingestion import documents, drawio, fidelity, quality, vision
+from schema import DataFidelity, DesignGraph, IngestWarning, NormalizedDesign
 
 _DRAWIO_SUFFIXES = (".drawio", ".xml", ".drawio.xml")
 _IMAGE_MEDIA_TYPES = {
@@ -38,6 +38,7 @@ def ingest(
     both sides of the comparison: the raw bytes AND what parsing made of them.
     """
     warnings: list[IngestWarning] = []
+    measured = DataFidelity()
 
     document_text = ""
     if document_key:
@@ -58,7 +59,7 @@ def ingest(
     usage: dict[str, int] = {}
     if diagram_key:
         data = storage.get_object(diagram_key)
-        graph, usage, diagram_warnings = parse_diagram(data, diagram_key)
+        graph, usage, diagram_warnings, measured = parse_diagram(data, diagram_key)
         warnings.extend(diagram_warnings)
 
     if not document_text and not graph.components:
@@ -76,6 +77,9 @@ def ingest(
         context=context,
         graph=graph,
         warnings=warnings,
+        # Only the two ingestion-time numbers are set here. The grounding count
+        # comes from the remediate stage and is filled in by the pipeline.
+        fidelity=measured,
     )
     return design, usage
 
@@ -91,20 +95,33 @@ def _display_name(key: str) -> str:
 
 def parse_diagram(
     data: bytes, filename: str
-) -> tuple[DesignGraph, dict[str, int], list[IngestWarning]]:
+) -> tuple[DesignGraph, dict[str, int], list[IngestWarning], DataFidelity]:
     """Dispatch to the deterministic path or the vision path by file type.
 
-    Each path gets the quality check that can say something about it: draw.io can be
-    compared against the shapes in its own XML, an image against its byte size and
-    the model's own legibility report. Neither check is meaningful on the other path,
-    which is why they are applied here rather than to the merged graph.
+    Each path gets the quality check and the fidelity measurement that can say
+    something about it, and neither is meaningful on the other path — which is why
+    both are applied here rather than to the merged graph:
+
+    * **draw.io** can be compared against the shapes in its own XML, so its coverage
+      is EXACT and needs no model. There is nothing to OCR.
+    * **an image** has no ground truth for what it contains, so its coverage is an
+      ESTIMATE against a second reader. A structural ratio is not even definable.
+
+    Keeping them on separate fields of `DataFidelity` rather than one "coverage"
+    number is what stops an exact figure and an estimate being read as the same
+    kind of thing.
     """
     lower = filename.lower()
     shown = _display_name(filename)
     if lower.endswith(_DRAWIO_SUFFIXES):
         graph = drawio.parse(data)
         unparsed = quality.drawio_extraction(graph, data, shown)
-        return graph, {}, [unparsed] if unparsed else []
+        return (
+            graph,
+            {},
+            [unparsed] if unparsed else [],
+            DataFidelity(structural=fidelity.structural_coverage(graph, data)),
+        )
 
     suffix = pathlib.Path(lower).suffix
     if suffix in _IMAGE_MEDIA_TYPES:
@@ -119,7 +136,12 @@ def parse_diagram(
             )
             if warning
         ]
-        return graph, usage, warnings
+        return (
+            graph,
+            usage,
+            warnings,
+            DataFidelity(ocr_proxy=fidelity.ocr_coverage_proxy(graph, data)),
+        )
 
     raise UnsupportedDiagram(
         f"Cannot parse diagram {filename!r}. Supported: "

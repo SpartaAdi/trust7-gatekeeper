@@ -61,6 +61,9 @@ export function resultFixture(overrides: Partial<ReviewResult> = {}): ReviewResu
     context: '',
     use_case_notes: [],
     warnings: [],
+    // All three null by default: a fixture is a clean review, and each metric only
+    // exists for the input path that can produce it.
+    fidelity: { structural: null, ocr_proxy: null, grounding: null },
     delta: null,
     frameworks: [
       {

@@ -74,15 +74,17 @@ backend/
                   filetype.py  upload type/size/signature gate
                   relevance.py the pre-pipeline "is this a design?" gate
                   quality.py   extraction-completeness warnings
+                  fidelity.py  structural + OCR-proxy coverage metrics
   agent/          the four pipeline stages, orchestration, injection guard
-  tests/          590 tests
+  tests/          641 tests
 frontend/
   src/App.tsx     History (home) -> Upload -> Analyzing -> Results
   src/api.ts      the only module that calls the API
   src/types.ts    mirrors backend/schema.py — the wire shapes
   src/maturity.ts score -> Aware/Managed/Governed/Certified/Pioneering
   src/fileKind.ts dropped-file classification (SoW / diagram / ask)
-  src/components/ StepTracker, DropZone, SeverityMark, IngestWarnings
+  src/components/ StepTracker, DropZone, SeverityMark, CaveatPanel,
+                  IngestWarnings, DataFidelity
   src/views/      HistoryView, UploadView, AnalyzingView, ResultsView
 rubric/
   rubric.json     45 checks across 13 pillars
@@ -211,6 +213,91 @@ reportlab PDF.
 drops unlabelled ones — a real diagram is full of arrows, containers and decoration
 carrying no reviewable meaning — so measuring against every `vertex="1"` would warn
 on every well-drawn diagram in existence.
+
+## Data fidelity — three numbers, never one
+
+How much of the design actually reached the review. Three measurements, reported
+separately and **never combined**, because each is trustworthy to a different
+degree and averaging them would launder the weakest into a figure that looks
+measured. `schema.DataFidelity` has no composite field and
+`tests/test_data_fidelity.py` asserts none appears.
+
+| Metric | Path | Kind | Lives in |
+| --- | --- | --- | --- |
+| Structural coverage | `.drawio` | **Exact.** No model call | `ingestion/fidelity.py::structural_coverage` |
+| OCR coverage | image | **Estimate.** Second fallible reader | `ingestion/fidelity.py::ocr_coverage_proxy` |
+| Grounding catch count | any, with context | **Count.** Not a rate | `agent/stages.py::_use_case_notes` |
+
+Both coverage figures trigger the review recommendation under
+`COVERAGE_REVIEW_THRESHOLD` (95%). The grounding count never does — removing an
+ungrounded claim is the filter working, not a reason to distrust the review.
+
+### 1. Structural extraction coverage — exact
+
+Parsed graph elements (components + connections + notes) over diagram elements in
+the raw XML. Both sides counted, so the ratio is measured rather than inferred.
+
+The denominator excludes draw.io's mandatory root and layer cells (`id="0"` and
+`id="1"`). That exclusion is load-bearing: they carry neither `vertex` nor `edge`,
+they are never diagram content, and counting them caps a perfectly parsed
+11-element diagram at 84.6% — which would fire the threshold on every upload and
+get the metric switched off within a week. Both shipped `.drawio` fixtures read
+100%, and a test pins that.
+
+`dropped` itemises what did not survive, because the percentage alone is not
+actionable. 50% because six unlabelled decorative shapes were skipped is correct
+behaviour; 8% because a merged export reused one id 24 times is a broken file.
+Without the breakdown those look identical.
+
+### 2. OCR coverage proxy — an estimate, labelled as one everywhere
+
+An independent Tesseract pass reads the image, and this reports the share of words
+it found that also appear anywhere in the extracted graph — labels, ids, services,
+protocols, notes. It is a **proxy**, and the UI says so in the heading, the body
+and the detail line, deliberately three times:
+
+- OCR is wrong in both directions. It misses rotated and low-contrast text and
+  invents words from icons and hatching. A word it invented looks identical here to
+  a label the vision model genuinely missed.
+- There is no ground truth for what an image contains. This compares two fallible
+  readers, so a low figure means they disagree — not which is right.
+- Words that are legitimately not components score against it. In testing, a
+  complete extraction of a five-box diagram scored 83% because OCR also read the
+  diagram's title. Treat the number as a prompt to look, never as a grade.
+
+When no OCR engine is reachable the metric is **absent, not zero** — a 0% would
+read as "the vision model missed everything", which is a claim about the model
+rather than about our tooling. That is the state on Render today: the native Python
+runtime installs from `requirements.txt` and cannot `apt-get install tesseract-ocr`,
+so `pytesseract` is a dev/harness dependency and the deployed service reports the
+estimate as unavailable. Enabling it in production means moving the service to a
+Docker runtime, which is a deliberate deployment decision and not done here.
+
+### 3. Grounding-filter catch count — a count, not a rate
+
+`_use_case_notes` already discarded any use-case recommendation whose `grounded_in`
+quote is not verbatim in the submitted context; it logged that at INFO where nobody
+saw it. The count is now surfaced as **"N ungrounded claims caught and removed"**.
+
+`GroundingFilter` carries no percentage and nothing computes one, because a rate
+here would invert the meaning: a claim whose quote was verifiable is not thereby
+correct, so "3 of 5 removed" shown as "60% grounded" would read as a confidence
+figure for output that has only passed a much weaker test. Claims dropped for a
+missing field are counted separately from failed quotes — one is the model
+returning nonsense, the other is the model asserting something it cannot support.
+
+Note the scope: this filter operates on use-case **recommendations**, which are the
+only quote-verified output. It does not cover the 45 rubric verdicts, which are
+checked structurally instead — see `_to_findings`, where an unrecognised check id is
+dropped and a missing one is recorded as unmet.
+
+### UI
+
+`components/DataFidelity.tsx` renders one panel per metric using `CaveatPanel` —
+the same component `IngestWarnings` uses, so there is no second panel style to
+drift. `caution` (amber) tone under the threshold, `neutral` (navy) otherwise.
+Rendered above the score on the results page, for the same reason the warnings are:
+they qualify every number below them.
 
 ## Demo access gate
 
@@ -660,8 +747,8 @@ two — nothing else references the shape.
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 590 tests
-cd frontend && npm test                                                          # 271 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q   # 641 tests
+cd frontend && npm test                                                          # 289 tests
 ```
 
 `requirements.txt` is runtime-only, so Render's build installs no test tooling;
