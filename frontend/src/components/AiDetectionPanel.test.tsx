@@ -209,6 +209,45 @@ describe('AiDetectionPanel', () => {
     )
   })
 
+  // ---- the count line explains itself ------------------------------------- //
+
+  it('explains what the three counts mean, inline', () => {
+    // The line shipped with no explanation, and each number invites a wrong reading.
+    // "96 patterns checked" is the one that matters: it looks like a property of the
+    // design and is a constant, so a reviewer could take it for 96 things found or 96
+    // checks run against their architecture.
+    render(<AiDetectionPanel detection={detection()} />)
+    const legend = screen.getByTestId('ai-detection-count-legend')
+
+    expect(legend).toHaveTextContent(/Patterns checked/)
+    expect(legend).toHaveTextContent(/the same number on every review/)
+    expect(legend).toHaveTextContent(/not anything about this design/)
+    expect(legend).toHaveTextContent(/Matches/)
+    expect(legend).toHaveTextContent(/how many of them fired here/)
+    expect(legend).toHaveTextContent(/components searched/)
+    expect(legend).toHaveTextContent(/had their text read/)
+  })
+
+  it('explains the counts inside the panel, not adrift below it', () => {
+    // Same reasoning as the evidence disclosure: a legend for a line has to sit with
+    // the line it describes, which means inside the block that draws it.
+    render(<AiDetectionPanel detection={detection()} />)
+
+    expect(screen.getByTestId('ai-detection-panel')).toContainElement(
+      screen.getByTestId('ai-detection-count-legend'),
+    )
+  })
+
+  it('omits the legend when there is no count line to explain', () => {
+    // `not_run` renders no counts, so a legend for them would describe nothing.
+    render(
+      <AiDetectionPanel
+        detection={detection({ verdict: 'not_run', signals: [], patterns_checked: 0 })}
+      />,
+    )
+    expect(screen.queryByTestId('ai-detection-count-legend')).toBeNull()
+  })
+
   // ---- singular/plural, because these strings are read closely ------------ //
 
   it('counts one match and one component in the singular', () => {

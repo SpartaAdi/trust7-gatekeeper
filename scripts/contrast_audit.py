@@ -225,6 +225,10 @@ def pairs() -> list[tuple[str, str, str, str, str]]:
         over(navy, sunken, 0.40), over(navy, sunken, 0.05), EXEMPT)
     add(s, "verdict tag border, sev-medium/40 on sev-medium/8 over sunken",
         over(medium, sunken, 0.40), over(medium, sunken, 0.08), EXEMPT)
+    # The legend for the count line. Prose, so it takes the body ink rather than the
+    # mono line's faint tier; the three emphasised terms are full ink.
+    add(s, "count legend, ink-muted on sunken", muted, sunken, TEXT)
+    add(s, "count legend emphasis, ink on sunken", ink, sunken, TEXT)
     add(s, "evidence disclosure, indigo on sunken", indigo, sunken, TEXT)
     add(s, "evidence disclosure chevron, indigo on sunken", indigo, sunken, GRAPHIC)
     add(s, "signal name, ink on sunken", ink, sunken, TEXT)

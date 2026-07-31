@@ -70,6 +70,41 @@ const TAG_CLASS: Record<'navy' | 'amber' | 'grey', string> = {
   grey: 'border-ink-faint/40 bg-ink-faint/5 text-ink-faint',
 }
 
+/**
+ * What "96 patterns checked · 2 matches · 3 components searched" actually means.
+ *
+ * The count line was shown with no explanation at all, and each of its three numbers
+ * invites a wrong reading. "96 patterns checked" looks like a property of the design
+ * — a reviewer could reasonably take it for 96 things found, or 96 checks run against
+ * their architecture — when it is the fixed size of the pattern set and is the same
+ * on every review ever produced. Only the middle number says anything about the design
+ * in front of you.
+ *
+ * Inline and always visible, matching how `DataFidelity` explains its OCR proxy in
+ * prose beside the figure rather than behind a disclosure. A number a reader has to
+ * guess the meaning of is the same problem as a verdict with no argument — this panel
+ * exists because of the second one, so it should not ship the first.
+ *
+ * Nothing to explain when the counts are absent: `not_run` renders no detail line.
+ */
+function CountLegend({ detection }: { detection: AiDetection }) {
+  if (detection.verdict === 'not_run') return null
+
+  return (
+    <p
+      data-testid="ai-detection-count-legend"
+      className="t-caption mt-1.5 max-w-prose text-ink-muted"
+    >
+      <span className="font-medium text-ink">Patterns checked</span> is the size of the
+      fixed pattern set — the same number on every review, so it describes how hard the
+      detector looked, not anything about this design.{' '}
+      <span className="font-medium text-ink">Matches</span> is how many of them fired
+      here, and <span className="font-medium text-ink">components searched</span> is how
+      many extracted elements had their text read.
+    </p>
+  )
+}
+
 function VerdictTag({ detection, disagrees }: { detection: AiDetection; disagrees: boolean }) {
   // A disagreement outranks the verdict itself: the reader's job is no longer "what
   // did detection find" but "which of these two is right".
@@ -169,10 +204,16 @@ export function AiDetectionPanel({
           the page background below the block, which put the evidence — the one part a
           reviewer can check against the original document — outside the thing it is
           evidence FOR, reading as unrelated content that happened to follow.
+
+          The footer slot also carries the legend for the count line, which sits
+          directly above it. Reusing the slot rather than adding a third one keeps the
+          count and its explanation in one block and in reading order.
         */
         footer={
-          signals.length > 0 ? (
-            <>
+          <>
+            <CountLegend detection={detection} />
+            {signals.length > 0 && (
+              <>
               <button
                 type="button"
                 onClick={() => setOpen((value) => !value)}
@@ -225,8 +266,9 @@ export function AiDetectionPanel({
                   ))}
                 </ul>
               )}
-            </>
-          ) : undefined
+              </>
+            )}
+          </>
         }
       />
     </section>
