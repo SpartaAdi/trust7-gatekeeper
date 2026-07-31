@@ -56,6 +56,19 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
   // material, so the note below says what a document would add.
   const diagramOnly = diagrams.length > 0 && documents.length === 0
 
+  /**
+   * A diagram, and nothing written down anywhere — no SoW, and the context field
+   * left empty.
+   *
+   * The note above already offers a document when a diagram arrives alone. This is
+   * the narrower case where BOTH offers have been declined, and it is worth saying
+   * separately because the consequence is specific rather than general: a whole class
+   * of control lives in prose and nowhere else, so those checks are being submitted
+   * with nothing to read. Purely derived from state that already exists — no new
+   * field, nothing sent to the API, nothing that can reach the scoring arithmetic.
+   */
+  const noDescriptionAtAll = diagramOnly && context.trim() === ''
+
   function addFiles(incoming: File[]) {
     setError('')
     const rejected = incoming.filter((file) => !isSupported(file.name))
@@ -230,6 +243,39 @@ export function UploadView({ previousReviewId, onStarted, onCancel }: Props) {
               <p className="t-caption mt-1 break-words text-ink-muted">{error}</p>
             </div>
           </div>
+        )}
+
+        {/*
+          Here, and not beside the drop zone, for two reasons. Its condition depends
+          on the context field, which renders above this point — a warning that the
+          field is empty has to come after the reader has met the field, or it
+          describes something they have not seen. And it is a statement about what the
+          run that is about to start will not be able to do, so it belongs at the
+          moment of committing to it.
+
+          In UploadView rather than as a results-page banner deliberately: here it is
+          still actionable — attach a document, or type a sentence — and on the results
+          page it would only be an explanation for work already paid for.
+
+          Informational. It does not touch `canSubmit`, and a diagram-only review with
+          no context remains a perfectly valid thing to run.
+        */}
+        {noDescriptionAtAll && (
+          /*
+            A plain notice rather than a CaveatPanel, matching its sibling above.
+            CaveatPanel splits a title from an elaborating body, and this copy is one
+            sentence that opens with its own title — routed through that component it
+            would print "No accompanying description provided" twice. It still borrows
+            the caution tone's colours, which are already in the contrast audit.
+          */
+          <p
+            className="animate-enter t-caption border-l-2 border-sev-medium bg-surface-sunken px-4 py-3 text-ink-muted"
+            data-testid="no-description-warning"
+          >
+            {"No accompanying description provided — controls described only in " +
+              "prose (encryption, IAM, disaster recovery, etc.) can't be scored " +
+              "from a diagram alone."}
+          </p>
         )}
 
         <div className="flex flex-wrap items-center gap-4 border-t border-hairline pt-6">

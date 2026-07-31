@@ -933,7 +933,12 @@ Point Render at this repo; `render.yaml` defines the service (free tier, Python
 | `ANTHROPIC_API_KEY` | only needed if you set `LLM_PROVIDER=anthropic`. |
 | `CORS_ALLOWED_ORIGIN` | the Vercel URL from step 2. Set a placeholder now, correct it in step 3. |
 
-Note the service URL, e.g. `https://trust7-gatekeeper-api.onrender.com`.
+Note the service URL. **This deployment's live API is
+`https://trust7-gatekeeper-backend-docker.onrender.com`** — the Docker service
+described under [a Docker runtime](#optional-a-docker-runtime-for-tesseract) below,
+which is what the cutover moved to. The earlier native service that `render.yaml`
+names is no longer deployed; its hostname answers `404` with
+`x-render-routing: no-server`, so treat any URL other than the one above as stale.
 
 ### 2. Frontend on Vercel
 
@@ -1008,7 +1013,7 @@ Tesseract is actually being reached.
 
 ```bash
 read -rs -p 'Demo token: ' TRUST7_DEMO_TOKEN && export TRUST7_DEMO_TOKEN
-./scripts/verify_docker_service.sh https://<your-service>.onrender.com
+./scripts/verify_docker_service.sh https://trust7-gatekeeper-backend-docker.onrender.com
 ```
 
 The token is the service's `DEMO_ACCESS_TOKEN`, sent as the `X-Demo-Token` header.
@@ -1067,7 +1072,7 @@ and it survives your laptop closing. On [cron-job.org](https://cron-job.org) or
 
 | Setting | Value |
 | --- | --- |
-| URL | `https://<your-service>.onrender.com/health` |
+| URL | `https://trust7-gatekeeper-backend-docker.onrender.com/health` |
 | Interval | 5 or 10 minutes (must be under 15) |
 | Method | `GET` or `HEAD` — both return 200 |
 
@@ -1075,14 +1080,14 @@ and it survives your laptop closing. On [cron-job.org](https://cron-job.org) or
 
 ```bash
 while true; do curl -sS -o /dev/null -w "%{http_code} $(date +%H:%M:%S)\n" \
-  https://<your-service>.onrender.com/health; sleep 600; done
+  https://trust7-gatekeeper-backend-docker.onrender.com/health; sleep 600; done
 ```
 
 Or the committed version, which logs legibly and keeps going through a failed
 ping rather than exiting:
 
 ```bash
-./scripts/warm.sh https://<your-service>.onrender.com
+./scripts/warm.sh https://trust7-gatekeeper-backend-docker.onrender.com
 ```
 
 Two caveats. Free instance-hours are ~750/month across the account, and holding

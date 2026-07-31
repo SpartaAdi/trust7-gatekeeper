@@ -10,7 +10,7 @@
 # laptop sleeps, so for an unattended demo prefer an external pinger — see the
 # "Keeping the backend awake" section of README.md.
 #
-#   ./scripts/warm.sh https://trust7-gatekeeper-api.onrender.com
+#   ./scripts/warm.sh https://trust7-gatekeeper-backend-docker.onrender.com
 #
 # /health needs no credentials: it is the one route the demo token gate skips.
 set -uo pipefail

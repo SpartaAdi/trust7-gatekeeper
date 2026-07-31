@@ -1,0 +1,56 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="A2I human review">
+    <mxGraphModel dx="900" dy="600" grid="0" page="1">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="ingest" value="Document Upload (S3)" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <mxCell id="model" value="Claims Classifier (SageMaker Endpoint)" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sagemaker" vertex="1" parent="1">
+          <mxGeometry x="200" y="40" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <mxCell id="confidence" value="Confidence Threshold Gate" style="rhombus;whiteSpace=wrap" vertex="1" parent="1">
+          <mxGeometry x="360" y="40" width="120" height="78" as="geometry" />
+        </mxCell>
+
+        <mxCell id="a2i" value="Amazon A2I Human Review Loop" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.augmented_ai" vertex="1" parent="1">
+          <mxGeometry x="360" y="180" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <mxCell id="reviewer" value="Claims Reviewer (human)" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.user" vertex="1" parent="1">
+          <mxGeometry x="200" y="180" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <mxCell id="store" value="Adjudicated Claims (DynamoDB)" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.dynamodb" vertex="1" parent="1">
+          <mxGeometry x="560" y="40" width="78" height="78" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" value="uploaded claim" edge="1" parent="1" source="ingest" target="model">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="prediction + confidence" edge="1" parent="1" source="model" target="confidence">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="below threshold — send for human review" edge="1" parent="1" source="confidence" target="a2i">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="review task assigned" edge="1" parent="1" source="a2i" target="reviewer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="reviewer approves or overrides the decision" edge="1" parent="1" source="reviewer" target="a2i">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="human-approved outcome only" edge="1" parent="1" source="a2i" target="store">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="above threshold — auto-approved" edge="1" parent="1" source="confidence" target="store">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

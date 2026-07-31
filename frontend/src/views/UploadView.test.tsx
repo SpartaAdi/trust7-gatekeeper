@@ -200,6 +200,80 @@ describe('UploadView', () => {
     })
   })
 
+  describe('no-description warning', () => {
+    /**
+     * Narrower than the note above, and separate from it on purpose.
+     *
+     * The note fires the moment a diagram arrives alone and offers a document. This
+     * fires only when BOTH ways of describing the design have been declined — no SoW
+     * and an empty context field — because at that point the consequence is specific:
+     * encryption, IAM and DR live in prose, and there is no prose.
+     */
+    const warning = () => screen.queryByTestId('no-description-warning')
+
+    it('appears for a diagram with no document and no context text', async () => {
+      const user = userEvent.setup()
+      render(<UploadView onStarted={vi.fn()} />)
+
+      await user.upload(fileInput(), [diagram()])
+
+      expect(warning()).toHaveTextContent(
+        /No accompanying description provided — controls described only in prose/,
+      )
+      expect(warning()).toHaveTextContent(
+        /\(encryption, IAM, disaster recovery, etc\.\) can't be scored from a diagram alone\./,
+      )
+    })
+
+    it('disappears once context text is typed', async () => {
+      const user = userEvent.setup()
+      render(<UploadView onStarted={vi.fn()} />)
+
+      await user.upload(fileInput(), [diagram()])
+      expect(warning()).toBeInTheDocument()
+
+      await user.type(
+        screen.getByLabelText(/purpose|use case|what this system/i),
+        'Internal claims triage for a regulated insurer; PII throughout.',
+      )
+
+      expect(warning()).toBeNull()
+    })
+
+    it('is absent when a SoW document accompanies the diagram', async () => {
+      const user = userEvent.setup()
+      render(<UploadView onStarted={vi.fn()} />)
+
+      await user.upload(fileInput(), [diagram()])
+      expect(warning()).toBeInTheDocument()
+
+      await user.upload(fileInput(), [sow()])
+
+      expect(warning()).toBeNull()
+    })
+
+    it('is absent for a SoW-only submission', async () => {
+      const user = userEvent.setup()
+      render(<UploadView onStarted={vi.fn()} />)
+
+      await user.upload(fileInput(), [sow()])
+
+      expect(warning()).toBeNull()
+    })
+
+    it('does not gate the submit — the review is still allowed to run', async () => {
+      // Informational only. A diagram-only review with no context is a valid thing to
+      // submit, and a warning that quietly disabled the button would be a gate.
+      const user = userEvent.setup()
+      render(<UploadView onStarted={vi.fn()} />)
+
+      await user.upload(fileInput(), [diagram()])
+
+      expect(warning()).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /start review/i })).toBeEnabled()
+    })
+  })
+
   it('rejects a second file of the same kind', async () => {
     const user = userEvent.setup()
     render(<UploadView onStarted={vi.fn()} />)
