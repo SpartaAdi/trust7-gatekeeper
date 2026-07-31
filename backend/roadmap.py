@@ -21,17 +21,35 @@ Those definitions already are the three phases, so the rule uses them rather tha
 inferring effort from severity, which measures how much a gap matters and not how
 much work it is to close.
 
-    1. STRUCTURAL   if effort is "high", OR the fix touches more than one component.
-    2. IMMEDIATE    else if effort is "low" AND severity is "high".
-    3. SHORT-TERM   everything else.
+    1. STRUCTURAL    if effort is "high", OR the fix touches more than one component.
+    2. UNSPECIFIED   else if effort is absent.
+    3. IMMEDIATE     else if effort is "low" AND severity is "high".
+    4. SHORT-TERM    everything else.
 
 The component-count override exists because a change spanning three components is a
 structural change whatever it was scored — blast radius is the one effort signal in
-the data that is not the model's opinion.
+the data that is not the model's opinion. It is also why it outranks the absent case:
+component count is MEASURED, so it still decides when the estimate is missing.
 
-Where ``remediation_effort`` is absent (an older stored review, or a check the model
-left out of its remediation list) the rule falls back to severity and component
-count alone. Absent effort never silently becomes "low".
+WHY ``unspecified`` EXISTS
+--------------------------
+Absent effort used to fall back to severity: high severity became IMMEDIATE, on the
+reasoning that a single-component high-severity gap is usually cheap. That put
+findings nobody had estimated into a bucket labelled "closable by a configuration or
+document change" — a claim about how much work the fix is, made from data that does
+not contain one. Everything else fell to SHORT-TERM, which claims "a component or
+flow change" and is no better founded.
+
+It mattered in practice. When the remediate stage returns nothing — which a real run
+did, twice over — every finding has a blank effort, so the whole roadmap filed itself
+as Immediate and Short-term work with confident phase blurbs and no estimate behind
+any of it.
+
+So a blank effort now lands in its own phase, ordered LAST because it is not a
+priority claim in either direction, and labelled as the absence it is. This follows
+the same rule the rest of the project does: an honest blank beats a fabricated value.
+These findings are still ON the roadmap — dropping them would be worse, and
+``group_by_phase`` is documented as a partition rather than a shortlist.
 
 Pillar is deliberately NOT used: it names a topic, not an amount of work. See the
 TypeScript twin for the worked example.
@@ -43,15 +61,22 @@ from typing import Literal
 
 from schema import Finding
 
-Phase = Literal["immediate", "short_term", "structural"]
+Phase = Literal["immediate", "short_term", "structural", "unspecified"]
 
-#: Presentation order, and the order the phases are worked in.
-PHASE_ORDER: tuple[Phase, ...] = ("immediate", "short_term", "structural")
+#: Presentation order. ``unspecified`` is last: it ranks nothing, it withholds a
+#: ranking, so it must not sit among phases that assert one.
+PHASE_ORDER: tuple[Phase, ...] = (
+    "immediate",
+    "short_term",
+    "structural",
+    "unspecified",
+)
 
 PHASE_LABEL: dict[Phase, str] = {
     "immediate": "Immediate",
     "short_term": "Short-term",
     "structural": "Structural",
+    "unspecified": "Effort not estimated",
 }
 
 #: What each phase means, in the reviewer's terms rather than the rule's.
@@ -59,6 +84,10 @@ PHASE_BLURB: dict[Phase, str] = {
     "immediate": "High-severity gaps closable by a configuration or document change.",
     "short_term": "A component or flow change — worth scheduling, not architecture work.",
     "structural": "Spans several components or needs a design change.",
+    "unspecified": (
+        "No effort estimate came back for these, so they are not scheduled. That is "
+        "not a judgement that they are cheap or expensive — it is the absence of one."
+    ),
 }
 
 #: Above one component, a fix is a structural change however it was scored.
@@ -71,11 +100,11 @@ def phase_for(finding: Finding) -> Phase:
     spans_components = len(finding.affected_components) >= STRUCTURAL_COMPONENT_COUNT
     if finding.remediation_effort == "high" or spans_components:
         return "structural"
+    # Checked BEFORE the effort buckets, so an absent estimate cannot be inferred
+    # into one. Blast radius is handled above and still wins, because it is measured.
+    if finding.remediation_effort == "":
+        return "unspecified"
     if finding.remediation_effort == "low" and finding.severity == "high":
-        return "immediate"
-    if finding.remediation_effort == "" and finding.severity == "high":
-        # No effort recorded. Severity and blast radius are all there is, and a
-        # single-component high-severity gap is the shape that is usually cheap.
         return "immediate"
     return "short_term"
 

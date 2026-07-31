@@ -43,15 +43,26 @@
 
 import type { Finding } from '../types'
 
-export type Phase = 'immediate' | 'short_term' | 'structural'
+export type Phase = 'immediate' | 'short_term' | 'structural' | 'unspecified'
 
-/** Presentation order, and the order the phases are worked in. */
-export const PHASE_ORDER: readonly Phase[] = ['immediate', 'short_term', 'structural']
+/**
+ * Presentation order, and the order the phases are worked in.
+ *
+ * `unspecified` is last: it does not rank anything, it withholds a ranking, so it
+ * must not sit among phases that assert one.
+ */
+export const PHASE_ORDER: readonly Phase[] = [
+  'immediate',
+  'short_term',
+  'structural',
+  'unspecified',
+]
 
 export const PHASE_LABEL: Record<Phase, string> = {
   immediate: 'Immediate',
   short_term: 'Short-term',
   structural: 'Structural',
+  unspecified: 'Effort not estimated',
 }
 
 /** What each phase means, in the reviewer's terms rather than the rule's. */
@@ -59,6 +70,9 @@ export const PHASE_BLURB: Record<Phase, string> = {
   immediate: 'High-severity gaps closable by a configuration or document change.',
   short_term: 'A component or flow change — worth scheduling, not architecture work.',
   structural: 'Spans several components or needs a design change.',
+  unspecified:
+    'No effort estimate came back for these, so they are not scheduled. That is ' +
+    'not a judgement that they are cheap or expensive — it is the absence of one.',
 }
 
 /** Above one component, a fix is a structural change however it was scored. */
@@ -67,12 +81,16 @@ const STRUCTURAL_COMPONENT_COUNT = 2
 export function phaseFor(finding: Finding): Phase {
   const spansComponents = finding.affected_components.length >= STRUCTURAL_COMPONENT_COUNT
   if (finding.remediation_effort === 'high' || spansComponents) return 'structural'
+  // Checked BEFORE the effort buckets, so an absent estimate cannot be inferred into
+  // one. Blast radius is handled above and still wins, because it is measured.
+  //
+  // This used to fall back to severity: high became 'immediate', everything else
+  // 'short_term'. Both of those blurbs claim how much work the fix is, from data that
+  // does not contain an estimate — and when the remediate stage returns nothing, as a
+  // real run did twice over, EVERY finding has a blank effort and the whole roadmap
+  // filed itself as scheduled work with nothing behind it.
+  if (finding.remediation_effort === '') return 'unspecified'
   if (finding.remediation_effort === 'low' && finding.severity === 'high') {
-    return 'immediate'
-  }
-  if (finding.remediation_effort === '' && finding.severity === 'high') {
-    // No effort recorded. Severity and blast radius are all there is, and a
-    // single-component high-severity gap is the shape that is usually cheap.
     return 'immediate'
   }
   return 'short_term'
@@ -93,6 +111,7 @@ export function groupByPhase(findings: readonly Finding[]): Record<Phase, Findin
     immediate: [],
     short_term: [],
     structural: [],
+    unspecified: [],
   }
 
   for (const finding of findings) {
@@ -151,6 +170,7 @@ export function prioritizedActions(
     immediate: [],
     short_term: [],
     structural: [],
+    unspecified: [],
   }
 
   for (const phase of PHASE_ORDER) {

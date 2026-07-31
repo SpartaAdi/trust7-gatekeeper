@@ -107,16 +107,19 @@ describe('RemediationGapPanel', () => {
     )
   })
 
-  it('warns about the two silent downstream effects on a total failure', () => {
-    // Both mislead in the direction of looking complete, and a reader will not
-    // discover either on their own.
+  it('says what happens to the two downstream effects on a total failure', () => {
+    // These were the two SILENT consequences when this panel was written, and the
+    // assertion changed with them: both are now handled rather than merely warned
+    // about, so the panel states the handling instead of the hazard. A reader still
+    // learns about both from one place.
     render(<RemediationGapPanel gap={gap()} />)
     const panel = screen.getByTestId('remediation-gap-panel')
-    // The copied prompt falls back to finding titles and looks finished.
+    // The roadmap buckets them honestly rather than filing them as cheap fixes.
+    expect(panel).toHaveTextContent(/Effort not estimated/)
+    expect(panel).toHaveTextContent(/rather than assuming they are cheap/)
+    // The copied prompt marks them and carries evidence in place of a fix.
     expect(panel).toHaveTextContent(/Copy fix-it prompt/)
-    // The roadmap's phases come from an effort estimate that is blank whenever the
-    // text is, so "Immediate" reflects an absent estimate rather than a cheap fix.
-    expect(panel).toHaveTextContent(/effort estimate that was also not returned/)
+    expect(panel).toHaveTextContent(/carries the review's evidence in place of a fix/)
   })
 
   it('does not raise those on a partial shortfall, where the phases still mean something', () => {

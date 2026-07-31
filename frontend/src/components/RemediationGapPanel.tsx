@@ -18,14 +18,12 @@ import { remediationTotallyMissing, type RemediationGap } from '../types'
  * Two other consequences are named here rather than left to be discovered, because
  * both are silent and both mislead in the direction of looking complete:
  *
- * - "Copy fix-it prompt" falls back to the finding TITLE when there is no
- *   remediation, so it produces a prompt that looks finished and carries no
- *   guidance. That is the artefact most likely to leave this app and land in
- *   someone else's editor.
- * - The roadmap's phases come from `remediation_effort`, which is blank whenever
- *   the text is. Its documented fallback files a blank-effort high-severity finding
- *   as Immediate — correct when one entry is missing, misleading when they all are,
- *   because "Immediate" then reflects an absent estimate rather than a cheap fix.
+ * - "Copy fix-it prompt" used to fall back to the finding TITLE, producing a prompt
+ *   that looked finished and carried no guidance. It now marks such items and
+ *   carries the review's evidence instead — see `fixItLine` in ResultsView.
+ * - The roadmap's phases come from `remediation_effort`, which is blank whenever the
+ *   text is. A blank used to be filed as Immediate, i.e. as a cheap fix nobody had
+ *   estimated; it now lands in "Effort not estimated", ordered last.
  *
  * `caution`, not `neutral`: unlike the fidelity numbers this is not a measurement to
  * weigh, it is a part of the deliverable that did not get produced.
@@ -74,9 +72,10 @@ export function RemediationGapPanel({
               <strong className="font-medium text-ink">
                 Nothing has been invented to fill the gap.
               </strong>{' '}
-              Note that “Copy fix-it prompt” falls back to the finding titles here,
-              and that the roadmap's phases are grouped from an effort estimate that
-              was also not returned.
+              The roadmap groups these under{' '}
+              <span className="font-medium text-ink">“Effort not estimated”</span>{' '}
+              rather than assuming they are cheap, and “Copy fix-it prompt” marks
+              them and carries the review's evidence in place of a fix.
             </>
           ) : (
             <>

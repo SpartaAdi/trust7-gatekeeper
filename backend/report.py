@@ -740,7 +740,7 @@ def _finding_block(finding: Finding, width: float) -> Flowable:
 
 
 def _roadmap(result: ReviewResult) -> list:
-    """How to improve — the open findings sequenced into three phases.
+    """How to improve — the open findings sequenced into phases by effort.
 
     The same grouping the results view renders, from the same rule in `roadmap.py`,
     so the report and the screen cannot disagree about a finding's phase.

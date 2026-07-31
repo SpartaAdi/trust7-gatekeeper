@@ -279,9 +279,22 @@ towards looking complete:
   remediation, producing a prompt that looks finished and carries no guidance — and
   that is the artefact most likely to leave the app.
 * **The roadmap's phases** come from `remediation_effort`, blank whenever the text
-  is. Its documented fallback files a blank-effort high-severity finding as
-  Immediate — right when one entry is missing, misleading when all are, because
-  "Immediate" then reflects an absent estimate rather than a cheap fix.
+  is. A blank now lands in its own phase — **"Effort not estimated"**, ordered last —
+  rather than in one that claims how much work the fix is. It previously fell back to
+  severity: high became Immediate ("closable by a configuration or document change"),
+  everything else Short-term ("a component or flow change"). Both assert an amount of
+  work from data that contains no estimate, and when remediate returns nothing the
+  whole roadmap files itself as confidently scheduled work. Blast radius still
+  overrides the blank — two or more components is structural whatever the estimate
+  says — because component count is measured rather than estimated.
+
+* **"Copy fix-it prompt"** used to fall back to the finding *title* when there was no
+  remediation. The title is the rubric check's description, so pasted under "please
+  revise the diagram to address each one" it read as a specific instruction while
+  carrying nothing specific to the design — and this is the artefact most likely to
+  leave the app. Such items are now marked `[NO REMEDIATION GUIDANCE]`, carry the
+  review's own `evidence` in place of a fix, and the prompt gains a closing note
+  saying so.
 
 A count, never a rate: "22 of 28 actions have guidance" invites reading 79% as a
 quality figure for the six that do not.
@@ -621,9 +634,11 @@ must not put an error in front of someone reading their findings.
 The score delta is the one the API already returns, rendered by the component that
 already rendered it. No new score arithmetic anywhere in this work.
 
-The footer's separate action is now **"Score a different design against this one"** —
-it posts to `/reanalyze` with fresh uploads, which is a different thing from a
-follow-up round, and the old label read like the same thing.
+The footer's separate action is **"Upload a different design and compare"** — it
+posts to `/reanalyze` with fresh uploads, which is a different operation from a
+follow-up round. Each label names its INPUT, which is the difference that matters:
+one takes a file, the other takes a sentence. The original "Re-review a revised
+design" described the feedback box at least as well as it described the footer.
 
 ### Not in this round
 

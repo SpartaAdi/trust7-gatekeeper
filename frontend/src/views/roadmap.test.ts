@@ -70,11 +70,42 @@ describe('phaseFor — the rule stated directly', () => {
   })
 
   it('never treats an absent effort as low', () => {
-    // The one place absent effort and low effort must differ: a medium-severity
-    // finding. Low effort + medium severity is short-term either way, so the
-    // distinguishing case is that "" is not allowed to promote anything on its own.
-    expect(phaseFor(finding({ remediation_effort: '', severity: 'medium' }))).toBe('short_term')
-    expect(phaseFor(finding({ remediation_effort: '', severity: 'low' }))).toBe('short_term')
+    // The intent this test always had, now enforced properly. It used to assert
+    // 'short_term', which honoured the name only narrowly: short_term is not "low",
+    // but its blurb still claims the fix is "a component or flow change" — an amount
+    // of work, asserted from data that contains none.
+    for (const severity of ['high', 'medium', 'low'] as const) {
+      expect(phaseFor(finding({ remediation_effort: '', severity }))).toBe('unspecified')
+    }
+  })
+
+  it('puts an absent effort in no bucket that claims an amount of work', () => {
+    const claimsEffort = ['immediate', 'short_term', 'structural']
+    for (const severity of ['high', 'medium', 'low'] as const) {
+      expect(claimsEffort).not.toContain(
+        phaseFor(finding({ remediation_effort: '', severity })),
+      )
+    }
+  })
+
+  it('still lets blast radius override an absent effort, because it is measured', () => {
+    // The one signal `unspecified` must not swallow: two or more components is a
+    // structural change whatever the estimate says.
+    expect(
+      phaseFor(
+        finding({
+          remediation_effort: '',
+          severity: 'low',
+          affected_components: ['api', 'db'],
+        }),
+      ),
+    ).toBe('structural')
+  })
+
+  it('does not swallow a real estimate', () => {
+    expect(phaseFor(finding({ remediation_effort: 'low', severity: 'high' }))).toBe('immediate')
+    expect(phaseFor(finding({ remediation_effort: 'medium', severity: 'medium' }))).toBe('short_term')
+    expect(phaseFor(finding({ remediation_effort: 'high', severity: 'low' }))).toBe('structural')
   })
 
   it('ignores the pillar', () => {

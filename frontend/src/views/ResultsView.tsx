@@ -283,12 +283,26 @@ export function ResultsView({
       <UseCaseNotes notes={result.use_case_notes} context={result.context} />
 
       <footer className="mt-16 flex flex-wrap items-center gap-x-6 gap-y-4 border-t border-hairline pt-8">
+        {/*
+          Two operations on this page could be called "re-review", and they are not
+          the same thing:
+
+            this button    -> POST /reviews/{id}/reanalyze — a FRESH UPLOAD, scored
+                              from scratch and compared against this review
+            feedback box   -> POST /reviews/{id}/re-review — this same design
+                              re-evaluated with the reviewer's words, as a new version
+
+          The label was "Re-review a revised design", which described the feedback box
+          at least as well as it described this. It now names the INPUT, which is the
+          actual difference: one takes a file, the other takes a sentence.
+        */}
         <button
           type="button"
           onClick={onReReview}
+          title="Submit a different design as a new review and compare its score against this one. To correct or revise THIS review, use the follow-up box at the top of the page."
           className="t-body bg-minfy-indigo px-5 py-2.5 font-semibold text-white transition-colors duration-150 hover:bg-minfy-blue"
         >
-          Score a different design against this one
+          Upload a different design and compare
         </button>
         <DownloadReportButton reviewId={result.review_id} />
         {/* Shown only when the prompt would carry something. A button that copies a
@@ -340,6 +354,49 @@ export const FIX_IT_PREAMBLE =
   'Here is my architecture. A review found the following gaps — please revise ' +
   'the diagram to address each one:'
 
+/** Appended when any item lacks guidance, so the absence travels with the prompt. */
+export const FIX_IT_GAP_NOTE =
+  'Note: the review did not produce remediation guidance for the items marked ' +
+  'above. For those, the finding and the evidence behind it are given instead — ' +
+  'no fix was suggested, so treat them as gaps to solve rather than instructions ' +
+  'to follow.'
+
+/**
+ * One numbered line for the fix-it prompt.
+ *
+ * When `remediation` exists this is the model's own imperative text, verbatim. When
+ * it does not, the fallback used to be the bare `title` — which is the rubric
+ * check's description, e.g. "Monitoring, logging, and alerting are defined for the
+ * workload's key operational signals."
+ *
+ * That was the worst possible fallback. Pasted under "please revise the diagram to
+ * address each one", a rubric description reads as a specific instruction about THIS
+ * design while carrying nothing specific to it. The prompt looked complete, and this
+ * is the artefact most likely to leave the app and land in someone else's editor —
+ * where nobody can tell that ten confident-looking lines came from a stage that
+ * returned nothing. A real run produced exactly that: 0 of 25 remediations, twice
+ * over, and a copyable prompt that betrayed none of it.
+ *
+ * So the absence is now stated, and `evidence` is carried in its place. Evidence is
+ * the right substitute because it is the one field the evaluate stage always writes
+ * and it IS design-specific — it says what in this design drove the verdict, which
+ * is the context a receiving tool needs in order to propose a fix itself.
+ */
+function fixItLine(finding: Finding, index: number): string {
+  const number = `${index + 1}.`
+  if (finding.remediation.trim()) {
+    return `${number} ${finding.remediation}`
+  }
+
+  const evidence = finding.evidence.trim()
+  return [
+    `${number} [NO REMEDIATION GUIDANCE] ${finding.title}`,
+    evidence
+      ? `   Evidence from the review: ${evidence}`
+      : '   The review recorded no evidence for this finding either.',
+  ].join('\n')
+}
+
 /**
  * The fix-it prompt, built from the same prioritized actions the roadmap shows.
  *
@@ -354,10 +411,10 @@ export function buildFixItPrompt(findings: readonly Finding[]): string {
   )
   if (actions.length === 0) return ''
 
-  const numbered = actions.map(
-    (finding, index) => `${index + 1}. ${finding.remediation || finding.title}`,
-  )
-  return `${FIX_IT_PREAMBLE}\n\n${numbered.join('\n')}\n`
+  const numbered = actions.map(fixItLine)
+  const anyMissing = actions.some((finding) => !finding.remediation.trim())
+  const body = `${FIX_IT_PREAMBLE}\n\n${numbered.join('\n')}\n`
+  return anyMissing ? `${body}\n${FIX_IT_GAP_NOTE}\n` : body
 }
 
 /**
@@ -541,7 +598,7 @@ function ActionRoadmap({ findings }: { findings: Finding[] }) {
         Action roadmap
         <span className="tnum font-normal normal-case tracking-normal text-ink-faint">
           {' '}
-          · {total} prioritized {total === 1 ? 'action' : 'actions'} in three phases
+          · {total} prioritized {total === 1 ? 'action' : 'actions'}
         </span>
       </h3>
       {/*
@@ -550,7 +607,9 @@ function ActionRoadmap({ findings }: { findings: Finding[] }) {
         the phases come from `remediation_effort`, not from severity.
       */}
       <p className="t-caption mt-1.5 text-ink-faint">
-        Prioritized next actions, ordered by effort. Open findings only.
+        Prioritized next actions, ordered by effort. Open findings only. Anything the
+        review returned no effort estimate for is grouped last, unscheduled, rather
+        than assumed cheap.
       </p>
 
       {PHASE_ORDER.map((phase) => (

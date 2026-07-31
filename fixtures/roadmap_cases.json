@@ -1,13 +1,18 @@
 {
   "$comment": [
     "Shared phase-grouping cases, read by BOTH frontend/src/views/roadmap.test.ts and",
-    "backend/tests/test_roadmap.py. The rule is implemented twice — once in TypeScript",
-    "for the results view, once in Python for the PDF — because the two runtimes cannot",
+    "backend/tests/test_roadmap.py. The rule is implemented twice \u2014 once in TypeScript",
+    "for the results view, once in Python for the PDF \u2014 because the two runtimes cannot",
     "share code. This file is what stops those two copies drifting: a case added here",
     "must pass in both suites, so a change to one implementation and not the other is a",
     "test failure rather than a report that quietly disagrees with the screen.",
     "",
-    "`expect` is the phase each finding must land in."
+    "`expect` is the phase each finding must land in.",
+    "",
+    "A blank `remediation_effort` lands in `unspecified`, never in a phase that",
+    "claims how much work the fix is. Blast radius still overrides it: a fix",
+    "spanning two or more components is structural whatever the estimate says,",
+    "because component count is measured rather than estimated."
   ],
   "cases": [
     {
@@ -20,7 +25,9 @@
         "status": "fail",
         "severity": "high",
         "title": "Single-AZ deployment",
-        "affected_components": ["rds-primary"],
+        "affected_components": [
+          "rds-primary"
+        ],
         "remediation": "Move the database to a multi-AZ deployment.",
         "remediation_effort": "high",
         "priority": 1
@@ -36,7 +43,11 @@
         "status": "fail",
         "severity": "high",
         "title": "Traffic between tiers is unencrypted",
-        "affected_components": ["alb", "api-service", "worker"],
+        "affected_components": [
+          "alb",
+          "api-service",
+          "worker"
+        ],
         "remediation": "Terminate TLS at the load balancer and require TLS on both hops.",
         "remediation_effort": "low",
         "priority": 2
@@ -52,7 +63,9 @@
         "status": "fail",
         "severity": "high",
         "title": "S3 bucket has no default encryption",
-        "affected_components": ["assets-bucket"],
+        "affected_components": [
+          "assets-bucket"
+        ],
         "remediation": "Enable SSE-KMS as the bucket default.",
         "remediation_effort": "low",
         "priority": 3
@@ -84,7 +97,9 @@
         "status": "partial",
         "severity": "low",
         "title": "No cost allocation tags",
-        "affected_components": ["api-service"],
+        "affected_components": [
+          "api-service"
+        ],
         "remediation": "Apply the standard cost allocation tag set.",
         "remediation_effort": "low",
         "priority": 9
@@ -100,15 +115,17 @@
         "status": "fail",
         "severity": "high",
         "title": "Secrets are passed as environment variables",
-        "affected_components": ["api-service"],
+        "affected_components": [
+          "api-service"
+        ],
         "remediation": "Read secrets from Secrets Manager at start-up.",
         "remediation_effort": "medium",
         "priority": 5
       }
     },
     {
-      "name": "no effort recorded: high severity on one component falls back to immediate",
-      "expect": "immediate",
+      "name": "no effort recorded: high severity is NOT filed as a cheap fix",
+      "expect": "unspecified",
       "finding": {
         "framework": "trust7",
         "pillar_id": "risk_resilience",
@@ -116,15 +133,17 @@
         "status": "fail",
         "severity": "high",
         "title": "No documented RPO",
-        "affected_components": ["rds-primary"],
+        "affected_components": [
+          "rds-primary"
+        ],
         "remediation": "",
         "remediation_effort": "",
         "priority": 0
       }
     },
     {
-      "name": "no effort recorded: medium severity falls back to short-term",
-      "expect": "short_term",
+      "name": "no effort recorded: medium severity is NOT filed as a component change",
+      "expect": "unspecified",
       "finding": {
         "framework": "aws_waf",
         "pillar_id": "operational_excellence",
@@ -148,7 +167,12 @@
         "status": "fail",
         "severity": "medium",
         "title": "No centralised logging",
-        "affected_components": ["api-service", "worker", "alb", "rds-primary"],
+        "affected_components": [
+          "api-service",
+          "worker",
+          "alb",
+          "rds-primary"
+        ],
         "remediation": "",
         "remediation_effort": "",
         "priority": 0
@@ -164,7 +188,9 @@
         "status": "fail",
         "severity": "high",
         "title": "No deployment rollback procedure described",
-        "affected_components": ["api-service"],
+        "affected_components": [
+          "api-service"
+        ],
         "remediation": "Describe the rollback procedure in the design document.",
         "remediation_effort": "low",
         "priority": 6
@@ -180,10 +206,49 @@
         "status": "partial",
         "severity": "high",
         "title": "Health check interval not specified",
-        "affected_components": ["alb"],
+        "affected_components": [
+          "alb"
+        ],
         "remediation": "Set the target group health check interval to 10 seconds.",
         "remediation_effort": "low",
         "priority": 7
+      }
+    },
+    {
+      "name": "no effort recorded: blast radius still decides, because it is measured",
+      "expect": "structural",
+      "finding": {
+        "framework": "trust7",
+        "pillar_id": "risk_resilience",
+        "check_id": "T7-9",
+        "status": "fail",
+        "severity": "low",
+        "title": "No cross-region failover path",
+        "affected_components": [
+          "api-service",
+          "rds-primary"
+        ],
+        "remediation": "",
+        "remediation_effort": "",
+        "priority": 0
+      }
+    },
+    {
+      "name": "a real low effort on a high-severity gap still reaches immediate",
+      "expect": "immediate",
+      "finding": {
+        "framework": "aws_waf",
+        "pillar_id": "security",
+        "check_id": "SEC-9",
+        "status": "fail",
+        "severity": "high",
+        "title": "Bucket is account-readable",
+        "affected_components": [
+          "receipts-bucket"
+        ],
+        "remediation": "Scope the bucket policy to the service role.",
+        "remediation_effort": "low",
+        "priority": 0
       }
     }
   ],
@@ -197,7 +262,9 @@
         "status": "pass",
         "severity": "high",
         "title": "IAM roles are scoped per service",
-        "affected_components": ["api-service"],
+        "affected_components": [
+          "api-service"
+        ],
         "remediation": "",
         "remediation_effort": "",
         "priority": 0

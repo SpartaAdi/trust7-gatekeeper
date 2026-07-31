@@ -80,8 +80,50 @@ def test_immediate_needs_both_cheap_and_high_severity() -> None:
 
 
 def test_absent_effort_is_never_treated_as_low() -> None:
-    assert roadmap.phase_for(finding(remediation_effort="", severity="medium")) == "short_term"
-    assert roadmap.phase_for(finding(remediation_effort="", severity="low")) == "short_term"
+    """The intent this test always had, now enforced properly.
+
+    It used to assert blank effort landed in `short_term`, which honoured the name
+    only narrowly: `short_term` is not "low", but its blurb still claims the fix is
+    "a component or flow change" — an amount of work, asserted from data that
+    contains none. Blank effort now lands in `unspecified`, which claims nothing.
+    """
+    for severity in ("high", "medium", "low"):
+        phase = roadmap.phase_for(finding(remediation_effort="", severity=severity))
+        assert phase == "unspecified", severity
+
+    # The stronger property: no bucket that asserts an amount of work.
+    asserts_effort = {"immediate", "short_term", "structural"}
+    for severity in ("high", "medium", "low"):
+        assert (
+            roadmap.phase_for(finding(remediation_effort="", severity=severity))
+            not in asserts_effort
+        )
+
+
+def test_absent_effort_is_still_overridden_by_blast_radius() -> None:
+    """Component count is MEASURED, not estimated, so it still decides.
+
+    This is the one thing `unspecified` must not swallow: a fix spanning two or more
+    components is structural whatever the estimate says, and saying "not estimated"
+    there would discard a real signal.
+    """
+    assert roadmap.phase_for(
+        finding(remediation_effort="", severity="low",
+                affected_components=["api", "db"])
+    ) == "structural"
+
+
+def test_a_real_estimate_still_reaches_its_phase() -> None:
+    """`unspecified` must not become a dumping ground that swallows real values."""
+    assert roadmap.phase_for(
+        finding(remediation_effort="low", severity="high")
+    ) == "immediate"
+    assert roadmap.phase_for(
+        finding(remediation_effort="medium", severity="medium")
+    ) == "short_term"
+    assert roadmap.phase_for(
+        finding(remediation_effort="high", severity="low")
+    ) == "structural"
 
 
 def test_pillar_does_not_move_a_finding() -> None:

@@ -1641,15 +1641,41 @@ describe('ResultsView — following up on a completed review', () => {
     expect(screen.queryByTestId('version-banner')).toBeNull()
   })
 
-  it('keeps the separate re-analyze action, renamed so the two do not read alike', async () => {
+  it('keeps the separate re-analyze action, labelled so the two do not read alike', async () => {
     const user = userEvent.setup()
     const props = mount(resultFixture())
 
     await screen.findByTestId('feedback-box')
     await user.click(
-      screen.getByRole('button', { name: /Score a different design against this one/i }),
+      screen.getByRole('button', { name: /Upload a different design and compare/i }),
     )
+    // The re-analyze flow: routes back to the upload step for a fresh file. It must
+    // NOT post to the follow-up endpoint.
     expect(props.onReReview).toHaveBeenCalled()
     expect(reReview).not.toHaveBeenCalled()
+  })
+
+  it('names the input in each label, which is what tells the two apart', async () => {
+    // Both operations re-review something. The distinguishing fact is what they take:
+    // one a file, the other a sentence. Labels that only said "re-review" left the
+    // reader to guess, and the old footer label described the feedback box at least
+    // as well as it described the footer button.
+    mount(resultFixture())
+    await screen.findByTestId('feedback-box')
+
+    const upload = screen.getByRole('button', { name: /Upload a different design and compare/i })
+    const feedback = screen.getByRole('button', { name: /Re-review with this feedback/i })
+
+    expect(upload).toBeInTheDocument()
+    expect(feedback).toBeInTheDocument()
+    // Neither label is a substring of the other, so no query can match both.
+    expect(upload.textContent).not.toBe(feedback.textContent)
+    // And the ambiguous original is gone from the page entirely.
+    expect(screen.queryByRole('button', { name: /Re-review a revised design/i })).toBeNull()
+    // The hover text spells out which is which, for anyone who still wonders.
+    expect(upload).toHaveAttribute(
+      'title',
+      expect.stringContaining('use the follow-up box at the top of the page'),
+    )
   })
 })

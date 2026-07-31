@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Finding } from '../types'
-import { FIX_IT_PREAMBLE, buildFixItPrompt } from './ResultsView'
+import { FIX_IT_GAP_NOTE, FIX_IT_PREAMBLE, buildFixItPrompt } from './ResultsView'
 import {
   MAX_FOCUS_ITEMS,
   flattenActions,
@@ -237,12 +237,72 @@ describe('buildFixItPrompt', () => {
     expect(buildFixItPrompt([finding({ remediation: exact })])).toContain(exact)
   })
 
-  it('falls back to the title exactly as the roadmap rows do', () => {
+  /**
+   * This test replaces one that asserted the OLD fallback: a bare `title`, emitted
+   * as if it were an instruction. That is the behaviour being fixed, so the old
+   * assertion could not survive the fix — flagged rather than quietly rewritten.
+   *
+   * Why it mattered: `title` is the rubric check's description. Pasted under "please
+   * revise the diagram to address each one", it reads as a specific instruction about
+   * this design while containing nothing specific to it. The prompt looked finished.
+   * This is the artefact most likely to leave the app, and a real run produced
+   * exactly it — 0 of 25 remediations, twice, and a copyable prompt that showed none
+   * of that.
+   */
+  it('marks a missing remediation instead of passing the title off as a fix', () => {
     const prompt = buildFixItPrompt([
-      finding({ remediation: '', title: 'No region constraint documented' }),
+      finding({
+        remediation: '',
+        title: 'No region constraint documented',
+        evidence: 'The document names no region and no residency requirement.',
+      }),
     ])
 
-    expect(prompt).toContain('1. No region constraint documented')
+    // The absence is stated, in the line itself.
+    expect(prompt).toContain('[NO REMEDIATION GUIDANCE]')
+    // The finding is still named — it is real output and still worth acting on.
+    expect(prompt).toContain('No region constraint documented')
+    // And the evidence travels with it: design-specific context the receiving tool
+    // can propose a fix from, which a bare rubric description is not.
+    expect(prompt).toContain(
+      'Evidence from the review: The document names no region and no residency requirement.',
+    )
+  })
+
+  it('tells the reader, once, that some items carry no guidance', () => {
+    const prompt = buildFixItPrompt([
+      finding({ check_id: 'a', remediation: 'A real fix.' }),
+      finding({ check_id: 'b', pillar_id: 'reliability', remediation: '', evidence: 'e' }),
+    ])
+
+    expect(prompt).toContain(FIX_IT_GAP_NOTE)
+    expect(prompt).toContain('treat them as gaps to solve rather than instructions')
+  })
+
+  it('adds no such note when every item has real guidance', () => {
+    // The note must not appear on a healthy prompt, or it stops meaning anything.
+    const prompt = buildFixItPrompt([
+      finding({ check_id: 'a', remediation: 'A real fix.' }),
+      finding({ check_id: 'b', pillar_id: 'reliability', remediation: 'Another.' }),
+    ])
+
+    expect(prompt).not.toContain(FIX_IT_GAP_NOTE)
+    expect(prompt).not.toContain('[NO REMEDIATION GUIDANCE]')
+  })
+
+  it('treats whitespace-only remediation as missing', () => {
+    const prompt = buildFixItPrompt([finding({ remediation: '   \n  ', evidence: 'e' })])
+    expect(prompt).toContain('[NO REMEDIATION GUIDANCE]')
+  })
+
+  it('says so plainly when there is no evidence to fall back on either', () => {
+    // Evidence is schema-required of the evaluate stage but the UI already treats it
+    // as possibly empty, so the fallback needs its own fallback — and it must not
+    // print a dangling "Evidence from the review:" with nothing after it.
+    const prompt = buildFixItPrompt([finding({ remediation: '', evidence: '' })])
+
+    expect(prompt).toContain('recorded no evidence for this finding either')
+    expect(prompt).not.toContain('Evidence from the review:')
   })
 
   /**
