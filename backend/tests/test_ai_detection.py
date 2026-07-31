@@ -482,6 +482,67 @@ def test_a_denial_in_prose_cannot_silence_a_component_in_the_diagram() -> None:
     assert detection.verdict == "contradicted"
 
 
+@pytest.mark.parametrize(
+    "denial",
+    [
+        # The exact sentence from Design B that this fix exists for.
+        "It does not utilize any foundation models, neural networks, or generative "
+        "capabilities.",
+        "The service does not use any neural networks.",
+        "This platform has no generative capabilities.",
+        "No foundation model is involved.",
+        "Built without any large language models.",
+        "Deep learning is not in scope.",
+        "The system does not leverage LLMs.",
+    ],
+)
+def test_a_denial_naming_something_other_than_ai_or_ml_is_still_a_denial(
+    denial: str,
+) -> None:
+    """Found on the tester's real Design B, and the worst shape of this bug.
+
+    The denial nouns were only "ai", "ml" and "machine learning", and the verbs only
+    use/using/include/contain. So "does not UTILIZE any FOUNDATION MODELS" matched
+    nothing, formed no denied span, and `_denied_spans` could not suppress the
+    positive matches inside it — "foundation model" and "neural network" were counted
+    as EVIDENCE OF AI, read out of the sentence saying there is none.
+
+    A design that stated its position as plainly as it could was the one the detector
+    got wrong, and it reported `present` on a document titled "Traditional_No AI".
+    """
+    detection = ai_detection.detect(graph("Checkout API"), denial)
+    assert detection.verdict == "denied", [
+        (s.tier, s.signal) for s in detection.signals
+    ]
+    assert [s.tier for s in detection.signals] == ["denial"], (
+        "the denied sentence must not also supply positive evidence"
+    )
+
+
+@pytest.mark.parametrize(
+    "gap",
+    [
+        "No neural network monitoring is in place.",
+        "No foundation model versioning is described.",
+        "No LLM oversight process exists.",
+        "No machine learning audit trail is kept.",
+        "No AI governance policy is defined.",
+    ],
+)
+def test_the_wider_noun_list_does_not_turn_a_governance_gap_into_a_denial(
+    gap: str,
+) -> None:
+    """The risk the widening creates, guarded in the same commit.
+
+    "No neural network monitoring" says a neural network EXISTS and is unmonitored.
+    Reading it as "this design has no AI" would suppress every real signal in the
+    sentence — the same trap a bare `no model` fell into, one noun further out.
+    """
+    detection = ai_detection.detect(graph("Bedrock summariser"), gap)
+    assert not [s for s in detection.signals if s.tier == "denial"], gap
+    assert detection.verdict == "present"
+
+
 def test_signals_are_ordered_strongest_first() -> None:
     """So the record reads as an argument: what proves it, then what suggests it."""
     detection = ai_detection.detect(

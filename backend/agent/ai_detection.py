@@ -212,11 +212,48 @@ _IMPLICIT_FUNCTION: tuple[tuple[str, str], ...] = (
 # So "model" only denies when the sentence is about its EXISTENCE ("no model is
 # used", "no model component"), and the negative lookahead on the first pattern keeps
 # "no AI governance" — a gap — out of the denial tier for the same reason.
+# What a design can be denying when it says it has none of it.
+#
+# One shared alternation rather than the same list repeated in six regexes: it was
+# repeated, and a real SoW slipped through the gap that created. Design B says
+#
+#     "It does not utilize any foundation models, neural networks, or generative
+#      capabilities."
+#
+# and every denial pattern missed it, because the noun list only knew "ai", "ml"
+# and "machine learning". So the sentence formed no denied span, and `_denied_spans`
+# could not suppress the positive matches inside it — the words "foundation model"
+# and "neural network" were then counted as EVIDENCE OF AI, drawn from the sentence
+# saying there is none. A design that stated its position as plainly as possible was
+# the one the detector got wrong.
+#
+# `model` on its own is still absent, and must stay absent: "No model registry is
+# described" says a model EXISTS and is ungoverned, which is the opposite of a
+# denial. Only phrases that pin the sense — "foundation model", "ml model" — are
+# here. See the note above `_DENIAL`.
+_DENIED_NOUN = (
+    r"(?:a\.?i\.?|ml|artificial\s+intelligence|machine[-\s]learning|"
+    r"foundation\s+models?|neural\s+networks?|generative\s+(?:ai|capabilit(?:y|ies))|"
+    r"deep\s+learning|l\.?l\.?ms?|large\s+language\s+models?|ml\s+models?)"
+)
+
+# Verbs a denial is built on. "utilize" was the other half of the same miss — the
+# list held use/using/include/contain, so "does not UTILIZE any foundation models"
+# failed on the verb as well as on the noun. Widening one without the other would
+# have left the reported sentence still unmatched.
+_DENIED_VERB = r"(?:use|using|utilis|utiliz|employ|leverag|includ|contain|involv|require)"
+
+# Nouns that turn "no <AI thing> X" into a GAP statement rather than a denial.
+# "No AI governance" means the AI is ungoverned, not that it is absent.
+_GOVERNANCE_NOUN = (
+    r"(?:governance|registry|monitoring|oversight|review|policy|inventory|"
+    r"versioning|audit|owner|documentation|card|drift|strategy|roadmap)"
+)
+
 _DENIAL: tuple[tuple[str, str], ...] = (
     (
-        r"\bno\s+(ai|ml|artificial\s+intelligence|machine[-\s]learning)\b"
-        r"(?!\s+(models?\s+)?(governance|registry|monitoring|oversight|review|"
-        r"policy|inventory|versioning|audit|owner|documentation|card|drift))",
+        rf"\bno\s+{_DENIED_NOUN}\b"
+        rf"(?!\s+(?:models?\s+)?{_GOVERNANCE_NOUN})",
         "states no AI/ML",
     ),
     # The comma-list form a real SoW uses: "No model, AI or machine-learning
@@ -225,11 +262,11 @@ _DENIAL: tuple[tuple[str, str], ...] = (
      "states no AI/ML component"),
     (r"\bno\s+models?\s+(is|are)\s+(used|present|involved|deployed)\b",
      "states no model is used"),
-    (r"\bnot?\s+(use|using|include|contain)\w*\s+(any\s+)?(ai|ml|machine\s+learning)\b",
+    (rf"\bnot?\s+{_DENIED_VERB}\w*\s+(?:any\s+)?{_DENIED_NOUN}\b",
      "states AI/ML not used"),
-    (r"\b(ai|ml|machine\s+learning)\s+(is\s+)?not\s+(used|present|involved|in\s+scope)\b",
+    (rf"\b{_DENIED_NOUN}\s+(?:is|are)?\s*not\s+(used|present|involved|in\s+scope)\b",
      "states AI/ML not used"),
-    (r"\bwithout\s+(ai|ml|machine\s+learning)\b", "states built without AI/ML"),
+    (rf"\bwithout\s+(?:any\s+)?{_DENIED_NOUN}\b", "states built without AI/ML"),
 )
 
 _TIERS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
