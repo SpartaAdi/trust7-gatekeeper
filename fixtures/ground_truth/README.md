@@ -16,7 +16,7 @@ each:
 | design | id | shape | why it is in the set |
 |---|---|---|---|
 | `DESIGN A_AI_Bearing.md` | `design_a_techassist_rag_portal` | AI-bearing — an internal RAG portal | Every TRUST-7 check applies (0 `not_applicable`), so precision and recall have something to separate. |
-| `DESIGN B_Traditional_No AI.md` | `design_b_checkout_payments_api` | traditional, no AI anywhere | 19 checks `not_applicable`, and **all seven** TRUST-7 pillars WHOLLY inapplicable. The N/A-denominator case, end to end. |
+| `DESIGN B_Traditional_No AI.md` | `design_b_checkout_payments_api` | traditional, no AI anywhere | 18 checks `not_applicable`, and **six of seven** TRUST-7 pillars WHOLLY inapplicable. The N/A-denominator case, end to end. |
 
 The pair matters more than either file. A set of only weak designs lets an
 always-`fail` evaluator score well; a set with no N/A-heavy design cannot tell a
@@ -143,15 +143,19 @@ unmentioned.** "This system has no AI component" makes `tf_hallucination_control
 inapplicable. "This system does not discuss encryption" does not make
 `sec_encryption_at_rest` inapplicable — it makes it `fail`. Several TRUST-7 checks
 read as AI-specific but are not, and `ss_data_residency` is the one that catches
-people: on this reading it applies to any design holding regulated data, whether or
-not the design has AI in it.
+people: it applies to any design holding regulated data, whether or not the design
+has AI in it.
 
-Worth flagging rather than quietly reconciling: the real Design B labels
-`ss_data_residency` `not_applicable`, which is what makes all seven of its TRUST-7
-pillars wholly inapplicable. That is the tester's call and is left exactly as
-labelled — but it disagrees with the guidance in the paragraph above, so one of the
-two should change. The synthetic `expense-portal` stub takes the other reading and
-labels it `fail`.
+Design B is the worked example. It was first labelled `not_applicable` on the
+grounds that the platform uses no foundation models — the reason that applies to
+its eighteen genuinely AI-specific neighbours, but not to this check. It was
+corrected to `fail` by the tester: the document never mentions residency, region
+pinning or localisation at all, and describes only a global platform with
+latency-based routing through Route 53. Silence is a `fail`, not an N/A.
+
+That correction is why six of Design B's seven TRUST-7 pillars are wholly
+inapplicable rather than all seven. `sovereignty_supply_chain` keeps one live
+check.
 
 ## Generated reports
 

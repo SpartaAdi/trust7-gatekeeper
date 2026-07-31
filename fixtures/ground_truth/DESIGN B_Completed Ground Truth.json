@@ -337,8 +337,8 @@
       "framework": "TRUST-7",
       "pillar": "Sovereignty and supply chain",
       "description": "Data residency/location constraints are explicit and enforced by design, not left implicit.",
-      "status": "not_applicable",
-      "why": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+      "status": "fail",
+      "why": "No mention of data residency, region pinning, or data localization constraints anywhere in the document — the platform is described only as a global system with latency-based routing via Amazon Route 53.",
       "labeler": "Human Tester",
       "date": "2026-07-31"
     },

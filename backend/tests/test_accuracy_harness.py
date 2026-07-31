@@ -347,8 +347,11 @@ def test_the_two_shipped_designs_sit_at_opposite_ends_of_the_n_a_axis() -> None:
 
     # And the non-AI design must render at least one WHOLE pillar inapplicable —
     # the case backend/tests/test_scoring.py pins arithmetically. The real Design B
-    # renders all seven of TRUST-7's, which is a stronger fixture than the synthetic
-    # pair it replaced.
+    # renders six of TRUST-7's seven, which is a stronger fixture than the synthetic
+    # pair it replaced. Not all seven: `ss_data_residency` is labelled `fail`,
+    # because a design that never mentions residency has failed that check rather
+    # than escaped it — the one TRUST-7 check in that pillar that is not
+    # AI-specific.
     labels = designs["design_b_checkout_payments_api"]["labels"]
     wholly_na = [
         pillar.pillar_id
