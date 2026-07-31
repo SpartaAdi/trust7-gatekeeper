@@ -497,6 +497,48 @@ class AiDetection(BaseModel):
         }
 
 
+class RemediationGap(BaseModel):
+    """Open findings the remediate stage produced no guidance for.
+
+    Derived from the stored findings rather than recorded by the stage, so it cannot
+    drift from what is actually on the page and so a review stored before this
+    existed reports correctly without a migration.
+
+    It exists because of a real run: remediate returned 0 of 25 open findings, the
+    retry returned 0 of 25 again, and the review was written, stored and served as a
+    normal completed review. Server-side there were two log lines. Client-side there
+    was nothing — every roadmap row read "No remediation text was generated for this
+    check.", and the only page-level status was the data-fidelity panel saying the
+    diagram had been read at 100%, which reads as reassurance.
+
+    Deliberately a COUNT of what is missing, and no rate. "22 of 28 actions have
+    guidance" invites reading 79% as a quality figure for the six that do not.
+    """
+
+    open_findings: int = Field(description="Findings with status fail or partial.")
+    without_guidance: int = Field(
+        description="Of those, how many carry no remediation text."
+    )
+    check_ids: list[str] = Field(
+        default_factory=list,
+        description="Which ones, so the gap is checkable rather than a number.",
+    )
+
+    @property
+    def any_missing(self) -> bool:
+        return self.without_guidance > 0
+
+    @property
+    def total(self) -> bool:
+        """Every open finding, not some. A different failure with a different cause.
+
+        A partial shortfall is a model running out of steam on a long list. Zero of
+        everything — twice, since the stage retries — is either a provider dip or a
+        systematic mismatch, and it means the roadmap has no content at all.
+        """
+        return self.open_findings > 0 and self.without_guidance == self.open_findings
+
+
 class NormalizedDesign(BaseModel):
     """Everything the agent pipeline needs, from whichever inputs were supplied."""
 
@@ -729,6 +771,24 @@ class ReviewResult(BaseModel):
     # correctly as "no detection was run", not as "no AI was found" — the two are
     # told apart by `patterns_checked`, which is why it is part of the record.
     ai_detection: AiDetection = Field(default_factory=AiDetection)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def remediation_gap(self) -> RemediationGap:
+        """Open findings left with no remediation text. See `RemediationGap`.
+
+        Computed from `findings`, not stored: the roadmap and the findings list read
+        the same field this counts, so the count cannot disagree with the page. It
+        also means every review already on disk reports its real state without being
+        rewritten.
+        """
+        open_findings = [f for f in self.findings if f.status in ("fail", "partial")]
+        missing = [f.check_id for f in open_findings if not f.remediation.strip()]
+        return RemediationGap(
+            open_findings=len(open_findings),
+            without_guidance=len(missing),
+            check_ids=sorted(missing),
+        )
 
     # ----------------------------------------------------------------------- #
     # The design this review was scored against, retained so a follow-up

@@ -983,7 +983,7 @@ def remediate(
     )
 
     wanted = {f.check_id for f in open_findings}
-    text, effort = _collect_remediations(payload, wanted)
+    text, effort, discarded = _collect_remediations(payload, wanted)
 
     # The same shortfall the prioritize stage already had to defend against: a real
     # run there returned 19 entries for 31 open findings. Nothing here noticed the
@@ -1005,6 +1005,7 @@ def remediate(
             "missing %d: %s",
             len(text), len(wanted), len(missing), ", ".join(missing),
         )
+        _log_shortfall("remediate", payload, wanted, discarded)
         retry_payload, retry_usage = llm.complete_json(
             system=[{"type": "text", "text": _REMEDIATE_RETRY_SYSTEM}],
             content=[
@@ -1023,7 +1024,13 @@ def remediate(
             max_tokens=32000,
             label="remediate-missing",
         )
-        retry_text, retry_effort = _collect_remediations(retry_payload, set(missing))
+        retry_text, retry_effort, retry_discarded = _collect_remediations(
+            retry_payload, set(missing)
+        )
+        if not retry_text:
+            _log_shortfall(
+                "remediate-missing", retry_payload, set(missing), retry_discarded
+            )
         text.update(retry_text)
         effort.update(retry_effort)
         usage = _add_usage(usage, retry_usage)
@@ -1037,6 +1044,25 @@ def remediate(
                 "remediate still missing %d of %d after retry: %s",
                 len(still_missing), len(wanted), ", ".join(still_missing),
             )
+            if len(still_missing) == len(wanted):
+                # TOTAL failure, not a shortfall. Called out separately because the
+                # two have different causes and different fixes: a partial answer
+                # is a model running out of steam, whereas zero-of-everything twice
+                # over is either a provider dip or a systematic mismatch between
+                # what the model returns and what `_collect_remediations` accepts.
+                #
+                # Also worth knowing when reading the two payloads above: on a total
+                # failure the retry is not the smaller ask its design assumes. With
+                # nothing collected, `missing` is every open finding, so the retry
+                # re-asks the same question at the same effort and the same
+                # max_tokens, with LESS context than the call that just failed.
+                log.error(
+                    "remediate produced NO guidance at all for review of %d open "
+                    "findings, across both the first call and the retry. Every "
+                    "action in the roadmap will render as 'No remediation text was "
+                    "generated for this check.'",
+                    len(wanted),
+                )
 
     notes, grounding = _use_case_notes(payload, context)
     return (
@@ -1126,7 +1152,7 @@ def _use_case_notes(
 
 def _collect_remediations(
     payload: dict[str, Any], wanted: set[str]
-) -> tuple[dict[str, str], dict[str, str]]:
+) -> tuple[dict[str, str], dict[str, str], list[str]]:
     """Read the remediation entries, keeping only those naming a real open finding.
 
     An entry for a check that is not open — a passing check, or a check_id the
@@ -1134,16 +1160,88 @@ def _collect_remediations(
     drops unrecognised check_ids and how `apply_ranking` refuses ranks for checks
     that are not open. An entry with no remediation text is treated as absent, so
     an empty string from the model is retried rather than stored as an answer.
+
+    Also returns WHY each discarded entry was discarded, which is the third return
+    value and the reason this signature changed.
+
+    A real run returned 0 of 25 open findings, retried, and returned 0 of 25 again.
+    Nothing recorded what came back, and the two candidate explanations call for
+    opposite fixes:
+
+    * the array was genuinely empty — a provider quality dip, the same schema-valid
+      empty envelope `classify` already defends against, where the answer is a
+      different retry strategy;
+    * entries came back but every `check_id` failed this membership test — for
+      instance carrying the `[brackets]` that `_render_findings` prints them
+      inside — in which case the retry was never going to help, because the model
+      answered correctly both times and this function silently dropped both
+      answers.
+
+    A count alone cannot tell those apart, so the discard reasons are returned and
+    logged by the caller. Nothing about the filtering itself changed.
     """
     text: dict[str, str] = {}
     effort: dict[str, str] = {}
+    discarded: list[str] = []
     for item in payload.get("remediations", []):
         check_id = item.get("check_id", "")
         remediation = (item.get("remediation") or "").strip()
         if check_id in wanted and remediation:
             text[check_id] = remediation
             effort[check_id] = item.get("effort", "")
-    return text, effort
+        elif not remediation:
+            discarded.append(f"{check_id!r}: empty remediation text")
+        else:
+            discarded.append(f"{check_id!r}: not an open finding we asked about")
+    return text, effort, discarded
+
+
+def _log_shortfall(
+    which: str,
+    payload: dict[str, Any],
+    wanted: set[str],
+    discarded: list[str],
+) -> None:
+    """Record what a remediate call actually returned when it fell short.
+
+    Exists because a real run went 0-of-25, retried, and went 0-of-25 again, and
+    afterwards there was no way to tell WHY. `ROUTE_LOG` keeps metadata only —
+    label, provider, finish_reason, output_tokens — and no stage payload is
+    persisted, so the response itself was recoverable nowhere. The same gap was
+    already closed for `classify`, which logs its raw payload for exactly this
+    reason; remediate logged counts alone.
+
+    The discriminator is `entries_returned` against `collected`:
+
+    * `entries_returned: 0` — the model returned an empty array. A provider quality
+      dip, and the retry strategy is what wants changing.
+    * `entries_returned: N, collected: 0` — the model answered and every entry was
+      DISCARDED. Then the retry was never going to help, because there was nothing
+      wrong with the answer; the discard reasons below say what the mismatch was,
+      and the fix is here rather than in the retry.
+
+    `output_tokens` from the route log separates both from a model that barely
+    generated anything. Truncation and stream errors are NOT candidates: those raise
+    in `llm.py` and are retried there, so a response that reaches this point
+    completed normally.
+
+    The payload is truncated at 2000 characters. It is model output derived from
+    submitted material, so it is written at ERROR to the server log only and never
+    surfaced — the same treatment classify's payload gets.
+    """
+    entries = payload.get("remediations")
+    returned = len(entries) if isinstance(entries, list) else -1
+    log.error(
+        "%s shortfall: asked for %d, entries_returned=%s, collected=%d, "
+        "discarded=%d%s. Raw payload: %s",
+        which,
+        len(wanted),
+        returned if returned >= 0 else "not-a-list",
+        max(0, returned) - len(discarded),
+        len(discarded),
+        (" — " + "; ".join(discarded[:10])) if discarded else "",
+        json.dumps(payload)[:2000],
+    )
 
 
 def _add_usage(first: dict[str, int], second: dict[str, int]) -> dict[str, int]:

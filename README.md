@@ -216,6 +216,76 @@ drops unlabelled ones — a real diagram is full of arrows, containers and decor
 carrying no reviewable meaning — so measuring against every `vertex="1"` would warn
 on every well-drawn diagram in existence.
 
+## When remediation comes back empty
+
+The remediate stage asks for one entry per open finding and retries once for any it
+misses. In a real accuracy-harness run — once in six — it returned **0 of 25**, the
+retry returned **0 of 25** again, and the review was stored and served looking
+completely normal. Two things were wrong with that, and they are separate.
+
+### It could not be diagnosed afterwards
+
+`ROUTE_LOG` keeps metadata only — label, provider, `finish_reason`, `output_tokens`
+— and no stage payload is persisted, so there was no way to tell apart:
+
+* the model returned an **empty array** — a provider quality dip, the same
+  schema-valid empty envelope `classify` already defends against; or
+* the model **answered** and `_collect_remediations` discarded every entry, because
+  each `check_id` failed its exact-match membership test.
+
+Those have opposite fixes, so both remediate calls now log the raw payload
+(truncated, server-side only, as classify's does) with the discriminator up front:
+
+```
+remediate shortfall: asked for 28, entries_returned=0, collected=0, discarded=0.
+  Raw payload: {"executive_summary": "…", "remediations": [], "use_case_notes": []}
+```
+
+`entries_returned=0` is a dip. `entries_returned=25, collected=0` means the answer
+was thrown away, the discard reasons say why, and the retry was never the problem.
+
+**Not a token-budget failure either way.** Truncation and provider stream errors
+raise in `llm.py` and are retried there, so a response that reaches
+`_collect_remediations` completed normally.
+
+### The retry degenerates when the first call returns nothing
+
+Its premise is "ask ONLY for what is missing… a fraction of the tokens". With zero
+collected, `missing` is *every* open finding, so it re-asks the same question at the
+same effort and the same `max_tokens`, immediately, with **less** context than the
+call that just failed — no scoreboard, no submitter context, no reviewer feedback.
+Designed for the partial case; strictly weaker than the original call in the total
+case. `test_remediation_gap.py` pins this rather than fixing it — the root cause is
+not established, and changing a retry that may not be the problem would just make
+the next occurrence harder to read.
+
+### What the user sees
+
+Before: nothing. Every roadmap row read "No remediation text was generated for this
+check." — honest per row, but a reader had to notice the same sentence sixteen times
+and infer a systemic failure, and a reader who did not scroll never learned at all.
+The only page-level status was the data-fidelity panel reporting the diagram had
+been read at 100%, which reads as reassurance.
+
+Now `ReviewResult.remediation_gap` counts open findings with no guidance and the
+results page says it once, at the top, at `caution` tone. It is **computed** from
+`findings` rather than stored, so it cannot drift from the rows it describes and
+every review already on disk reports its real state without a migration.
+
+The panel also names two consequences that are otherwise silent and both mislead
+towards looking complete:
+
+* **"Copy fix-it prompt"** falls back to the finding *title* when there is no
+  remediation, producing a prompt that looks finished and carries no guidance — and
+  that is the artefact most likely to leave the app.
+* **The roadmap's phases** come from `remediation_effort`, blank whenever the text
+  is. Its documented fallback files a blank-effort high-severity finding as
+  Immediate — right when one entry is missing, misleading when all are, because
+  "Immediate" then reflects an absent estimate rather than a cheap fix.
+
+A count, never a rate: "22 of 28 actions have guidance" invites reading 79% as a
+quality figure for the six that do not.
+
 ## Data fidelity — three numbers, never one
 
 How much of the design actually reached the review. Three measurements, reported

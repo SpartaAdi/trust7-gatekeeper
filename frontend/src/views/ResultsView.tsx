@@ -6,6 +6,7 @@ import { ChangeBadge } from '../components/ChangeBadge'
 import { DataFidelity } from '../components/DataFidelity'
 import { FeedbackBox } from '../components/FeedbackBox'
 import { IngestWarnings } from '../components/IngestWarnings'
+import { RemediationGapPanel } from '../components/RemediationGapPanel'
 import { SeverityMark } from '../components/SeverityMark'
 import { StructuredText } from '../components/StructuredText'
 import { VersionBanner } from '../components/VersionBanner'
@@ -219,6 +220,15 @@ export function ResultsView({
         )}
         className="mt-3"
       />
+
+      {/*
+        Part of the deliverable that did not get produced, said once at the top.
+        Below the fidelity numbers because those describe how well the design was
+        READ, and this describes what was WRITTEN about it — but above the executive
+        summary, because a reader who never scrolls to the roadmap would otherwise
+        never learn that the roadmap is empty.
+      */}
+      <RemediationGapPanel gap={result.remediation_gap} className="mt-3" />
 
       {result.delta && <DeltaSummary delta={result.delta} />}
 

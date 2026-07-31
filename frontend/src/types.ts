@@ -295,6 +295,13 @@ export interface ReviewResult {
   based_on_review_id?: string
   /** The reviewer's own words that produced this version. '' on an original. */
   feedback?: string
+
+  /**
+   * Open findings with no remediation text. Computed server-side, so it is present
+   * on every review including ones stored before it existed. Optional only because
+   * a hand-built fixture may omit it.
+   */
+  remediation_gap?: RemediationGap
   delta: ScoreDelta | null
   token_usage: Record<string, number>
 }
@@ -374,6 +381,27 @@ export interface UploadTicket {
   key: string
   filename: string
   size_bytes: number
+}
+
+/**
+ * Open findings the remediate stage produced no guidance for. Mirrors
+ * `RemediationGap` in backend/schema.py, and computed there from the same findings
+ * the roadmap renders — so the count cannot disagree with the page.
+ *
+ * A COUNT of what is missing, never a rate: "22 of 28 have guidance" invites
+ * reading 79% as a quality figure for the six that do not.
+ */
+export interface RemediationGap {
+  open_findings: number
+  without_guidance: number
+  check_ids: string[]
+}
+
+/** Every open finding, not some — a different failure with a different cause. */
+export function remediationTotallyMissing(gap?: RemediationGap): boolean {
+  return (
+    !!gap && gap.open_findings > 0 && gap.without_guidance === gap.open_findings
+  )
 }
 
 export interface ReviewAccepted {
