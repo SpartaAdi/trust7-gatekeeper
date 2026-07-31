@@ -586,6 +586,19 @@ def _to_findings(raw_findings: list[dict[str, Any]], framework_key: str) -> list
 
 
 def _render_classification(classification: dict[str, Any]) -> str:
+    """Render the classify stage's inventory for the evaluate prompt.
+
+    This is the SECOND description of the design evaluate receives. The first is
+    `design.as_prompt_context()`, the deterministic one, and `evaluate` passes both —
+    so a re-narrated component list is never the only thing evaluate sees, and the
+    parsed connection labels reach it verbatim. `test_evaluate_prompt.py` pins that.
+
+    Which makes the `service` field below matter more than it looks. Dropping it left
+    the two blocks disagreeing about the same component: the deterministic one said
+    `service=augmented ai` and this one said `kind=unknown provider=aws` and stopped,
+    on a component whose service was the only machine-resolved signal it had. Two
+    descriptions of one component, the lower one strictly weaker, is worse than one.
+    """
     lines = [classification.get("design_summary", "")]
     for component in classification.get("components", []):
         attrs = ", ".join(
@@ -593,6 +606,10 @@ def _render_classification(classification: dict[str, Any]) -> str:
         )
         line = f"- {component.get('label')} [id={component.get('id')}] " \
                f"kind={component.get('kind')} provider={component.get('provider')}"
+        # Only when the classifier actually resolved one. An empty `service=` would
+        # read as "no service", which is a different claim from "not identified".
+        if service := (component.get("service") or "").strip():
+            line += f" service={service}"
         if attrs:
             line += f" ({attrs})"
         lines.append(line)
