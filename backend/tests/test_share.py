@@ -288,7 +288,9 @@ def test_an_unfinished_review_cannot_be_shared(app) -> None:
     client, review_id = app
     import storage
 
-    upload = client.post(
+    # The POST is the point — it stages the upload this test needs. Its response was
+    # bound to a name nothing read (ruff F841); the call stays, the binding goes.
+    client.post(
         "/uploads", files={"file": ("sow.md", b"# Design\n", "text/markdown")}
     )
     from schema import ReviewStatus

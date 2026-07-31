@@ -601,7 +601,6 @@ def test_raising_the_ceiling_did_not_change_what_evaluate_actually_requests(
 def test_evaluate_asks_for_more_output_than_the_other_stages() -> None:
     """Evaluate emits a finding per check with evidence, and truncated at 32000 in
     a real run. It should be the stage with the most headroom."""
-    from agent import stages
 
     evaluate_max = _stage_max_tokens("evaluate")
     assert evaluate_max == 64_000, evaluate_max

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import importlib
 import json
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient

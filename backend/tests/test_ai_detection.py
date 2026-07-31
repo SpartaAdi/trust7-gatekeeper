@@ -63,7 +63,6 @@ from agent import ai_detection
 from ingestion import drawio
 from schema import (
     AiDetection,
-    AiSignal,
     Component,
     DesignGraph,
     PillarScore,

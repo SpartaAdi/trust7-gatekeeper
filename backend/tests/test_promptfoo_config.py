@@ -424,7 +424,6 @@ def test_the_cache_key_covers_every_file_that_can_change_a_verdict() -> None:
 def test_the_summary_carries_what_every_assertion_needs() -> None:
     import json
 
-    from scripts import promptfoo_provider
 
     summary = json.loads(_summary(_all_checks("not_applicable")))
 

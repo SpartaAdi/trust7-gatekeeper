@@ -81,7 +81,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         ...init?.headers,
       },
     })
-  } catch (cause) {
+  } catch {
+    // The binding was unused (eslint no-unused-vars): the message is deliberately
+    // generic, because a fetch rejection here is always "the host is unreachable"
+    // and the underlying reason is not actionable for the reader.
     throw new ApiError(
       `Cannot reach the API at ${BASE_URL}. Is the backend running?`,
       0,
