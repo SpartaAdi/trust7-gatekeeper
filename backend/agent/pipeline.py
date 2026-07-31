@@ -18,7 +18,7 @@ import llm
 import rubric
 import scoring
 import storage
-from agent import stages
+from agent import ai_detection, stages
 from ingestion import normalize, relevance
 from schema import (
     DesignGraph,
@@ -280,6 +280,19 @@ def _run(
             )
         progress.finish("classify", detail)
 
+        # The AI/ML evidence record. Built here, straight after classify, because
+        # this is the first point all three of its inputs exist. Deterministic, no
+        # model call, and it changes nothing downstream: it is the audit trail behind
+        # a not-applicable pillar, not a gate on one. See schema.AiDetection.
+        detection = ai_detection.detect(
+            design.graph, design.document_text, classification
+        )
+        log.info(
+            "ai detection for %s: verdict=%s from %d signals across %d patterns",
+            review_id, detection.verdict, len(detection.signals),
+            detection.patterns_checked,
+        )
+
         # ---- evaluate ------------------------------------------------------- #
         stage = "evaluate"
         frameworks = [f.key for f in rubric.load()]
@@ -384,6 +397,9 @@ def _run(
             # Three separate numbers, carried as measured. Nothing between here and
             # the screen combines them — see the note on DataFidelity in schema.py.
             fidelity=design.fidelity,
+            # Why the AI-dependent checks were or were not applicable. Stored so the
+            # answer survives the run rather than living only in a log line.
+            ai_detection=detection,
             token_usage=_sum(usages),
         )
 
@@ -571,6 +587,15 @@ def _re_review(
             ):
                 progress.finish(skipped, detail)
 
+        # Recomputed for this version rather than copied from the base. On a
+        # feedback-only round the design is identical so the record is too, but on a
+        # round with a new attachment the design has been REPLACED — carrying the old
+        # record forward would attribute the previous upload's AI evidence to a
+        # design that may no longer contain it.
+        detection = ai_detection.detect(
+            design.graph, design.document_text, classification
+        )
+
         # ---- evaluate — ALWAYS, even on feedback alone ----------------------- #
         stage = "evaluate"
         frameworks = [f.key for f in rubric.load()]
@@ -659,6 +684,7 @@ def _re_review(
             classification=classification,
             use_case_notes=use_case_notes,
             fidelity=design.fidelity,
+            ai_detection=detection,
             token_usage=_sum(usages),
             # ---- the version linkage ---------------------------------------- #
             version=base.version + 1,

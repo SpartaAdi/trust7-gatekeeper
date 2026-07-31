@@ -569,7 +569,54 @@ def _scorecard(result: ReviewResult) -> list:
         story.append(table)
         story.append(Spacer(1, 4 * mm))
 
+    story.extend(_not_applicable_note(result, width))
     return story
+
+
+def _not_applicable_note(result: ReviewResult, width: float) -> list:
+    """Why a pillar reads "Not applicable to this design".
+
+    The STATUS column can only fit a conclusion, and a conclusion with no argument is
+    not auditable — which matters most here, because nineteen of the forty-five checks
+    turn on whether the design has an AI/ML component, so a wholly-skipped pillar is
+    one of the largest single influences on the score in this document.
+
+    So the reasoning goes underneath, once, with the component labels that were
+    searched. Nothing is recomputed: this prints the record the review already stores,
+    the same sentence the results page shows.
+
+    Absent entirely when every pillar was evaluated — there is nothing to explain.
+    """
+    skipped = [
+        pillar
+        for framework in result.frameworks
+        for pillar in framework.pillars
+        if pillar.checks_evaluated == 0
+    ]
+    if not skipped:
+        return []
+
+    detection = result.ai_detection
+    names = ", ".join(_t(pillar.pillar_name) for pillar in skipped)
+    body = (
+        f'<b>{names}</b> {"was" if len(skipped) == 1 else "were"} not evaluated. '
+        f"{_t(detection.rationale)}"
+    )
+
+    # The disagreement case: evidence of AI on a design whose AI pillar was skipped.
+    # Stated plainly rather than resolved, because nothing in the pipeline overrides a
+    # verdict on the strength of a keyword match.
+    if any(detection.disagrees_with_pillar(pillar) for pillar in skipped):
+        body += (
+            " <b>These two statements disagree.</b> The evidence above points to an "
+            "AI/ML component while the checks were scored as not applicable. Nothing "
+            "was changed automatically; both are reported so a reviewer can judge."
+        )
+
+    return [
+        _pastel_block(Paragraph(body, S["small"]), PASTEL_CREAM, width),
+        Spacer(1, 4 * mm),
+    ]
 
 
 def _findings(result: ReviewResult) -> list:

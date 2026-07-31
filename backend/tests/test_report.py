@@ -22,7 +22,14 @@ import report
 import roadmap
 import rubric
 import scoring
-from schema import Component, Finding, ReviewResult, ScoreDelta
+from agent import ai_detection
+from schema import (
+    AiDetection,
+    Component,
+    Finding,
+    ReviewResult,
+    ScoreDelta,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -702,3 +709,104 @@ def test_filename_never_contains_path_or_quote_characters(title: str) -> None:
     assert name.startswith("trust7-") and name.endswith(".pdf")
     for bad in ("/", "\\", "..", '"', ";", " "):
         assert bad not in name, f"{bad!r} survived in {name!r}"
+
+
+# --------------------------------------------------------------------------- #
+# Why a pillar was not evaluated
+#
+# The scorecard's STATUS column can only fit a conclusion — "Not applicable to this
+# design" — and a conclusion with no argument is not auditable. That matters most
+# here, because nineteen of the forty-five checks turn on whether the design has an
+# AI/ML component, so a wholly-skipped pillar is one of the largest single influences
+# on the number this document leads with. The PDF is also the artefact most likely to
+# be handed to a judge who cannot open the app.
+# --------------------------------------------------------------------------- #
+
+
+def flowing(pdf: bytes) -> str:
+    """Extracted text with whitespace collapsed.
+
+    `text_of` preserves the line breaks ReportLab wrapped the paragraph at, which
+    split every phrase this section asserts on. Collapsing them tests the sentence
+    that was written rather than where it happened to wrap.
+    """
+    return " ".join(text_of(pdf).split())
+
+
+def _skipping(pillar_id: str, findings: list[Finding]) -> list[Finding]:
+    """Mark every check in one pillar not_applicable, so its pillar is skipped."""
+    return [
+        f.model_copy(update={"status": "not_applicable"})
+        if f.pillar_id == pillar_id
+        else f
+        for f in findings
+    ]
+
+
+def test_a_skipped_pillar_states_why_and_what_was_searched() -> None:
+    findings = _skipping("trust_foundations", _findings())
+    review = _review(
+        findings=findings,
+        ai_detection=ai_detection.detect(
+            None,
+            "An expense portal. No model, AI or machine-learning component is used.",
+            {"components": [{"label": "Expense API", "kind": "compute"}]},
+        ),
+    )
+    body = flowing(report.build_pdf(review, None))
+
+    assert "Trust foundations" in body
+    assert "not evaluated" in body
+    assert "No AI/ML component detected" in body
+    # The argument, not just the verdict: how hard it looked and at what.
+    assert "AI/ML patterns were checked" in body
+    assert "Expense API" in body
+
+
+def test_the_disagreement_is_stated_and_not_resolved() -> None:
+    """Evidence of AI on a design whose AI pillar was scored not-applicable.
+
+    The PDF must say both things and say that neither was overridden — nothing in the
+    pipeline moves a verdict on the strength of a keyword match.
+    """
+    findings = _skipping("ai_governance", _findings())
+    review = _review(
+        findings=findings,
+        ai_detection=ai_detection.detect(
+            None,
+            "Documents are summarised by a hosted foundation model on Bedrock.",
+            None,
+        ),
+    )
+    body = flowing(report.build_pdf(review, None))
+
+    assert "AI/ML component detected" in body
+    assert "These two statements disagree" in body
+    assert "Nothing was changed automatically" in body
+
+
+def test_a_review_with_every_pillar_evaluated_gains_no_note() -> None:
+    """There is nothing to explain, so nothing is printed. A note on every report is
+    a note nobody reads."""
+    review = _review(ai_detection=ai_detection.detect(None, "Uses Bedrock.", None))
+    assert all(
+        pillar.checks_evaluated > 0
+        for framework in review.frameworks
+        for pillar in framework.pillars
+    )
+    body = flowing(report.build_pdf(review, None))
+    # A specific marker: the scorecard's own legend already says "A dashed cell was
+    # not evaluated", so the bare phrase cannot distinguish the note's presence.
+    assert "AI/ML component" not in body
+    assert "AI/ML patterns" not in body
+
+
+def test_an_older_review_says_detection_did_not_run_rather_than_no_ai() -> None:
+    """A review stored before the record existed must not acquire a finding about its
+    design that nothing ever established."""
+    findings = _skipping("trust_foundations", _findings())
+    review = _review(findings=findings, ai_detection=AiDetection())
+    body = flowing(report.build_pdf(review, None))
+
+    assert "did not run" in body
+    assert "No AI/ML component detected" not in body

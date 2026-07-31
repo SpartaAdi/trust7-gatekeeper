@@ -10,7 +10,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 # --------------------------------------------------------------------------- #
 # Design representation (the one common schema)
@@ -292,6 +292,211 @@ class DataFidelity(BaseModel):
         )
 
 
+# --------------------------------------------------------------------------- #
+# AI/ML detection — an audit record, not a gate
+#
+# Nineteen of the forty-five checks only mean anything if the design has an AI or
+# ML component. Whether they apply is decided by the evaluate stage's
+# `not_applicable` verdict, and this record exists so that decision can be
+# CHECKED rather than trusted: it says what was searched for, what matched, and
+# where, for every review.
+#
+# It changes NO verdict and NO score. `scoring.py` never reads it, and
+# `agent/ai_detection.py` explains why letting a keyword detector overrule a model
+# judgement would trade a fallible reading for a fallible regex rather than
+# improve anything. Where the record and the model disagree, that is surfaced for
+# a human — `disagrees_with_pillar` below — and acting on it is a person's job.
+# --------------------------------------------------------------------------- #
+
+AiSignalTier = Literal[
+    # A component some earlier stage already called `ai_model`. Not a text match —
+    # a conclusion the classify stage or the draw.io keyword map reached.
+    "classified_kind",
+    # A specific AI/ML product, service or model family: Bedrock, SageMaker, GPT-4.
+    "named_service",
+    # Generic but unambiguous ML vocabulary: "training data", "vector store",
+    # "fine-tuning", "inference".
+    "explicit_term",
+    # A business capability that is almost always ML-implemented and almost never
+    # says so: "recommendation engine", "propensity", "churn prediction". Suggestive
+    # only — such a thing genuinely can be hand-written rules.
+    "implicit_function",
+    # The design STATES it has no AI/ML. A claim, recorded as one, never believed on
+    # its own — see the note on `verdict`.
+    "denial",
+]
+
+
+class AiSignal(BaseModel):
+    """One piece of AI/ML evidence, and where it was found.
+
+    `source` and `excerpt` are the whole point. "An AI signal was detected" is not
+    auditable; "the phrase 'propensity model' appears in the solution document, in
+    this sentence" is something a reviewer can agree or disagree with.
+    """
+
+    tier: AiSignalTier
+    signal: str = Field(description="What was found, named for a human: 'Amazon "
+                        "Bedrock', 'training data/job', 'churn prediction'.")
+    source: str = Field(description="Where it was found — a named diagram "
+                        "component, a diagram edge, the solution document, or a "
+                        "specific field of the classify stage's output.")
+    excerpt: str = Field(description="The match with a little surrounding text, so "
+                         "the reader can judge whether it means what it looks like.")
+
+
+class AiDetection(BaseModel):
+    """The reproducible AI/ML evidence record for one design. No model call.
+
+    Deliberately stores only what was OBSERVED — the signals, how many patterns ran,
+    and the component labels that were searched. Every conclusion (`verdict`,
+    `rationale`, `disagrees_with_pillar`) is computed from those, so a stored record
+    cannot drift out of agreement with its own evidence the way a stored prose
+    summary would.
+    """
+
+    signals: list[AiSignal] = Field(default_factory=list)
+    patterns_checked: int = Field(
+        default=0,
+        description="How many patterns were run. Part of the audit trail: it "
+        "distinguishes 'searched thoroughly, found nothing' from 'barely looked'.",
+    )
+    components_seen: list[str] = Field(
+        default_factory=list,
+        description="Component labels the detector searched. This is the "
+        "'Components found: [...]' half of an auditable not-applicable — it lets a "
+        "reviewer overrule the record on sight instead of taking it on trust.",
+    )
+
+    def _tiers(self) -> set[str]:
+        return {signal.tier for signal in self.signals}
+
+    @property
+    def positive_signals(self) -> list[AiSignal]:
+        """Everything except denials.
+
+        A plain property, NOT a computed field: serializing it would repeat most of
+        `signals` in every stored review and every API response for a filter the
+        caller can apply in one line.
+        """
+        return [s for s in self.signals if s.tier != "denial"]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def verdict(
+        self,
+    ) -> Literal["present", "likely", "contradicted", "denied", "absent", "not_run"]:
+        """What the evidence supports. Computed, so it cannot contradict `signals`.
+
+        * `present` — a named service, unambiguous ML vocabulary, or a component
+          already classified `ai_model`.
+        * `likely` — only implicit capability signals. A "personalisation service"
+          almost certainly holds a model, but it genuinely might be rules, and the
+          record should not overstate what a phrase proves.
+        * `contradicted` — the design both denies AI and shows it. The most
+          interesting outcome and the one a reviewer most needs to see; it usually
+          means a document and a diagram were written at different times.
+        * `denied` — the design says it has no AI, and nothing contradicts that. Note
+          this is still weaker than `absent`: `absent` is silence, this is a claim,
+          and a claim inside submitted material is not evidence of itself.
+        * `absent` — patterns ran and nothing matched.
+        * `not_run` — no detection happened. A review stored before this record
+          existed, and NOT the same statement as `absent`: one says "we looked and
+          found nothing", the other says "nobody looked". Reporting the second as the
+          first would put a claim about the design in front of a reviewer that
+          nothing in the system ever established.
+        """
+        if not self.patterns_checked:
+            return "not_run"
+
+        tiers = self._tiers()
+        strong = tiers & {"classified_kind", "named_service", "explicit_term"}
+        weak = "implicit_function" in tiers
+        denied = "denial" in tiers
+
+        if denied and (strong or weak):
+            return "contradicted"
+        if strong:
+            return "present"
+        if weak:
+            return "likely"
+        if denied:
+            return "denied"
+        return "absent"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def rationale(self) -> str:
+        """One sentence a results page or a PDF can print verbatim.
+
+        Computed rather than stored for the same reason `verdict` is: prose written
+        at detection time and saved alongside the evidence is prose that can end up
+        describing evidence it no longer matches.
+        """
+        named = []
+        for signal in self.positive_signals:
+            if signal.signal not in named:
+                named.append(signal.signal)
+        listed = ", ".join(named[:6]) + ("…" if len(named) > 6 else "")
+
+        if self.verdict == "present":
+            return f"AI/ML component detected. Evidence: {listed}."
+        if self.verdict == "likely":
+            return (
+                f"AI/ML component likely but never labelled as one. Suggestive "
+                f"evidence: {listed}. A capability like this is usually "
+                f"model-backed, but could be implemented as rules."
+            )
+        if self.verdict == "contradicted":
+            return (
+                f"The design states it has no AI/ML, but AI/ML evidence was also "
+                f"found: {listed}. Document and diagram may disagree."
+            )
+        if self.verdict == "denied":
+            return (
+                f"No AI/ML component detected, and the design explicitly states it "
+                f"has none. {self._searched()}"
+            )
+        if self.verdict == "not_run":
+            return (
+                "AI/ML detection did not run for this review — it was stored before "
+                "the check existed. This is not a finding that the design has no "
+                "AI/ML component; re-run the review to establish that either way."
+            )
+        return f"No AI/ML component detected. {self._searched()}"
+
+    def _searched(self) -> str:
+        if not self.components_seen:
+            return f"{self.patterns_checked} AI/ML patterns checked; no components were extracted."
+        count = len(self.components_seen)
+        shown = ", ".join(self.components_seen[:12])
+        more = f" (+{count - 12} more)" if count > 12 else ""
+        return (
+            f"{self.patterns_checked} AI/ML patterns were checked against "
+            f"{count} {'component' if count == 1 else 'components'}: {shown}{more}."
+        )
+
+    def disagrees_with_pillar(self, pillar: PillarScore) -> bool:
+        """Whether this record contradicts a pillar being wholly not-applicable.
+
+        True when the evaluate stage skipped every check in a pillar while the
+        evidence says AI is present or likely. That is the case worth a reviewer's
+        eye, and it is reported rather than corrected: nothing here overrides the
+        verdicts, because a regex is not better placed than the model to decide the
+        check — only better placed to be argued with.
+
+        Symmetrically silent in the other direction. A pillar that WAS evaluated on
+        a design with no AI evidence is not flagged, because the AI-dependent checks
+        are spread across pillars that also contain non-AI ones, so "evaluated" does
+        not imply "the model thought there was AI here".
+        """
+        return pillar.checks_evaluated == 0 and self.verdict in {
+            "present",
+            "likely",
+            "contradicted",
+        }
+
+
 class NormalizedDesign(BaseModel):
     """Everything the agent pipeline needs, from whichever inputs were supplied."""
 
@@ -514,6 +719,16 @@ class ReviewResult(BaseModel):
     # written before this existed still load, with all three fields None — which
     # reads correctly as "not measured" rather than as zero coverage.
     fidelity: DataFidelity = Field(default_factory=DataFidelity)
+
+    # The AI/ML evidence record, so a not-applicable pillar can say why rather than
+    # just saying so. Audit only — it moves no verdict and no score; see the note
+    # above `AiDetection`.
+    #
+    # Defaults to an empty record, whose `verdict` is "absent" with
+    # `patterns_checked: 0`. On a review stored before this existed that reads
+    # correctly as "no detection was run", not as "no AI was found" — the two are
+    # told apart by `patterns_checked`, which is why it is part of the record.
+    ai_detection: AiDetection = Field(default_factory=AiDetection)
 
     # ----------------------------------------------------------------------- #
     # The design this review was scored against, retained so a follow-up

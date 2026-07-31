@@ -184,6 +184,75 @@ export interface DataFidelity {
 /** Mirrors `COVERAGE_REVIEW_THRESHOLD` in backend/schema.py. */
 export const COVERAGE_REVIEW_THRESHOLD = 95.0
 
+/**
+ * The AI/ML evidence record, mirroring `AiDetection` in backend/schema.py.
+ *
+ * Nineteen of the forty-five checks only mean anything if the design has an AI or
+ * ML component in it, and whether they apply is the evaluate stage's
+ * `not_applicable` judgement. This record is what makes that judgement checkable:
+ * what was searched for, what matched, and where.
+ *
+ * It moves NO verdict and NO score. Where it and the model disagree, the UI says so
+ * and a human decides — see `disagreesWithPillar`.
+ */
+export type AiSignalTier =
+  /** A component an earlier stage already called `ai_model`. */
+  | 'classified_kind'
+  /** A specific product or model family: Bedrock, SageMaker, GPT-4. */
+  | 'named_service'
+  /** Unambiguous ML vocabulary: 'training data', 'vector store', 'inference'. */
+  | 'explicit_term'
+  /** A capability usually but not necessarily model-backed: 'recommendation engine'. */
+  | 'implicit_function'
+  /** The design states it has no AI/ML. A claim, never believed on its own. */
+  | 'denial'
+
+export interface AiSignal {
+  tier: AiSignalTier
+  /** What was found, named for a human. */
+  signal: string
+  /** Where — a named component, a diagram edge, the document, a classify field. */
+  source: string
+  /** The match with surrounding text, so the reader can judge it. */
+  excerpt: string
+}
+
+/**
+ * `verdict` and `rationale` are computed server-side and arrive read-only, so the UI
+ * cannot describe the evidence differently from the backend or the PDF.
+ *
+ * `not_run` is deliberately distinct from `absent`: one means nobody looked (a review
+ * stored before this existed), the other means patterns ran and found nothing. Never
+ * render `not_run` as "no AI detected".
+ */
+export interface AiDetection {
+  signals: AiSignal[]
+  patterns_checked: number
+  components_seen: string[]
+  verdict: 'present' | 'likely' | 'contradicted' | 'denied' | 'absent' | 'not_run'
+  rationale: string
+}
+
+/**
+ * Mirrors `AiDetection.disagrees_with_pillar` in backend/schema.py.
+ *
+ * True when the evaluate stage skipped every check in a pillar while the evidence
+ * says AI is present or likely. Reported, never corrected — a keyword record is more
+ * auditable than the model, not more right.
+ */
+export function disagreesWithPillar(
+  detection: AiDetection | undefined,
+  pillar: PillarScore,
+): boolean {
+  if (!detection) return false
+  return (
+    pillar.checks_evaluated === 0 &&
+    (detection.verdict === 'present' ||
+      detection.verdict === 'likely' ||
+      detection.verdict === 'contradicted')
+  )
+}
+
 export interface ReviewResult {
   review_id: string
   created_at: string
@@ -203,6 +272,12 @@ export interface ReviewResult {
   warnings: IngestWarning[]
   /** The three fidelity numbers. Absent on reviews stored before they existed. */
   fidelity?: DataFidelity
+  /**
+   * Why the AI-dependent checks were or were not applicable. Optional because a
+   * review stored before this existed has none — and when it IS present but
+   * `verdict` is `not_run`, that means the same thing and must read that way.
+   */
+  ai_detection?: AiDetection
   delta: ScoreDelta | null
   token_usage: Record<string, number>
 }

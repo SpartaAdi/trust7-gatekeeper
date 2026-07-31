@@ -322,6 +322,102 @@ the backend predicate.
 Rendered above the score on the results page, for the same reason the warnings are:
 they qualify every number below them.
 
+## AI/ML detection — an audit record, not a gate
+
+Nineteen of the forty-five checks only mean anything if the design has an AI or ML
+component in it. Whether they apply is the evaluate stage's `not_applicable`
+judgement, made per check by the model. That judgement is not the problem; its
+**invisibility** was. A pillar rendered "Not applicable to this design" and nothing
+else, so a reviewer could not tell "there is genuinely no model here" apart from "the
+model did not notice the model" — on one of the largest single influences on the
+score.
+
+`agent/ai_detection.py` produces an independent, reproducible record of the AI/ML
+evidence in a design: what was searched for, what matched, and where. No model call,
+so it is free and returns the same answer for the same design every time, including
+months later against a stored review.
+
+### What it does not do
+
+**It moves no verdict, no status and no score.** `scoring.py` never reads it, and
+`test_ai_detection.py` asserts that at the source level. A keyword detector is more
+*auditable* than the model, not more *right* — letting it force a check to be
+evaluated or skipped would swap a fallible reading for a fallible regex and lose the
+judgement, while making a score no longer reproducible from the rubric and the
+statuses.
+
+Where the record and the model disagree, that is **surfaced, not resolved**.
+
+### The four tiers, and why the weakest one exists
+
+| Tier | Means | Example |
+| --- | --- | --- |
+| `classified_kind` | an earlier stage already called it `ai_model` | — |
+| `named_service` | a specific product or model family | Bedrock, SageMaker, GPT-4 |
+| `explicit_term` | unambiguous ML vocabulary | "training data", "vector store" |
+| `implicit_function` | a capability that is *usually* model-backed | "recommendation engine" |
+| `denial` | the design states it has no AI/ML | "no ML is used" |
+
+The first three give `present`. `implicit_function` gives **`likely`**, deliberately:
+a personalisation service is almost certainly model-backed and genuinely might be
+rules, and the record should not assert what a phrase does not establish.
+
+`denial` is recorded as a **claim, never a fact** — the same rule the evaluate prompt
+already applies to submitted material. So `denied` is *weaker* than `absent`: absent
+is silence, a denial is an assertion inside untrusted content. A denial alongside
+real evidence reads `contradicted`, which usually means a document and a diagram were
+written at different times.
+
+`not_run` is distinct from `absent` and must never be rendered as "no AI detected".
+One means nobody looked (a review stored before this existed); the other means
+patterns ran and found nothing. `patterns_checked` is the discriminator.
+
+### What the old keyword map actually scored
+
+`ingestion/drawio.py` had a bare `"model"` substring in its keyword→kind map.
+Measured against 25 labels:
+
+| | before | after |
+| --- | --- | --- |
+| explicitly labelled AI found | 5/5 | 5/5 |
+| implicit / unlabelled AI found | **0/15** | 14/15 |
+| non-AI carrying "model" misclassified | **5/5** | 0/5 |
+
+"Domain Model", "Cost Model", "Provisioning Model", "Threat Model Doc" and "Data
+Model Registry" were all `ai_model`. That was not cosmetic: `kind` is rendered into
+the evaluate stage's component block, so a design whose only "model" was a cost model
+arrived at the AI-governance checks looking like it had a model in it. The word now
+appears only inside phrases that fix its sense.
+
+Two known limits are pinned as tests rather than fixed, because both fixes cost more
+than they buy: "Data Model Registry" reads as `present`, and a bare "Triage" or
+"Scoring" with no system noun reads as `absent` (matching them would fire on "Ticket
+Triage Runbook" and "Scoreboard").
+
+### Negation is scoped to the sentence
+
+"This design does not use machine learning" contains the phrase "machine learning",
+so a naive scan matches the denial *and* the explicit term on the same eight
+characters and reports the design as self-contradictory for the sole reason that it
+stated its position clearly. Positive matches inside a denying sentence are therefore
+discarded — a mention of AI inside a sentence denying AI is not evidence of AI.
+
+Per sentence, not per document. Otherwise one denial anywhere would silence the whole
+design, which is exactly the hole someone would need to hide a model in.
+
+### Where it shows up
+
+- **Results page** — a panel above the score (`AiDetectionPanel`, built on the same
+  `CaveatPanel` as the warnings and the fidelity numbers), with the evidence behind a
+  disclosure. `caution` tone only when a human is needed: a self-contradicting
+  design, or a disagreement with a skipped pillar.
+- **Pillar cards** — the bare "Not applicable to this design" now carries the
+  reasoning and the list of components that were searched, so it can be argued with.
+- **PDF** — a note under the scorecard, since the PDF is the artefact most likely to
+  reach someone who cannot open the app.
+- **API** — `ai_detection` on the review, with `verdict` and `rationale` computed
+  server-side so no two surfaces can describe one record differently.
+
 ## Follow-up re-review
 
 `POST /reviews/{id}/re-review` — feedback on a review, optionally with a new

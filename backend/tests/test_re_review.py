@@ -343,6 +343,63 @@ def test_a_new_attachment_carries_its_own_fidelity_and_warnings(client) -> None:
     assert structural["total_elements"] == 4, "measured on the NEW attachment"
 
 
+def test_the_ai_detection_record_is_recomputed_for_the_new_attachment(client) -> None:
+    """Recomputed, not copied forward.
+
+    A new attachment REPLACES the design, so carrying the base's record over would
+    attribute the previous upload's AI evidence to a design that may no longer hold
+    it — and on a governance review that is the record being wrong in the direction
+    that matters.
+    """
+    review_id = original(client)
+    base = client.get(f"/reviews/{review_id}").json()["ai_detection"]
+    assert base["verdict"] == "absent"
+
+    with_ai = _drawio("Claims API", "Bedrock summariser", "Claims RDS")
+    version_id = re_review(
+        client, review_id, "The summariser was always there.",
+        diagram_key=upload(client, "v3.drawio", with_ai),
+    ).json()["review_id"]
+
+    fresh = client.get(f"/reviews/{version_id}").json()["ai_detection"]
+    assert fresh["verdict"] == "present"
+    assert "Bedrock" in fresh["rationale"]
+    assert "Bedrock summariser" in fresh["components_seen"]
+
+    # And the base is untouched — versions do not rewrite each other's records.
+    assert client.get(f"/reviews/{review_id}").json()["ai_detection"] == base
+
+
+def test_a_feedback_only_round_still_carries_a_detection_record(client) -> None:
+    """Ingest and classify are skipped, but the design is still stored on the base, so
+    the record must be present rather than silently reverting to `not_run`."""
+    review_id = original(client)
+    version_id = re_review(client, review_id, "Please re-check the AI checks.").json()[
+        "review_id"
+    ]
+
+    detection = client.get(f"/reviews/{version_id}").json()["ai_detection"]
+    assert detection["verdict"] != "not_run"
+    assert detection["patterns_checked"] > 50
+
+
+def test_reviewer_feedback_is_not_treated_as_design_evidence(client) -> None:
+    """Feedback is a POINTER, not evidence — the same rule the evaluate prompt states.
+
+    A submitter typing "we use Bedrock" must not make the record say the design has
+    Bedrock in it. The record describes the DESIGN; if it read the feedback, the
+    audit trail would become whatever the submitter asserted.
+    """
+    review_id = original(client)
+    version_id = re_review(
+        client, review_id, "We definitely use Amazon Bedrock and SageMaker here."
+    ).json()["review_id"]
+
+    detection = client.get(f"/reviews/{version_id}").json()["ai_detection"]
+    assert detection["verdict"] == "absent"
+    assert "Bedrock" not in detection["rationale"]
+
+
 # --------------------------------------------------------------------------- #
 # Versioning — nothing is ever overwritten
 # --------------------------------------------------------------------------- #

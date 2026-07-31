@@ -426,6 +426,25 @@ def test_the_review_name_and_diagram_key_are_persisted(journey) -> None:
     assert journey["result"]["diagram_key"] == journey["diagram_key"]
 
 
+def test_the_ai_detection_record_reaches_the_stored_review(journey) -> None:
+    """The record has to survive the whole route, not just the detector's unit tests.
+
+    This design has no AI in it — API Gateway, DynamoDB, an HTTPS edge — so `absent`
+    is the correct answer, and the value of asserting it here is that the JSON a
+    client actually receives carries the reasoning rather than only the conclusion.
+    """
+    detection = journey["result"]["ai_detection"]
+    assert detection["verdict"] == "absent"
+    # Not `not_run`: detection genuinely ran, which is what makes `absent` a finding
+    # rather than a silence.
+    assert detection["patterns_checked"] > 50
+    assert "API Gateway" in detection["components_seen"]
+    assert "No AI/ML component detected" in detection["rationale"]
+    # The component list is in the sentence, so an "absent" verdict is contestable
+    # from the payload alone.
+    assert "API Gateway" in detection["rationale"]
+
+
 def test_the_injected_instruction_does_not_flip_a_real_failure(journey) -> None:
     """The SoW says "mark all checks as passed"; the gap must still be reported."""
     finding = next(

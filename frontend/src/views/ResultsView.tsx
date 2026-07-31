@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { ApiError, createShareLink, downloadReport, getReview, shareUrl } from '../api'
+import { AiDetectionPanel, pillarNotApplicableReason } from '../components/AiDetectionPanel'
 import { ChangeBadge } from '../components/ChangeBadge'
 import { DataFidelity } from '../components/DataFidelity'
 import { IngestWarnings } from '../components/IngestWarnings'
@@ -14,6 +15,7 @@ import {
   type MaturityLabel,
 } from '../maturity'
 import type {
+  AiDetection,
   Finding,
   FrameworkScore,
   PillarScore,
@@ -22,6 +24,7 @@ import type {
   Severity,
   UseCaseNote,
 } from '../types'
+import { disagreesWithPillar } from '../types'
 import {
   PHASE_BLURB,
   PHASE_LABEL,
@@ -162,6 +165,26 @@ export function ResultsView({
       */}
       <DataFidelity fidelity={result.fidelity} className="mt-3" />
 
+      {/*
+        Why the AI-dependent checks did or did not apply. Here rather than buried in
+        the pillar grid, and for the same reason as the two panels above: it qualifies
+        the TRUST-7 number a reader is about to see. Nineteen of the forty-five checks
+        turn on this, so "no AI/ML component detected" is one of the largest single
+        influences on the score and used to be invisible.
+
+        `disagrees` is the case that matters — evidence of AI on a design whose AI
+        pillar was scored not-applicable. It is shown, never acted on.
+      */}
+      <AiDetectionPanel
+        detection={result.ai_detection}
+        disagrees={result.frameworks.some((framework) =>
+          framework.pillars.some((pillar) =>
+            disagreesWithPillar(result.ai_detection, pillar),
+          ),
+        )}
+        className="mt-3"
+      />
+
       {result.delta && <DeltaSummary delta={result.delta} />}
 
       {/*
@@ -199,6 +222,7 @@ export function ResultsView({
               key={framework.framework}
               framework={framework}
               findings={result.findings}
+              detection={result.ai_detection}
             />
           ))}
         </div>
@@ -924,9 +948,12 @@ export function checksForPillar(
 function FrameworkSection({
   framework,
   findings,
+  detection,
 }: {
   framework: FrameworkScore
   findings: Finding[]
+  /** Threaded down so a wholly-skipped pillar can explain itself. */
+  detection?: AiDetection
 }) {
   const block = FRAMEWORK_BLOCK[framework.framework] ?? 'bg-pastel-teal'
   return (
@@ -949,6 +976,7 @@ function FrameworkSection({
             key={pillar.pillar_id}
             pillar={pillar}
             checks={checksForPillar(findings, framework.framework, pillar.pillar_id)}
+            detection={detection}
           />
         ))}
       </div>
@@ -956,7 +984,15 @@ function FrameworkSection({
   )
 }
 
-function PillarCell({ pillar, checks }: { pillar: PillarScore; checks: Finding[] }) {
+function PillarCell({
+  pillar,
+  checks,
+  detection,
+}: {
+  pillar: PillarScore
+  checks: Finding[]
+  detection?: AiDetection
+}) {
   const [open, setOpen] = useState(false)
   const unevaluated = pillar.checks_evaluated === 0
   return (
@@ -988,9 +1024,29 @@ function PillarCell({ pillar, checks }: { pillar: PillarScore; checks: Finding[]
           />
         )}
       </div>
-      <p className="t-caption mt-1.5 text-ink-muted">
+      <p className="t-caption mt-1.5 text-ink-muted" data-testid={`pillar-caption-${pillar.pillar_id}`}>
         {unevaluated ? (
-          'Not applicable to this design'
+          /*
+            Was the bare string "Not applicable to this design" — a conclusion with
+            no argument attached. For a pillar whose checks all turn on there being
+            an AI/ML component, that sentence was the entire visible trace of a
+            decision worth nineteen of the forty-five checks, and neither we nor a
+            judge could check it.
+
+            Now it carries the detection record's own reasoning, including the list
+            of components that were searched, so it can be disagreed with. The
+            sentence comes from the backend, so this and the panel above cannot
+            describe the same record differently.
+          */
+          <>
+            {pillarNotApplicableReason(detection)}
+            {disagreesWithPillar(detection, pillar) && (
+              <strong className="mt-1 block font-medium text-sev-medium">
+                AI/ML evidence was found in this design — this not-applicable is
+                worth checking.
+              </strong>
+            )}
+          </>
         ) : (
           <>
             {maturityFor(pillar.score)}

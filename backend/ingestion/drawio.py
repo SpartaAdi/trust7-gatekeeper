@@ -74,12 +74,37 @@ _KIND_KEYWORDS: tuple[tuple[str, str], ...] = (
     ("grafana", "observability"),
     ("datadog", "observability"),
     ("splunk", "observability"),
+    # AI/ML. Note what is deliberately NOT here: a bare `"model"`.
+    #
+    # It was, and matching is plain substring, so every label containing the word
+    # became `ai_model`. Measured against 25 labels: it caught 5 of 5 explicitly
+    # named AI services and 0 of 15 implicit ones, while misclassifying "Domain
+    # Model", "Cost Model", "Provisioning Model", "Threat Model Doc" and "Data Model
+    # Registry" — 5 false positives out of 5 non-AI labels carrying the word.
+    #
+    # That mattered beyond the inventory: `kind` is rendered into the evaluate
+    # stage's component block, so a design whose only "model" was a cost model
+    # arrived at the AI-governance checks looking like it had a model in it.
+    #
+    # So the word only appears inside phrases that fix its sense. Anything genuinely
+    # ambiguous is left as `unknown`, which is honest, and the AI evidence record in
+    # `agent/ai_detection.py` catches the implicit cases this map cannot.
     ("bedrock", "ai_model"),
     ("sagemaker", "ai_model"),
     ("claude", "ai_model"),
     ("openai", "ai_model"),
+    ("anthropic", "ai_model"),
+    ("vertex ai", "ai_model"),
     ("llm", "ai_model"),
-    ("model", "ai_model"),
+    ("machine learning", "ai_model"),
+    ("ml model", "ai_model"),
+    ("foundation model", "ai_model"),
+    ("model registry", "ai_model"),
+    ("model serving", "ai_model"),
+    ("model endpoint", "ai_model"),
+    ("model inference", "ai_model"),
+    ("inference", "ai_model"),
+    ("embedding", "ai_model"),
     ("user", "external_actor"),
     ("actor", "external_actor"),
     ("client", "external_actor"),

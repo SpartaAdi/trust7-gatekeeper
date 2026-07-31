@@ -1358,3 +1358,128 @@ describe('ResultsView — use-case notes', () => {
   })
 
 })
+
+describe('ResultsView — a not-applicable pillar explains itself', () => {
+  /**
+   * The silent not-applicable was the whole problem. A pillar whose checks all turn
+   * on there being an AI/ML component used to render the bare string "Not applicable
+   * to this design" — a conclusion worth nineteen of the forty-five checks, with no
+   * argument attached and no way for a reviewer or a judge to contest it.
+   */
+  const skippedPillar = (overrides = {}) =>
+    resultFixture({
+      frameworks: [
+        {
+          framework: 'trust7',
+          framework_name: 'Minfy TRUST-7 Framework',
+          score: 0,
+          pillars: [
+            {
+              framework: 'trust7',
+              pillar_id: 'trust_foundations',
+              pillar_name: 'Trust foundations',
+              score: 0,
+              checks_total: 4,
+              checks_evaluated: 0,
+              checks_passed: 0,
+            },
+          ],
+        },
+      ],
+      ...overrides,
+    })
+
+  const ABSENT_RECORD = {
+    signals: [],
+    patterns_checked: 96,
+    components_seen: ['Expense API', 'Receipts bucket'],
+    verdict: 'absent' as const,
+    rationale:
+      'No AI/ML component detected. 96 AI/ML patterns were checked against 2 ' +
+      'components: Expense API, Receipts bucket.',
+  }
+
+  function mount(result: unknown) {
+    getReview.mockResolvedValue(result)
+    return render(
+      <ResultsView reviewId="rev-1" onReReview={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />,
+    )
+  }
+
+  it('gives the reason and the components searched, not just the conclusion', async () => {
+    mount(skippedPillar({ ai_detection: ABSENT_RECORD }))
+    const caption = await screen.findByTestId('pillar-caption-trust_foundations')
+
+    expect(caption).toHaveTextContent('Not applicable to this design')
+    // The argument. Without these two the sentence is the old bare string.
+    expect(caption).toHaveTextContent('96 AI/ML patterns')
+    expect(caption).toHaveTextContent('Expense API')
+  })
+
+  it('flags a not-applicable that the evidence contradicts', async () => {
+    // The case the round exists for: AI evidence present, AI pillar scored n/a.
+    mount(
+      skippedPillar({
+        ai_detection: {
+          signals: [
+            {
+              tier: 'implicit_function' as const,
+              signal: 'personalisation',
+              source: 'diagram component “Personalization Service”',
+              excerpt: 'Personalization Service',
+            },
+          ],
+          patterns_checked: 96,
+          components_seen: ['Personalization Service', 'API'],
+          verdict: 'likely' as const,
+          rationale:
+            'AI/ML component likely but never labelled as one. Suggestive evidence: ' +
+            'personalisation. A capability like this is usually model-backed, but ' +
+            'could be implemented as rules.',
+        },
+      }),
+    )
+
+    const caption = await screen.findByTestId('pillar-caption-trust_foundations')
+    expect(caption).toHaveTextContent(/worth checking/i)
+
+    // And the panel at the top says the same thing, cautions, and states that
+    // nothing was changed on the strength of a keyword match.
+    const panel = screen.getByTestId('ai-detection-panel')
+    expect(panel).toHaveAttribute('data-tone', 'caution')
+    expect(panel).toHaveTextContent(/Nothing has been changed automatically/)
+  })
+
+  it('does not flag a correctly-empty design', async () => {
+    mount(skippedPillar({ ai_detection: ABSENT_RECORD }))
+    const caption = await screen.findByTestId('pillar-caption-trust_foundations')
+
+    expect(caption).not.toHaveTextContent(/worth checking/i)
+    expect(screen.getByTestId('ai-detection-panel')).toHaveAttribute('data-tone', 'neutral')
+  })
+
+  it('never claims no AI was found on a review stored before detection existed', async () => {
+    // `ai_detection` absent entirely. Saying "no AI/ML component detected" here would
+    // put a claim in front of a reviewer that nothing in the system established.
+    const { ai_detection: _dropped, ...older } = skippedPillar({
+      ai_detection: ABSENT_RECORD,
+    })
+    mount(older)
+
+    const caption = await screen.findByTestId('pillar-caption-trust_foundations')
+    expect(caption).toHaveTextContent(/no detection record was stored/)
+    expect(caption).not.toHaveTextContent(/patterns/)
+    // No record, so nothing to render a panel from.
+    expect(screen.queryByTestId('ai-detection')).toBeNull()
+  })
+
+  it('leaves an evaluated pillar reading as it always did', async () => {
+    mount(resultFixture({ ai_detection: ABSENT_RECORD }))
+    await screen.findByTestId('assessment')
+
+    const caption = screen.getByTestId('pillar-caption-security')
+    expect(caption).toHaveTextContent('3/7 passed')
+    expect(caption).not.toHaveTextContent(/Not applicable/)
+    expect(caption).not.toHaveTextContent(/patterns/)
+  })
+})
