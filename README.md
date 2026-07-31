@@ -287,7 +287,10 @@ rather than about our tooling. That is the state on Render today: the native Pyt
 runtime installs from `requirements.txt` and cannot `apt-get install tesseract-ocr`,
 so `pytesseract` is a dev/harness dependency and the deployed service reports the
 estimate as unavailable. Enabling it in production means moving the service to a
-Docker runtime, which is a deliberate deployment decision and not done here.
+Docker runtime — `backend/Dockerfile` exists for that, additively, and
+[Optional: a Docker runtime, for Tesseract](#optional-a-docker-runtime-for-tesseract)
+covers it. The native service is unchanged and still reports the estimate as
+unavailable, which is correct for it.
 
 ### 3. Grounding-filter catch count — a count, not a rate
 
@@ -731,6 +734,62 @@ before use (a browser's `Origin` header never has one), and **Vercel preview
 deployments will be blocked**, because they get their own hostnames
 (`…-git-<branch>.vercel.app`) that are not this origin. Preview testing needs
 that preview origin set instead, or a second Render service.
+
+### Optional: a Docker runtime, for Tesseract
+
+The native runtime cannot `apt-get`, so the OCR coverage proxy reports as
+unavailable on it. `backend/Dockerfile` is an **additive** file that installs
+`tesseract-ocr` and runs the same start command; nothing in `render.yaml` or the
+native service references it, so adding it changed no existing deployment.
+
+To use it, create a **second** Render service with Runtime = Docker, Dockerfile
+path `backend/Dockerfile`, and — this is the part that catches people — **Docker
+build context = the repository root**, not `backend/`. `rubric.py` resolves
+`<its dir>/../rubric/rubric.json`, so a `backend/`-scoped context builds an image
+that starts and then fails on the first review with a missing rubric.
+
+Same environment variables as the native service. `CORS_ALLOWED_ORIGIN` only
+matters if a browser will call it; the verification below uses curl and does not.
+
+### Verifying a deployment end to end
+
+`scripts/verify_docker_service.sh` runs one real review against a deployed service
+and prints the score, the warnings and the three data-fidelity numbers. It exists
+because "the container starts and `/health` answers" does not tell you the pipeline
+works, and on the Docker service specifically it is the only way to see whether
+Tesseract is actually being reached.
+
+```bash
+read -rs -p 'Demo token: ' TRUST7_DEMO_TOKEN && export TRUST7_DEMO_TOKEN
+./scripts/verify_docker_service.sh https://<your-service>.onrender.com
+```
+
+The token is the service's `DEMO_ACCESS_TOKEN`, sent as the `X-Demo-Token` header.
+`read -rs` keeps it out of your shell history, and the script prints only its
+length, never its value. With no URL argument it targets the Docker service.
+
+It uploads two fixtures from `fixtures/verification/` — a synthetic SoW and a
+**PNG** diagram. The PNG is deliberate: the OCR proxy is only computed on the image
+path, so a `.drawio` upload returns `ocr_proxy: null`, which is correct and looks
+exactly like Tesseract being broken.
+
+Read the OCR-proxy line as the verdict on the image:
+
+| Line | Means |
+| --- | --- |
+| `~N% ESTIMATED` | Tesseract ran. The percentage is a proxy, not a grade — see [OCR coverage proxy](#2-ocr-coverage-proxy--an-estimate-labelled-as-one-everywhere). |
+| `NOT MEASURED — …` | No OCR engine reachable. Expected on the native runtime; a fault on the Docker one. |
+| `not applicable` | No image was uploaded, so nothing to compare. |
+
+**It spends real tokens** — six model calls, one of them the evaluate stage's
+64,000-token request. There is no way to verify a live deployment without them. It
+creates exactly one review and touches nothing else.
+
+Exit codes: `0` completed, `1` a step failed, `2` no token set, `3` service
+unreachable. The report formatting lives in `scripts/verify_docker_service.py`
+rather than inline in the shell, and `test_verify_script.py` covers it — a broken
+report during a deploy check reads as a broken service, which is the most
+expensive way for this script to fail.
 
 ### Free tier caveats
 
