@@ -405,31 +405,58 @@ the backend predicate.
 Rendered above the score on the results page, for the same reason the warnings are:
 they qualify every number below them.
 
-## AI/ML detection — an audit record, not a gate
+## AI/ML detection — an audit record, and a one-way gate
 
-Nineteen of the forty-five checks only mean anything if the design has an AI or ML
-component in it. Whether they apply is the evaluate stage's `not_applicable`
-judgement, made per check by the model. That judgement is not the problem; its
-**invisibility** was. A pillar rendered "Not applicable to this design" and nothing
-else, so a reviewer could not tell "there is genuinely no model here" apart from "the
-model did not notice the model" — on one of the largest single influences on the
-score.
+Eighteen of the forty-five checks only mean anything if the design has an AI or ML
+component in it. `rubric.json` declares which eighteen, per check, via
+`ai_conditional` — an explicit reviewable list, not a keyword match.
 
 `agent/ai_detection.py` produces an independent, reproducible record of the AI/ML
 evidence in a design: what was searched for, what matched, and where. No model call,
 so it is free and returns the same answer for the same design every time, including
 months later against a stored review.
 
-### What it does not do
+### Why applicability could not be left to the model alone
 
-**It moves no verdict, no status and no score.** `scoring.py` never reads it, and
-`test_ai_detection.py` asserts that at the source level. A keyword detector is more
-*auditable* than the model, not more *right* — letting it force a check to be
-evaluated or skipped would swap a fallible reading for a fallible regex and lose the
-judgement, while making a score no longer reproducible from the rubric and the
-statuses.
+It was, and it cost 46 points. Design B of the ground-truth set is a payments API
+whose document states it "does not utilize any foundation models, neural networks, or
+generative capabilities". In one of three otherwise identical runs, evaluate returned
+all eighteen AI-conditional checks as `pass` — **89.3 instead of 42.9** overall,
+**92.9 instead of 0.0** on TRUST-7. A design was reported as satisfying eighteen
+AI-governance checks it has no AI to govern, and the error ran in the flattering
+direction on the number a reviewer reads first.
 
-Where the record and the model disagree, that is **surfaced, not resolved**.
+Not ordinary sampling drift: evaluate already runs at `temperature=0`. Its *input*
+varied, because classify sampled freely. Classify is greedy now too, which narrows the
+variance rather than removing it — which is why the constraint belongs in code.
+
+### The gate, and what it may not do
+
+`agent/ai_gate.py` runs between evaluate and prioritize. It has exactly one power: on
+an `absent` or `denied` verdict it can turn an AI-conditional check into
+`not_applicable`, with the detection rationale written into the finding's evidence so
+the change is contestable from the stored JSON alone.
+
+**It is one-way.** It can never force a check to be evaluated — that mirror-image
+failure would silence real AI-governance findings on designs that do have AI. It never
+fires on `present`, `likely`, `contradicted` or `not_run`. And it never overwrites a
+`pass`/`fail`/`partial` the model backed with evidence: only an unevidenced verdict,
+the shape of a guess on a check that structurally cannot apply.
+
+That last guard also bounds what the gate can fix, which is worth stating rather than
+hiding: an evidenced `pass` on an AI-conditional check survives even on a `denied`
+verdict. Fabricated evidence and real evidence are the same string to the gate. Those
+deferrals are logged at WARNING, because "this design has no AI" and "its AI controls
+are satisfied" cannot both be true and the contradiction should not be invisible.
+
+**Scoring still never reads the detection record.** `scoring.py` reads statuses and the
+rubric, and a score is still reproducible from those two alone —
+`test_ai_gate.py` and `test_ai_detection.py` assert that at the source level from both
+sides. What changed is narrower and real: one of those statuses can now be *set* by
+code rather than only by the model.
+
+Where the record and the model disagree in the other direction — detection finds AI
+the review treated as absent — that is **surfaced, not resolved**.
 
 ### The four tiers, and why the weakest one exists
 

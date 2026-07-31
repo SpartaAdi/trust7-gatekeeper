@@ -2,11 +2,12 @@
 
 ## What is being pinned, and why it needed pinning
 
-Nineteen of the forty-five rubric checks only mean anything if the design has an AI
-or ML component in it. Whether they apply was decided entirely inside the evaluate
+Eighteen of the forty-five rubric checks only mean anything if the design has an AI
+or ML component in it — the rubric now declares which eighteen, per check, via
+`ai_conditional`. Whether they applied used to be decided entirely inside the evaluate
 stage's `not_applicable` verdict — a per-check model judgement with no record of what
 was looked for. A reviewer could not tell "there is genuinely no model here" apart
-from "the model did not notice the model", and nineteen checks is a large fraction of
+from "the model did not notice the model", and eighteen checks is a large fraction of
 a score to rest on something unexaminable.
 
 Measurement first, because it is the reason this module exists. The pre-existing
@@ -21,13 +22,22 @@ Both halves are pinned here: `test_the_bare_model_keyword_no_longer_*` covers th
 false positives, and the implicit cases are covered by the parametrised detector
 tests. Neither number should be allowed to regress silently.
 
-## What is deliberately NOT tested here
+## What detection may and may not move
 
-That detection changes a verdict or a score — because it must not.
-`test_detection_moves_no_verdict_and_no_score` asserts the opposite, at the level of
-the stored record. A keyword detector is more *auditable* than the model, not more
-*right*, and letting it overrule a judgement would trade a fallible reading for a
-fallible regex while making the score unreproducible from the rubric.
+Detection is still not a scorer. `scoring.py` never reads the `AiDetection` record,
+and `test_scoring_arithmetic_still_never_reads_the_detection_record` asserts that at
+the source level.
+
+What it may now do, since the one-way gate landed, is narrower than "overrule a
+judgement" and is enforced in `agent/ai_gate.py`, not here: on an `absent`/`denied`
+verdict it can turn an `ai_conditional` check into `not_applicable`, and only where
+the model left no evidence behind. It can never force a check to be evaluated, and it
+never touches a `pass`/`fail`/`partial` that cites something. The gate's own
+behaviour, including that one-way property, is pinned in `test_ai_gate.py`.
+
+So the old blanket rule "detection must not affect a score" is gone, deliberately: it
+was too broad. A keyword detector is more *auditable* than the model, not more
+*right*, which is why the gate only speaks where the model said nothing.
 
 ## Known, accepted limits, pinned so they stay known
 
@@ -239,7 +249,7 @@ def test_a_design_that_states_it_has_no_ai_reads_as_denied_not_absent() -> None:
     `absent` is silence, which is a fact about the material. A denial is a claim
     inside submitted content, and the evaluate prompt already treats such claims as
     non-evidence. Collapsing the two would let a sentence in an untrusted document
-    stand as the reason nineteen checks were skipped.
+    stand as the reason eighteen checks were skipped.
     """
     detection = ai_detection.detect(
         graph("API", "Postgres"),
@@ -638,15 +648,38 @@ def test_an_unrun_record_never_raises_the_flag() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_detection_moves_no_verdict_and_no_score() -> None:
-    """The load-bearing constraint of this whole round.
+def test_scoring_arithmetic_still_never_reads_the_detection_record() -> None:
+    """THE RULE NARROWED, deliberately, and this states the new one exactly.
 
-    Two results identical but for their detection record must score identically.
-    `scoring.py` reads statuses and the rubric; if it ever read this, a score would
-    stop being reproducible from the rubric and a regex would be deciding checks.
+    It used to assert the broad claim: detection moves no verdict and no score, full
+    stop. That is no longer true, and the change was the point of the one-way-gate
+    round rather than a side effect — so the assertion is rewritten rather than
+    worked around.
+
+    WHAT IS STILL TRUE, and is what this test now pins:
+
+        `scoring.py` never reads `AiDetection`. Its arithmetic reads statuses and the
+        rubric, and a score remains reproducible from those two alone.
+
+    WHAT CHANGED, stated so it is not lost:
+
+        Scoring reads `not_applicable`. `not_applicable` is now sometimes SET by
+        `agent/ai_gate.py`, which runs AFTER evaluate and BEFORE scoring. So the
+        detection record does now influence a score — transitively, through a status,
+        via a separate and separately-tested layer. It does not influence the
+        arithmetic.
+
+    The old rule was too broad rather than wrong. Leaving the AI-applicability
+    decision wholly unconstrained cost 46 points on a real run: 18 AI-conditional
+    checks returned `pass` on a design that states it has no AI, scoring 89.3 instead
+    of 42.9. A regex is not more trustworthy than the model in general, which is why
+    the gate is ONE-WAY and defers to any evidence-bearing verdict — see
+    tests/test_ai_gate.py.
     """
     import scoring
 
+    # The arithmetic is blind to the record: same statuses, different detection,
+    # identical score. This still holds because the gate is not in this code path.
     findings = ReviewResult(review_id="r", created_at="t").findings
     with_ai = ReviewResult(
         review_id="r",
@@ -659,9 +692,15 @@ def test_detection_moves_no_verdict_and_no_score() -> None:
     )
     assert scoring.score(with_ai.findings) == scoring.score(without.findings)
 
+    # And at the source level, which is the part that cannot be satisfied by luck.
     source = (__import__("pathlib").Path(scoring.__file__)).read_text()
     assert "ai_detection" not in source
     assert "AiDetection" not in source
+    assert "ai_gate" not in source, (
+        "scoring must not reach into the gate either; the gate hands it a status"
+    )
+    # The only applicability concept scoring may know about is the status itself.
+    assert "not_applicable" in source
 
 
 def test_the_record_survives_a_json_round_trip() -> None:

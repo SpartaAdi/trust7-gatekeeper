@@ -293,19 +293,23 @@ class DataFidelity(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
-# AI/ML detection — an audit record, not a gate
+# AI/ML detection — an audit record, and the input to a one-way gate
 #
-# Nineteen of the forty-five checks only mean anything if the design has an AI or
-# ML component. Whether they apply is decided by the evaluate stage's
-# `not_applicable` verdict, and this record exists so that decision can be
-# CHECKED rather than trusted: it says what was searched for, what matched, and
-# where, for every review.
+# Eighteen of the forty-five checks only mean anything if the design has an AI or
+# ML component; the rubric declares which eighteen, per check, via
+# `ai_conditional`. This record exists so that applicability can be CHECKED rather
+# than trusted: it says what was searched for, what matched, and where, for every
+# review.
 #
-# It changes NO verdict and NO score. `scoring.py` never reads it, and
-# `agent/ai_detection.py` explains why letting a keyword detector overrule a model
-# judgement would trade a fallible reading for a fallible regex rather than
-# improve anything. Where the record and the model disagree, that is surfaced for
-# a human — `disagrees_with_pillar` below — and acting on it is a person's job.
+# `scoring.py` never reads it — a score stays reproducible from the statuses and
+# the rubric alone. But the record is no longer inert: on an `absent`/`denied`
+# verdict, `agent/ai_gate.py` may turn an AI-conditional check into
+# `not_applicable`, which scoring does read. That gate is ONE-WAY (it can never
+# force a check to be evaluated) and it defers to any verdict the model backed with
+# evidence. Read that module before assuming this record cannot move a number.
+#
+# Where the record and the model disagree in the other direction, that is still
+# surfaced rather than resolved — `disagrees_with_pillar` below.
 # --------------------------------------------------------------------------- #
 
 AiSignalTier = Literal[

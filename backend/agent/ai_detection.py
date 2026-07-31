@@ -2,11 +2,12 @@
 
 ## Why this exists
 
-Nineteen of the rubric's forty-five checks only mean anything if the design has an
-AI or ML component in it. Until now, whether they applied was decided entirely
-inside the evaluate stage's `not_applicable` verdict — a per-check model judgement,
-with no record of what was looked for, and no way for a reviewer to tell "there is
-genuinely no model here" apart from "the model did not notice the model".
+Eighteen of the rubric's forty-five checks only mean anything if the design has an
+AI or ML component in it — `rubric.json` declares which eighteen, per check, via
+`ai_conditional`. Whether they applied used to be decided entirely inside the
+evaluate stage's `not_applicable` verdict — a per-check model judgement, with no
+record of what was looked for, and no way for a reviewer to tell "there is genuinely
+no model here" apart from "the model did not notice the model".
 
 That is the failure this module addresses. It produces an independent, reproducible
 record of the AI/ML evidence in a design: what was searched for, what matched, and

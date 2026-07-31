@@ -18,7 +18,7 @@ import llm
 import rubric
 import scoring
 import storage
-from agent import ai_detection, stages
+from agent import ai_detection, ai_gate, stages
 from ingestion import normalize, relevance
 from schema import (
     DesignGraph,
@@ -282,8 +282,9 @@ def _run(
 
         # The AI/ML evidence record. Built here, straight after classify, because
         # this is the first point all three of its inputs exist. Deterministic, no
-        # model call, and it changes nothing downstream: it is the audit trail behind
-        # a not-applicable pillar, not a gate on one. See schema.AiDetection.
+        # model call. It is both the audit trail behind a not-applicable pillar AND —
+        # since the one-way gate below landed — the input that can set one. See
+        # schema.AiDetection for the record and agent/ai_gate.py for the gate.
         detection = ai_detection.detect(
             design.graph, design.document_text, classification
         )
@@ -308,8 +309,36 @@ def _run(
             )
             findings.extend(framework_findings)
             usages.append(usage)
+
+        # ---- the one-way AI-applicability gate ------------------------------- #
+        #
+        # Between evaluate and prioritize deliberately: the gate's output is a
+        # `not_applicable` status, and everything downstream — prioritize, remediate,
+        # the roadmap, scoring — reads statuses. Running it here means one code path
+        # produces the statuses and every consumer sees the same set.
+        #
+        # It can ONLY mark an AI-conditional check not_applicable, only when
+        # detection says absent/denied, and never over an evidence-bearing verdict.
+        # See agent/ai_gate.py for why each of those guards is there.
+        gated = ai_gate.apply(findings, detection)
+        gate_note = ""
+        if gated:
+            # Carried into evaluate's FINAL detail line rather than shown mid-stage
+            # and then overwritten by it. A status the code set, not the model, is
+            # exactly the kind of thing this project does not do silently — and the
+            # transient version of this message was invisible by the time the stage
+            # finished, which is the same as not sending it.
+            gate_note = (
+                f"; {len(gated)} AI-specific checks marked not applicable — "
+                f"no AI/ML component detected"
+            )
+            progress.detail("evaluate", gate_note.lstrip("; "))
+
         open_count = sum(1 for f in findings if f.status in ("fail", "partial"))
-        progress.finish("evaluate", f"{open_count} gaps found across {len(findings)} checks")
+        progress.finish(
+            "evaluate",
+            f"{open_count} gaps found across {len(findings)} checks{gate_note}",
+        )
 
         # ---- prioritize ----------------------------------------------------- #
         stage = "prioritize"
@@ -615,9 +644,35 @@ def _re_review(
             )
             findings.extend(framework_findings)
             usages.append(usage)
+
+        # ---- the one-way AI-applicability gate ------------------------------- #
+        #
+        # Between evaluate and prioritize deliberately: the gate's output is a
+        # `not_applicable` status, and everything downstream — prioritize, remediate,
+        # the roadmap, scoring — reads statuses. Running it here means one code path
+        # produces the statuses and every consumer sees the same set.
+        #
+        # It can ONLY mark an AI-conditional check not_applicable, only when
+        # detection says absent/denied, and never over an evidence-bearing verdict.
+        # See agent/ai_gate.py for why each of those guards is there.
+        gated = ai_gate.apply(findings, detection)
+        gate_note = ""
+        if gated:
+            # Carried into evaluate's FINAL detail line rather than shown mid-stage
+            # and then overwritten by it. A status the code set, not the model, is
+            # exactly the kind of thing this project does not do silently — and the
+            # transient version of this message was invisible by the time the stage
+            # finished, which is the same as not sending it.
+            gate_note = (
+                f"; {len(gated)} AI-specific checks marked not applicable — "
+                f"no AI/ML component detected"
+            )
+            progress.detail("evaluate", gate_note.lstrip("; "))
+
         open_count = sum(1 for f in findings if f.status in ("fail", "partial"))
         progress.finish(
-            "evaluate", f"{open_count} gaps found across {len(findings)} checks"
+            "evaluate",
+            f"{open_count} gaps found across {len(findings)} checks{gate_note}",
         )
 
         # ---- prioritize ----------------------------------------------------- #

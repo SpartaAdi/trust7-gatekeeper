@@ -577,7 +577,7 @@ def _not_applicable_note(result: ReviewResult, width: float) -> list:
     """Why a pillar reads "Not applicable to this design".
 
     The STATUS column can only fit a conclusion, and a conclusion with no argument is
-    not auditable — which matters most here, because nineteen of the forty-five checks
+    not auditable — which matters most here, because eighteen of the forty-five checks
     turn on whether the design has an AI/ML component, so a wholly-skipped pillar is
     one of the largest single influences on the score in this document.
 

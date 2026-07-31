@@ -284,13 +284,23 @@ def test_the_greedy_temperature_binds_to_the_installed_openai_signature(
     )
 
 
-def test_only_the_evaluate_stage_asks_for_a_temperature() -> None:
+def test_only_the_two_score_bearing_stages_ask_for_a_temperature() -> None:
     """Read from source, across every model call site in the pipeline.
 
-    The instruction this implements was explicit that classify, ingest and
-    remediate keep their sampling untouched. A request-level test cannot show that,
-    because it only sees the stage it drives — so this enumerates the call sites
-    instead, and fails if a temperature appears at a new one.
+    THE ASSERTION WIDENED, on instruction. It read `== {"evaluate"}`, implementing an
+    earlier round that was explicit classify should keep its sampling untouched. That
+    was reversed deliberately: classify's output is rendered into the evaluate prompt
+    by `_render_classification`, so classify IS part of evaluate's input, and greedy
+    decoding on a varying input still varies.
+
+    It was not hypothetical. Design B run 2 returned `pass` on all 18 AI-conditional
+    checks where two otherwise-identical runs returned `not_applicable` — 89.3 against
+    42.9 overall — and this call was the only thing that differed between them.
+
+    `prioritize`, `remediate` and the vision path still sample at the provider
+    default, and still must: they produce prose and an ordering, where wording
+    varying between runs is not a correctness problem, and paying to suppress it buys
+    nothing. This test exists to keep that line where it is, not to freeze a count.
     """
     import inspect as inspect_module
 
@@ -311,10 +321,30 @@ def test_only_the_evaluate_stage_asks_for_a_temperature() -> None:
         and "temperature=" in inspect_module.getsource(function)
     }
 
-    assert asking == {"evaluate"}, (
-        f"temperature is set at {sorted(asking)}; only evaluate may set it — "
-        f"ingest/vision, classify and remediate sample at the provider default"
+    assert asking == {"evaluate", "_classify_once"}, (
+        f"temperature is set at {sorted(asking)}; only evaluate and the classify call "
+        f"may set it — prioritize, remediate and ingest/vision sample at the provider "
+        f"default, because their output is prose and an ordering rather than "
+        f"arithmetic input"
     )
+
+
+def test_classify_asks_for_the_greedy_temperature() -> None:
+    """The literal at the call site, so a future edit to a non-zero value fails.
+
+    Classify feeds the evaluate prompt, so a non-zero here reintroduces variance into
+    a stage that was made greedy precisely to remove it.
+    """
+    import inspect as inspect_module
+    import re
+
+    from agent import stages
+
+    source = inspect_module.getsource(stages._classify_once)
+    match = re.search(r"temperature=([\w.]+)", source)
+    assert match, "classify no longer sets a temperature"
+    assert match.group(1) == "llm.GREEDY_TEMPERATURE"
+    assert llm.GREEDY_TEMPERATURE == 0.0
 
 
 def test_evaluate_asks_for_the_greedy_temperature() -> None:

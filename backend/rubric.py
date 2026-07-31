@@ -36,6 +36,20 @@ class Check:
     check_id: str
     description: str
     severity: str
+    #: Whether this check only means anything when the design HAS an AI/ML
+    #: component. Declared per check in rubric.json, never inferred.
+    #:
+    #: An earlier attempt derived this by matching AI words in the description. It
+    #: was measured wrong in both directions: `cost_provisioning_model` matched on
+    #: "Provisioning model" and `tf_hallucination_control` was missed because "LLM"
+    #: contains no `\bML\b`. The list is therefore explicit and reviewable — and it
+    #: was drafted from each description independently, then found to match the
+    #: human labeller's 18 not-applicables on the non-AI ground-truth design exactly.
+    #:
+    #: `ss_data_residency` is deliberately NOT flagged: residency applies to any
+    #: design holding regulated data. That is also the check the tester corrected
+    #: from not_applicable to fail for precisely this reason.
+    ai_conditional: bool = False
 
 
 @dataclass(frozen=True)
@@ -69,6 +83,7 @@ def load() -> tuple[Framework, ...]:
                     check_id=c["id"],
                     description=c["description"],
                     severity=c.get("severity_default", "medium"),
+                    ai_conditional=bool(c.get("ai_conditional", False)),
                 )
                 for c in p.get("checks", [])
             )

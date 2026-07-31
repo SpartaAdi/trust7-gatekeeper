@@ -133,6 +133,23 @@ def _classify_once(
         content=[{"type": "text", "text": untrusted.wrap(design.as_prompt_context())}],
         schema=_CLASSIFY_SCHEMA,
         effort="medium",
+        # Greedy, matching evaluate — and for evaluate's benefit rather than its own.
+        #
+        # `_render_classification` feeds this stage's output straight into the
+        # evaluate prompt, so classify IS part of evaluate's input. Evaluate has been
+        # greedy since the determinism round, but greedy decoding on a varying input
+        # still varies, and this was the varying half: two runs over one design could
+        # hand evaluate two different design summaries and two different component
+        # inventories.
+        #
+        # That mattered concretely. Design B run 2 returned `pass` on all 18
+        # AI-conditional checks where the other two runs returned `not_applicable` —
+        # a 46-point swing on the overall score — and the only thing that differed
+        # between those runs was this call. The one-way gate in `agent/ai_gate.py` is
+        # the real defence, because greedy narrows variance rather than removing it
+        # (batching, quantized kernels and MoE routing all leave a served response
+        # non-reproducible at temperature 0). This closes the input side of it.
+        temperature=llm.GREEDY_TEMPERATURE,
         max_tokens=16000,
         label=label,
     )

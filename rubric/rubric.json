@@ -74,28 +74,28 @@
           "id": "trust_foundations",
           "name": "Trust foundations",
           "checks": [
-            {"id": "tf_explainability", "description": "AI-driven decisions that affect people can be explained at a level appropriate to the audience.", "severity_default": "high"},
-            {"id": "tf_fairness", "description": "AI outputs are evaluated for unjustified variation across populations/segments where the use case involves consequential decisions.", "severity_default": "high"},
-            {"id": "tf_hallucination_control", "description": "LLM outputs are grounded (RAG, validation, citation) rather than relying on unverified generation for factual claims.", "severity_default": "high"},
-            {"id": "tf_privacy", "description": "PII flowing through AI components is identified and protected (minimization, masking, or encryption).", "severity_default": "high"}
+            {"id": "tf_explainability", "description": "AI-driven decisions that affect people can be explained at a level appropriate to the audience.", "severity_default": "high", "ai_conditional": true},
+            {"id": "tf_fairness", "description": "AI outputs are evaluated for unjustified variation across populations/segments where the use case involves consequential decisions.", "severity_default": "high", "ai_conditional": true},
+            {"id": "tf_hallucination_control", "description": "LLM outputs are grounded (RAG, validation, citation) rather than relying on unverified generation for factual claims.", "severity_default": "high", "ai_conditional": true},
+            {"id": "tf_privacy", "description": "PII flowing through AI components is identified and protected (minimization, masking, or encryption).", "severity_default": "high", "ai_conditional": true}
           ]
         },
         {
           "id": "risk_resilience",
           "name": "Risk and resilience",
           "checks": [
-            {"id": "rr_ai_threat_model", "description": "AI-specific threats (prompt injection, data poisoning, model extraction) are considered, not just traditional infra security.", "severity_default": "high"},
-            {"id": "rr_incident_response_ai", "description": "An incident response path exists specifically for AI failures (bad output, hallucination, misuse), not just general system incidents.", "severity_default": "medium"},
-            {"id": "rr_validation_before_prod", "description": "AI models/outputs are validated (testing, red-teaming, or human review) before being relied upon in production.", "severity_default": "medium"}
+            {"id": "rr_ai_threat_model", "description": "AI-specific threats (prompt injection, data poisoning, model extraction) are considered, not just traditional infra security.", "severity_default": "high", "ai_conditional": true},
+            {"id": "rr_incident_response_ai", "description": "An incident response path exists specifically for AI failures (bad output, hallucination, misuse), not just general system incidents.", "severity_default": "medium", "ai_conditional": true},
+            {"id": "rr_validation_before_prod", "description": "AI models/outputs are validated (testing, red-teaming, or human review) before being relied upon in production.", "severity_default": "medium", "ai_conditional": true}
           ]
         },
         {
           "id": "unit_economics",
           "name": "Unit economics",
           "checks": [
-            {"id": "ue_cost_per_unit", "description": "Cost per AI call/decision is knowable or estimable, not opaque.", "severity_default": "medium"},
-            {"id": "ue_model_routing", "description": "Cheaper/smaller models are used for simple tasks, reserving expensive models for tasks that need them.", "severity_default": "low"},
-            {"id": "ue_caching_ai", "description": "Repeated or semantically similar AI queries are cached rather than always re-invoking the model.", "severity_default": "low"}
+            {"id": "ue_cost_per_unit", "description": "Cost per AI call/decision is knowable or estimable, not opaque.", "severity_default": "medium", "ai_conditional": true},
+            {"id": "ue_model_routing", "description": "Cheaper/smaller models are used for simple tasks, reserving expensive models for tasks that need them.", "severity_default": "low", "ai_conditional": true},
+            {"id": "ue_caching_ai", "description": "Repeated or semantically similar AI queries are cached rather than always re-invoking the model.", "severity_default": "low", "ai_conditional": true}
           ]
         },
         {
@@ -103,32 +103,32 @@
           "name": "Sovereignty and supply chain",
           "checks": [
             {"id": "ss_data_residency", "description": "Data residency/location constraints are explicit and enforced by design, not left implicit.", "severity_default": "high"},
-            {"id": "ss_provider_dependency", "description": "Foundation model/vendor dependency is acknowledged with some consideration of switching cost or exit path.", "severity_default": "medium"},
-            {"id": "ss_abstraction", "description": "AI provider calls are abstracted behind an internal interface rather than tightly coupled to one vendor's SDK throughout the codebase.", "severity_default": "low"}
+            {"id": "ss_provider_dependency", "description": "Foundation model/vendor dependency is acknowledged with some consideration of switching cost or exit path.", "severity_default": "medium", "ai_conditional": true},
+            {"id": "ss_abstraction", "description": "AI provider calls are abstracted behind an internal interface rather than tightly coupled to one vendor's SDK throughout the codebase.", "severity_default": "low", "ai_conditional": true}
           ]
         },
         {
           "id": "talent_adoption",
           "name": "Talent and adoption",
           "checks": [
-            {"id": "ta_human_in_loop", "description": "Consequential AI decisions retain a human review/override point rather than being fully autonomous.", "severity_default": "medium"},
-            {"id": "ta_user_training", "description": "End users/operators have a defined path to understand and correctly use the AI system's outputs.", "severity_default": "low"}
+            {"id": "ta_human_in_loop", "description": "Consequential AI decisions retain a human review/override point rather than being fully autonomous.", "severity_default": "medium", "ai_conditional": true},
+            {"id": "ta_user_training", "description": "End users/operators have a defined path to understand and correctly use the AI system's outputs.", "severity_default": "low", "ai_conditional": true}
           ]
         },
         {
           "id": "sustainability_ai",
           "name": "Sustainability (AI-specific)",
           "checks": [
-            {"id": "sai_inference_efficiency", "description": "Design choices (model size, caching, batching) that reduce cost also incidentally reduce AI inference energy footprint.", "severity_default": "low"}
+            {"id": "sai_inference_efficiency", "description": "Design choices (model size, caching, batching) that reduce cost also incidentally reduce AI inference energy footprint.", "severity_default": "low", "ai_conditional": true}
           ]
         },
         {
           "id": "ai_governance",
           "name": "AI governance",
           "checks": [
-            {"id": "gov_model_inventory", "description": "Each AI model/component in the design has a clear named owner and purpose.", "severity_default": "medium"},
-            {"id": "gov_audit_trail", "description": "AI decisions/outputs are logged with enough context (input, model version, output) to be reconstructed later.", "severity_default": "high"},
-            {"id": "gov_accountability", "description": "It's clear who is accountable when the AI produces an incorrect or harmful output.", "severity_default": "medium"}
+            {"id": "gov_model_inventory", "description": "Each AI model/component in the design has a clear named owner and purpose.", "severity_default": "medium", "ai_conditional": true},
+            {"id": "gov_audit_trail", "description": "AI decisions/outputs are logged with enough context (input, model version, output) to be reconstructed later.", "severity_default": "high", "ai_conditional": true},
+            {"id": "gov_accountability", "description": "It's clear who is accountable when the AI produces an incorrect or harmful output.", "severity_default": "medium", "ai_conditional": true}
           ]
         }
       ]
