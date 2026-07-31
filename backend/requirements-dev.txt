@@ -11,3 +11,8 @@ httpx==0.28.1        # FastAPI's TestClient transport
 # metric reports itself unavailable rather than zero where the engine is absent, so
 # the deployed service degrades honestly instead of breaking.
 pytesseract==0.3.13
+
+# Read directly by tests/test_promptfoo_config.py to parse promptfooconfig.yaml. It
+# already arrives transitively via uvicorn[standard], but a test that imports a module
+# pins it: an extras change upstream should break the install, not the suite.
+pyyaml==6.0.1

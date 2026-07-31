@@ -1,0 +1,138 @@
+# Trust7 Gatekeeper — regression eval over failure modes already found and fixed.
+#
+# NOT a second accuracy measurement. `backend/scripts/accuracy_harness.py` measures
+# accuracy over all 45 labelled checks, per class and per pillar, with no pass/fail
+# threshold anywhere in it. This file is narrower and has the opposite shape: a small
+# set of settled behaviours, each with a hard pass/fail, so that a prompt change which
+# reintroduces one of them fails a check instead of being noticed by luck on the next
+# manual harness run.
+#
+# READ BEFORE RUNNING: every test here drives the REAL pipeline over the REAL provider
+# and costs real money. See the "Promptfoo regression eval" section of README.md for
+# the command, the call count and the cost.
+#
+# The "prompt" is a ground-truth design id, not a prompt. The real prompts live in
+# backend/agent/stages.py and are deliberately not duplicated here — an eval carrying
+# its own copy of the prompt would keep passing after the shipped one changed, which
+# is the single thing it exists to prevent.
+
+description: Trust7 Gatekeeper pipeline regression eval
+
+prompts:
+  - "{{design}}"
+
+providers:
+  - id: file://backend/scripts/promptfoo_provider.py
+    label: trust7-pipeline
+
+# One review at a time. Two reasons, both real: the provider writes a shared on-disk
+# review cache that concurrent processes would race on, and a review is six model calls
+# against a provider-locked route where parallelism buys latency variance rather than
+# throughput.
+evaluateOptions:
+  maxConcurrency: 1
+
+tests:
+  # ------------------------------------------------------------------------- #
+  # (a) The AI-applicability gate. The most important case in this file.
+  #
+  # design_b_checkout_payments_api is a payments API whose SoW states it "does not
+  # utilize any foundation models, neural networks, or generative capabilities". Its
+  # 18 AI-conditional TRUST-7 checks are labelled not_applicable by a human reviewer.
+  # In one of three otherwise identical harness runs all 18 came back `pass` — 89.3
+  # instead of 42.9 overall, 92.9 instead of 0.0 on TRUST-7 — because nothing gated
+  # them. The one-way gate in backend/agent/ai_gate.py now does.
+  #
+  # Four assertions rather than one, because they fail for different reasons and send
+  # whoever reads the failure to different files.
+  # ------------------------------------------------------------------------- #
+  - description: "no-AI design: all 18 AI-conditional checks are gated, nothing else is"
+    vars:
+      design: design_b_checkout_payments_api
+      expected_ai_verdict: denied
+    assert:
+      - type: python
+        value: file://backend/scripts/promptfoo_asserts.py:ai_conditional_checks_are_not_applicable
+      - type: python
+        value: file://backend/scripts/promptfoo_asserts.py:the_gate_did_not_reach_the_other_checks
+      - type: python
+        value: file://backend/scripts/promptfoo_asserts.py:the_gated_findings_say_why
+      - type: python
+        value: file://backend/scripts/promptfoo_asserts.py:ai_verdict_is
+
+  # The other side of the same gate: a design that DOES have AI must not be gated.
+  # design_a_techassist_rag_portal names Bedrock, Titan embeddings and an LLM router,
+  # and its 45 labels contain no not_applicable at all. A gate that over-fires here
+  # would silence the AI-governance checks on the designs they exist for — the more
+  # dangerous direction, and the reason the gate is one-way.
+  - description: "AI-bearing design: detection says present and nothing is gated"
+    vars:
+      design: design_a_techassist_rag_portal
+      expected_ai_verdict: present
+    assert:
+      - type: python
+        value: file://backend/scripts/promptfoo_asserts.py:ai_verdict_is
+      - type: python
+        value: file://backend/scripts/promptfoo_asserts.py:the_gate_did_not_reach_the_other_checks
+
+  # ------------------------------------------------------------------------- #
+  # (b) Drift detection on settled checks.
+  #
+  # Five cases, each one a check whose ground truth rests on a single explicit
+  # sentence in the design document — the kind of reading that should not move
+  # between runs or across a prompt edit. Expected verdicts are NOT written here:
+  # the assertion reads the label file, so this eval and the accuracy harness can
+  # never disagree about what the truth is.
+  #
+  # SELECTION BASIS — worth knowing before you trust these five. They were chosen by
+  # reading the two design documents for unambiguous, single-sentence evidence. They
+  # are NOT read off the per-check diff of the last --repeats 3 run: that run was made
+  # locally and its report is not in the repo (fixtures/ground_truth/accuracy-report-*
+  # is gitignored as run output). If a case here proves unstable across runs, swap its
+  # check_id for one of the settled rows from your own report — that is the only edit
+  # needed, since the expected verdict comes from the labels.
+  #
+  # sec_secrets_mgmt appears on BOTH designs with opposite ground truth, on purpose:
+  # Design B rotates everything through Secrets Manager, Design A injects API keys as
+  # plaintext environment variables. A prompt change that degrades how secret handling
+  # is read has to break one side or the other, and cannot pass both by guessing.
+  # ------------------------------------------------------------------------- #
+  - description: "drift: oe_iac on the AI-bearing design (Terraform via GitHub Actions -> pass)"
+    vars:
+      design: design_a_techassist_rag_portal
+      check_id: oe_iac
+    assert:
+      - type: python
+        value: file://backend/scripts/promptfoo_asserts.py:verdict_matches_ground_truth
+
+  - description: "drift: sec_secrets_mgmt on the AI-bearing design (plaintext env vars -> fail)"
+    vars:
+      design: design_a_techassist_rag_portal
+      check_id: sec_secrets_mgmt
+    assert:
+      - type: python
+        value: file://backend/scripts/promptfoo_asserts.py:verdict_matches_ground_truth
+
+  - description: "drift: cost_storage_lifecycle on the AI-bearing design (no TTL, no Glacier -> fail)"
+    vars:
+      design: design_a_techassist_rag_portal
+      check_id: cost_storage_lifecycle
+    assert:
+      - type: python
+        value: file://backend/scripts/promptfoo_asserts.py:verdict_matches_ground_truth
+
+  - description: "drift: sec_secrets_mgmt on the no-AI design (Secrets Manager with rotation -> pass)"
+    vars:
+      design: design_b_checkout_payments_api
+      check_id: sec_secrets_mgmt
+    assert:
+      - type: python
+        value: file://backend/scripts/promptfoo_asserts.py:verdict_matches_ground_truth
+
+  - description: "drift: sec_audit_logging on the no-AI design (stated audit gap -> fail)"
+    vars:
+      design: design_b_checkout_payments_api
+      check_id: sec_audit_logging
+    assert:
+      - type: python
+        value: file://backend/scripts/promptfoo_asserts.py:verdict_matches_ground_truth

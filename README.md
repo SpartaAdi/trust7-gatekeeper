@@ -1281,6 +1281,81 @@ them the evaluate stage's 64,000-token request. `--repeats`, `--designs` and
 `--check-labels` exist for that reason. Like `real_api_e2e.py` it exits `2` without
 spending anything when no key is configured.
 
+### Promptfoo regression eval
+
+The accuracy harness *measures*; it draws no conclusion and has no threshold. This is
+the other shape: a small set of behaviours that are already settled, each with a hard
+pass/fail, so that a prompt change reintroducing one of them fails a check instead of
+being noticed by luck on the next manual harness run.
+
+```bash
+cd /path/to/trust7-gatekeeper          # the repo root, NOT backend/
+npx promptfoo@0.121.20 eval -c promptfooconfig.yaml
+npx promptfoo@0.121.20 view            # optional: the same results in a browser
+```
+
+The credential is read the way everything else reads it — `OPENROUTER_API_KEY` from the
+environment or `backend/.env`, never a flag and never printed. Without one the provider
+returns an error per test case rather than spending anything.
+
+**Cost, and how to think about it.** Seven test cases over two designs. The provider
+caches a review on disk and reuses it across the cases that ask about the same design,
+so a cold run is **2 reviews = 12 model calls**, two of them the evaluate stage's
+large-output request — roughly the cost of `--repeats 1` on the accuracy harness. Not
+seven reviews. The eleven assertions are all local Python: there is no `llm-rubric` or
+other model-graded assertion anywhere in the config, so promptfoo's own grader never
+calls a model and no OpenAI key is needed.
+
+The cache is keyed by a digest of everything that could change a verdict — the rubric,
+the stage prompts, `pipeline.py`, the gate, the detector, `scoring.py`, the model id,
+and the design's own bytes. Editing a prompt invalidates it, which is exactly the run
+you would be doing. `TRUST7_EVAL_CACHE=off` refuses it outright. The cache lives in
+`local-data/promptfoo-cache/` and is gitignored.
+
+**What the cases are.**
+
+*The AI-applicability gate*, both polarities. On `design_b_checkout_payments_api` — the
+payments API whose SoW states it has no foundation models, neural networks or
+generative capabilities — all 18 `ai_conditional` checks must come back
+`not_applicable`, everything else must still be evaluated, each gated finding must
+carry the reason it was gated, and the detector's verdict must be `denied`. This is the
+46-point regression described under [AI/ML detection](#aiml-detection--an-audit-record-and-a-one-way-gate),
+and it is the reason the config exists. On `design_a_techassist_rag_portal` the verdict
+must be `present` and nothing may be gated — the over-firing direction, which would
+silence AI-governance findings on the designs they exist for.
+
+*Drift detection*, five checks whose ground truth rests on a single explicit sentence
+in the design document: `oe_iac`, `sec_secrets_mgmt` and `cost_storage_lifecycle` on
+the AI-bearing design, `sec_secrets_mgmt` and `sec_audit_logging` on the no-AI one.
+`sec_secrets_mgmt` appears on both with opposite truth on purpose — one design rotates
+everything through Secrets Manager, the other injects API keys as plaintext environment
+variables — so a prompt change that degrades how secret handling is read must break one
+side and cannot pass both by guessing. Expected verdicts are read from the label file,
+never written into the YAML, so this eval and the accuracy harness cannot disagree
+about what the truth is.
+
+**Reading a result.** A failure means the pipeline's behaviour on a settled case moved.
+The reason line names the check and both verdicts, so the first question is which kind
+of move it was: an AI-conditional check arriving as anything but `not_applicable` is a
+gate or wiring regression (`agent/ai_gate.py`, `agent/pipeline.py`); a wrong
+`ai_verdict` is a detector regression (`agent/ai_detection.py`); a drift case flipping
+is an evaluate-prompt or classify regression. A pass means those specific behaviours
+still hold — it is **not** an accuracy statement, and the eval has no opinion about the
+other 40 checks. Use the harness for that.
+
+**What is deliberately not tested here.** The model's tendency to hedge toward
+`partial` on checks with a clear `pass`/`fail` label. That is a disclosed limitation,
+measured across all 45 checks by the accuracy harness's per-class figures, and turning
+it into a pass/fail here would mean this file failed for a known reason on most runs
+and stopped being read.
+
+The config is guarded offline by `backend/tests/test_promptfoo_config.py`, which runs in
+the ordinary suite at no cost. It resolves every `file://` reference, checks every
+design id against the ground-truth loader and every `check_id` against the rubric, and
+— the part that matters — feeds each assertion a synthetic *regressed* payload and
+requires it to fail. The 46-point shape (all 18 returned `pass`) is one of those
+payloads. An eval whose assertions have never been observed to fail is decoration.
+
 Frontend tests are deliberately shallow: each view renders with mocked API
 responses and must not crash, plus one interaction test covering the upload path.
 The test setup throws on any unmocked `fetch`, so a test that reaches the network
