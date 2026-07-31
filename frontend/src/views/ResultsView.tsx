@@ -858,7 +858,7 @@ function DeltaSummary({ delta }: { delta: ScoreDelta }) {
   // each other for the top of the page.
   return (
     <section className="mt-10 border-l-2 border-minfy-indigo bg-surface-sunken px-5 py-4.5">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <h3 className="t-heading">Change since the previous review</h3>
         <p className="tnum t-caption text-ink-muted">
           {delta.previous_overall_score.toFixed(1)} → {delta.current_overall_score.toFixed(1)}
@@ -866,29 +866,42 @@ function DeltaSummary({ delta }: { delta: ScoreDelta }) {
         <ChangeBadge change={delta.change} />
       </div>
 
-      <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-1">
+      {/* Value before label, and the value a step up in size. The three counts are what
+          a reader scans this panel for; when both halves sat at caption weight the row
+          read as one long sentence of alternating words. */}
+      <dl className="mt-3.5 flex flex-wrap gap-x-7 gap-y-2">
         <Stat label="Resolved" value={delta.resolved_checks.length} tone="text-verdict-pass" />
         <Stat label="New" value={delta.new_checks.length} tone="text-sev-high" />
         <Stat label="Still open" value={delta.unchanged_failures.length} tone="text-ink" />
       </dl>
 
       {moved.length > 0 ? (
-        <ul className="mt-4 grid gap-x-10 gap-y-1.5 sm:grid-cols-2">
+        /*
+          A three-part row — name, scores, badge — with the numbers in their own fixed
+          column rather than pushed right by `justify-between`. Previously a short pillar
+          name and a long one put their figures in different places, so the two grid
+          columns could not be read down.
+        */
+        <ul className="mt-4 grid gap-x-10 gap-y-2 border-t border-ink/10 pt-3 sm:grid-cols-2">
           {moved.map((pillar) => (
             <li
               key={`${pillar.framework}-${pillar.pillar_id}`}
-              className="t-caption flex items-baseline justify-between gap-3"
+              className="t-caption flex items-baseline gap-3"
             >
-              <span className="truncate">{pillar.pillar_name}</span>
-              <span className="tnum flex shrink-0 items-baseline gap-2 text-ink-muted">
+              <span className="min-w-0 flex-1 truncate" title={pillar.pillar_name}>
+                {pillar.pillar_name}
+              </span>
+              <span className="tnum w-[4.5rem] shrink-0 text-right text-ink-muted">
                 {pillar.previous_score.toFixed(0)} → {pillar.current_score.toFixed(0)}
+              </span>
+              <span className="w-[3.25rem] shrink-0 text-right">
                 <ChangeBadge change={pillar.change} compact />
               </span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="t-caption mt-3 text-ink-muted">
+        <p className="t-caption mt-3.5 text-ink-muted">
           No pillar score changed between the two reviews.
         </p>
       )}
@@ -898,9 +911,11 @@ function DeltaSummary({ delta }: { delta: ScoreDelta }) {
 
 function Stat({ label, value, tone }: { label: string; value: number; tone: string }) {
   return (
+    /* DOM order stays dt-then-dd, which is what a definition list requires and what a
+       screen reader reads; only the visual order is swapped. */
     <div className="flex items-baseline gap-1.5">
-      <dt className="t-caption text-ink-muted">{label}</dt>
-      <dd className={`tnum t-caption font-semibold ${tone}`}>{value}</dd>
+      <dt className="t-caption order-2 text-ink-muted">{label}</dt>
+      <dd className={`tnum t-body order-1 font-semibold ${tone}`}>{value}</dd>
     </div>
   )
 }

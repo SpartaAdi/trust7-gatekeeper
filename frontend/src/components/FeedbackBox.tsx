@@ -172,7 +172,14 @@ export function FeedbackBox({
           maxLength={MAX_FEEDBACK_CHARS}
           aria-label="What this review got wrong, or what has changed"
           placeholder="The orders table is encrypted with a customer-managed key — see section 4 of the SoW. And the queue now has a dead-letter queue after three attempts."
-          className="t-body min-w-0 flex-1 resize-y border border-hairline bg-surface px-3 py-2 transition-colors duration-150 placeholder:text-ink-faint hover:border-ink-faint focus:border-minfy-indigo disabled:opacity-60"
+          /*
+            `border-ink-faint`, not `border-hairline`. The audit pass over this surface
+            measured it: hairline is 1.38:1 against the sky fill outside the field and
+            1.52:1 against the white inside it, so the only boundary of the primary
+            input on this panel was invisible by WCAG 1.4.11's 3:1 measure. ink-faint is
+            5.23:1. Same class of miss as the version chips.
+          */
+          className="t-body min-w-0 flex-1 resize-y border border-ink-faint bg-surface px-3 py-2 transition-colors duration-150 placeholder:text-ink-faint hover:border-ink focus:border-minfy-indigo disabled:opacity-60"
         />
 
         {/* Same control as the context field's, including the hover popover, so the
@@ -185,45 +192,86 @@ export function FeedbackBox({
               disabled={busy !== ''}
               aria-pressed={listening}
               aria-label={listening ? 'Stop dictating' : 'Speak your feedback'}
-              title="Speak your feedback"
-              className={`flex size-12 items-center justify-center transition-colors duration-150 disabled:opacity-60 ${
+              /* Follows the state, like the accessible name already did. A static
+                 "Speak your feedback" tip over a stop square contradicts the glyph. */
+              title={listening ? 'Stop dictating' : 'Speak your feedback'}
+              /*
+                The listening state used to be carried by fill alone — indigo #1420be
+                to navy #1b263b, two dark blues that are hard to tell apart side by
+                side and impossible to tell apart from memory. It now also gains a ring
+                and a filled dot, so the state survives a reader who cannot separate
+                those two hues and one who never saw the other state.
+              */
+              className={`relative flex size-12 items-center justify-center transition-colors duration-150 disabled:opacity-60 ${
                 listening
-                  ? 'bg-minfy-navy text-white'
+                  ? 'bg-minfy-navy text-white ring-2 ring-minfy-navy ring-offset-2 ring-offset-pastel-sky'
                   : 'bg-minfy-indigo text-white hover:bg-minfy-blue'
               }`}
             >
-              <svg viewBox="0 0 16 16" aria-hidden="true" className="size-5 fill-current">
-                <path d="M8 1.5a2 2 0 0 1 2 2v4a2 2 0 0 1-4 0v-4a2 2 0 0 1 2-2Z" />
-                <path d="M4 7a.75.75 0 0 1 1.5 0 2.5 2.5 0 0 0 5 0A.75.75 0 0 1 12 7a4 4 0 0 1-3.25 3.93v1.32h1.75a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.75v-1.32A4 4 0 0 1 4 7Z" />
-              </svg>
+              {/*
+                A stop square while listening, the mic otherwise. The glyph is the
+                second, non-colour carrier of the state and it also says what the next
+                press DOES, which is what the accessible name already says — the two
+                now agree. `minfy-yellow` was the other candidate for a recording dot
+                and is deliberately not used: index.css reserves it for the logo mark
+                and forbids it as a status colour.
+              */}
+              {listening ? (
+                <svg viewBox="0 0 16 16" aria-hidden="true" className="size-4 fill-current">
+                  <rect x="3" y="3" width="10" height="10" rx="1" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 16 16" aria-hidden="true" className="size-5 fill-current">
+                  <path d="M8 1.5a2 2 0 0 1 2 2v4a2 2 0 0 1-4 0v-4a2 2 0 0 1 2-2Z" />
+                  <path d="M4 7a.75.75 0 0 1 1.5 0 2.5 2.5 0 0 0 5 0A.75.75 0 0 1 12 7a4 4 0 0 1-3.25 3.93v1.32h1.75a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.75v-1.32A4 4 0 0 1 4 7Z" />
+                </svg>
+              )}
             </button>
             <span
               aria-hidden="true"
               data-testid="feedback-mic-tooltip"
-              className="pointer-events-none absolute right-0 top-full z-10 mt-1.5 w-max max-w-[13rem] bg-minfy-navy px-2.5 py-1.5 text-right text-[0.75rem] leading-snug text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+              className="t-caption pointer-events-none absolute right-0 top-full z-10 mt-1.5 w-max max-w-[13rem] bg-minfy-navy px-2.5 py-1.5 text-right leading-snug text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
             >
-              Speak your feedback
+              {listening ? 'Stop dictating' : 'Speak your feedback'}
             </span>
           </span>
         )}
       </div>
 
-      <p className="t-caption mt-1.5 text-[0.75rem] text-ink-muted" aria-live="polite">
-        {listening
-          ? 'Listening — speak, then press the mic again to stop.'
-          : `${remaining} characters left.`}
-      </p>
+      {/*
+        Two nodes, and the split is the point. Both statuses shared one `aria-live`
+        region, so the character count changed inside it on every keystroke and a screen
+        reader announced "3994 characters left" after every letter typed — the live
+        region was firing on the one thing nobody needs told.
+
+        The dictation status keeps the live region (it changes on a deliberate press, and
+        it is the state a blind user cannot otherwise perceive). The counter is now plain
+        text: it is visible, it is reachable, and it is not news.
+      */}
+      <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <p
+          className="t-caption font-medium text-ink"
+          aria-live="polite"
+          data-testid="feedback-dictation-status"
+        >
+          {listening ? 'Listening — speak, then press stop when you are done.' : ''}
+        </p>
+        <p className="t-caption tnum ml-auto text-ink-muted">{remaining} characters left.</p>
+      </div>
 
       {/*
         Optional, and behind a disclosure because most rounds are words alone —
         that is the case the endpoint was built to support. An always-open drop
         zone would imply a file is expected.
       */}
-      <details className="mt-3.5" data-testid="feedback-attachment">
-        <summary className="t-caption cursor-pointer text-minfy-indigo underline underline-offset-2 transition-colors hover:text-minfy-blue">
+      <details className="mt-4 border-t border-ink/10 pt-3.5" data-testid="feedback-attachment">
+        {/* `font-medium` and a hairline above it: the disclosure sits between the
+            counter row and the submit button, and at plain caption weight on a tinted
+            fill it read as a third line of fine print rather than as a control. */}
+        <summary className="t-caption cursor-pointer font-medium text-minfy-indigo underline underline-offset-2 transition-colors hover:text-minfy-blue">
           Attach a revised document or diagram (optional)
         </summary>
-        <p className="t-caption mt-2 max-w-prose text-ink-muted">
+        <p className="t-caption mt-2.5 max-w-prose text-ink-muted">
           A new attachment REPLACES the design this review was scored against; the
           old one is carried through only as context for what changed. Same file
           types and same checks as the original upload.

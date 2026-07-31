@@ -52,12 +52,20 @@ export function VersionBanner({
   const previous = result.based_on_review_id ?? ''
 
   return (
+    /*
+      A 4px rule rather than the 2px every caveat panel uses, and the only block on
+      the page with one. Four left-ruled blocks stack here — this banner, the feedback
+      box, the detection panel and the delta panel — and at identical weight they read
+      as four equal asides. This one is not an aside: it says WHICH DOCUMENT the reader
+      is looking at, and everything below is scoped to that. The extra 2px is the whole
+      of the hierarchy fix; no new colour, no new fill.
+    */
     <section
       data-testid="version-banner"
       data-version={version}
-      className="mt-8 border-l-2 border-minfy-navy bg-surface-sunken px-5 py-4"
+      className="mt-8 border-l-4 border-minfy-navy bg-surface-sunken px-5 py-4.5"
     >
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <h2 className="t-heading">
           Follow-up review — version <span className="tnum">{version}</span>
           <span className="t-caption font-normal text-ink-muted">
@@ -69,7 +77,7 @@ export function VersionBanner({
           <button
             type="button"
             onClick={() => onOpenVersion(previous)}
-            className="t-caption text-minfy-indigo underline underline-offset-2 transition-colors hover:text-minfy-blue"
+            className="t-caption font-medium text-minfy-indigo underline underline-offset-2 transition-colors hover:text-minfy-blue"
           >
             Open the previous version
           </button>
@@ -86,13 +94,13 @@ export function VersionBanner({
         and the difference should be visible.
       */}
       {result.feedback && (
-        <figure className="mt-3">
-          <figcaption className="t-caption text-ink-muted">
+        <figure className="mt-3.5">
+          <figcaption className="t-eyebrow text-ink-faint">
             Your feedback for this round
           </figcaption>
           <blockquote
             data-testid="version-feedback"
-            className="t-caption mt-1 border-l border-ink/20 pl-3 font-mono text-pretty text-ink-muted"
+            className="t-caption mt-1.5 border-l-2 border-ink/25 pl-3.5 font-mono text-pretty text-ink-muted"
           >
             {result.feedback}
           </blockquote>
@@ -100,7 +108,16 @@ export function VersionBanner({
       )}
 
       {chain && chain.length > 1 && (
-        <ol className="mt-3.5 flex flex-wrap gap-x-2 gap-y-1.5" data-testid="version-chain">
+        /*
+          `aria-label` rather than a visible caption: the chips are a list of links to
+          sibling reviews, and without a name a screen reader reads them as a bare run
+          of "v1 48.9" buttons with nothing saying what the list is.
+        */
+        <ol
+          aria-label="All versions of this review"
+          className="mt-4 flex flex-wrap gap-x-2 gap-y-2"
+          data-testid="version-chain"
+        >
           {chain.map((entry) => {
             const current = entry.review_id === result.review_id
             return (
@@ -115,14 +132,26 @@ export function VersionBanner({
                       ? 'The original review'
                       : entry.feedback || 'Follow-up round'
                   }
-                  className={`t-caption tnum border px-2.5 py-1 transition-colors duration-150 ${
+                  /*
+                    `border-ink-faint` rather than `border-hairline`. These are the only
+                    controls on the page whose entire boundary was a hairline — #ccd2dc
+                    on the sunken fill is 1.42:1, well under the 3:1 WCAG 1.4.11 asks
+                    for the boundary of a user-interface component, so they read as
+                    floating text rather than as buttons. ink-faint is 5.37:1.
+                  */
+                  className={`t-caption tnum border px-2.5 py-1.5 transition-colors duration-150 ${
                     current
                       ? 'cursor-default border-minfy-navy bg-minfy-navy font-semibold text-white'
-                      : 'border-hairline hover:border-ink-faint hover:bg-surface'
+                      : 'border-ink-faint text-ink hover:border-minfy-navy hover:bg-surface'
                   }`}
                 >
                   v{entry.version}
-                  <span className="font-normal opacity-70">
+                  {/* `text-*` rather than `opacity-70`: opacity fades the border and
+                      the background with the text on a control whose boundary is the
+                      thing that just got fixed. */}
+                  <span
+                    className={`font-normal ${current ? 'text-white/80' : 'text-ink-muted'}`}
+                  >
                     {' '}
                     · {entry.overall_score.toFixed(1)}
                   </span>

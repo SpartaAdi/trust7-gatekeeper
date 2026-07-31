@@ -207,6 +207,77 @@ def pairs() -> list[tuple[str, str, str, str, str]]:
     add(s, "copy fix-it prompt copied, white on navy", white, navy, TEXT)
     add(s, "copy failure message, sev-high on surface", high, surface, TEXT)
 
+    # Three surfaces the audit did not reach until the visual pass over them. The gap
+    # mattered: the version chips' only boundary was a hairline at 1.42:1 on the sunken
+    # fill, well under the 3:1 WCAG 1.4.11 asks of a control's boundary, and nothing
+    # here was measuring it.
+    s = "AI detection panel"
+    add(s, "verdict tag 'AI present', navy on navy/5 over sunken",
+        navy, over(navy, sunken, 0.05), TEXT)
+    add(s, "verdict tag 'AI likely', sev-medium on sev-medium/8 over sunken",
+        medium, over(medium, sunken, 0.08), TEXT)
+    add(s, "verdict tag 'No AI found', ink-faint on ink-faint/5 over sunken",
+        faint, over(faint, sunken, 0.05), TEXT)
+    # The tags' 1px borders. Decorative: each tag carries a tint AND a word, so the
+    # border is not what identifies it. Listed so the exemption is visible rather than
+    # assumed, matching how the remediation rule above is handled.
+    add(s, "verdict tag border, navy/40 on navy/5 over sunken",
+        over(navy, sunken, 0.40), over(navy, sunken, 0.05), EXEMPT)
+    add(s, "verdict tag border, sev-medium/40 on sev-medium/8 over sunken",
+        over(medium, sunken, 0.40), over(medium, sunken, 0.08), EXEMPT)
+    add(s, "evidence disclosure, indigo on sunken", indigo, sunken, TEXT)
+    add(s, "evidence disclosure chevron, indigo on sunken", indigo, sunken, GRAPHIC)
+    add(s, "signal name, ink on sunken", ink, sunken, TEXT)
+    add(s, "signal tier, ink-faint on sunken", faint, sunken, TEXT)
+    # The submitted text, quoted. It moved from ink-faint to ink-muted in the visual
+    # pass: it was the faintest thing in the panel and it is the only part a reviewer
+    # can check against the original document.
+    add(s, "quoted excerpt mono, ink-muted on sunken", muted, sunken, TEXT)
+    add(s, "signal source, ink-faint on sunken", faint, sunken, TEXT)
+    add(s, "evidence item rule, ink/10 on sunken", over(ink, sunken, 0.10), sunken, EXEMPT)
+
+    s = "Version banner and delta"
+    add(s, "banner heading, ink on sunken", ink, sunken, TEXT)
+    add(s, "'of N' count, ink-muted on sunken", muted, sunken, TEXT)
+    add(s, "feedback eyebrow, ink-faint on sunken", faint, sunken, TEXT)
+    add(s, "quoted feedback mono, ink-muted on sunken", muted, sunken, TEXT)
+    add(s, "'Open the previous version', indigo on sunken", indigo, sunken, TEXT)
+    # The regression the pass fixed. `border-hairline` here was the entire visual
+    # boundary of a button, at 1.42:1.
+    add(s, "version chip border, ink-faint on sunken", faint, sunken, GRAPHIC)
+    add(s, "version chip label, ink on sunken", ink, sunken, TEXT)
+    add(s, "version chip score, ink-muted on sunken", muted, sunken, TEXT)
+    add(s, "current version chip, white on navy", white, navy, TEXT)
+    add(s, "current version chip score, white/80 on navy",
+        over(white, navy, 0.80), navy, TEXT)
+    add(s, "delta stat value resolved, verdict-pass on sunken", passing, sunken, TEXT)
+    add(s, "delta stat value new, sev-high on sunken", high, sunken, TEXT)
+    add(s, "delta stat label, ink-muted on sunken", muted, sunken, TEXT)
+    add(s, "delta pillar scores, ink-muted on sunken", muted, sunken, TEXT)
+
+    s = "Feedback box"
+    add(s, "heading, ink on sky", ink, sky, TEXT)
+    add(s, "instruction, ink-muted on sky", muted, sky, TEXT)
+    add(s, "textarea text, ink on surface", ink, surface, TEXT)
+    # Was `hairline` — 1.38:1 against the sky fill outside the field and 1.52:1
+    # against the white inside it. The only boundary of this panel's primary input.
+    add(s, "textarea border, ink-faint on sky", faint, sky, GRAPHIC)
+    add(s, "textarea border inner edge, ink-faint on surface", faint, surface, GRAPHIC)
+    add(s, "dictation status, ink on sky", ink, sky, TEXT)
+    add(s, "character counter, ink-muted on sky", muted, sky, TEXT)
+    add(s, "mic glyph idle, white on indigo", white, indigo, GRAPHIC)
+    add(s, "stop glyph listening, white on navy", white, navy, GRAPHIC)
+    # The second, non-colour carrier of the listening state is the glyph swap; the ring
+    # is the third. Measured anyway, since it is drawn on the sky fill.
+    add(s, "listening ring, navy on sky", navy, sky, GRAPHIC)
+    add(s, "mic tooltip, white on navy", white, navy, TEXT)
+    add(s, "attachment disclosure, indigo on sky", indigo, sky, TEXT)
+    add(s, "attachment note, ink-muted on sky", muted, sky, TEXT)
+    add(s, "attachment rule, ink/10 on sky", over(ink, sky, 0.10), sky, EXEMPT)
+    add(s, "submit button, white on indigo", white, indigo, TEXT)
+    add(s, "blocker reason, ink-muted on sky", muted, sky, TEXT)
+    add(s, "upload error, sev-high on sky", high, sky, TEXT)
+
     s = "PDF cover"
     add(s, "title 30pt, WHITE on NAVY", p["WHITE"], p["NAVY"], LARGE)
     add(s, "eyebrow 8.5pt, ACCENT_ON_DARK on NAVY", p["ACCENT_ON_DARK"], p["NAVY"], TEXT)

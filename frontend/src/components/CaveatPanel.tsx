@@ -27,6 +27,8 @@ export function CaveatPanel({
   title,
   body,
   detail,
+  badge,
+  footer,
   testId,
 }: {
   tone: CaveatTone
@@ -34,6 +36,26 @@ export function CaveatPanel({
   body: ReactNode
   /** The measurements behind the claim. Shown, not hidden — see below. */
   detail?: string
+  /**
+   * A short status tag on the title line. Optional and presentational.
+   *
+   * Added for the AI-detection panel, whose SIX verdicts collapsed into this
+   * component's two tones — `present`, `likely`, `absent`, `denied` and `not_run` all
+   * rendered as the same navy block, distinguishable only by reading a full sentence.
+   * The tag names the verdict in one or two words so the state is scannable, without
+   * inventing a third tone or a second panel style. Callers that have one state pass
+   * nothing and are unchanged.
+   */
+  badge?: ReactNode
+  /**
+   * Content that belongs to the panel rather than after it — a disclosure and what it
+   * reveals. Rendered inside the block, so it inherits the fill and the left rule.
+   *
+   * Also added for the AI-detection panel: its evidence disclosure used to sit on the
+   * page background BELOW the block, which read as unrelated content rather than as
+   * the panel's own supporting detail.
+   */
+  footer?: ReactNode
   testId?: string
 }) {
   const caution = tone === 'caution'
@@ -69,15 +91,21 @@ export function CaveatPanel({
           <path d="M8 7.4 V11.2" className={stroke} strokeWidth="1.3" strokeLinecap="round" />
         </svg>
       )}
-      <div className="min-w-0">
-        <p className="t-heading">{title}</p>
-        <p className="t-caption mt-1 break-words text-ink-muted">{body}</p>
+      <div className="min-w-0 flex-1">
+        {/* Tag first in the DOM but baseline-aligned beside the title, so a screen
+            reader hears the state before the sentence that elaborates it. */}
+        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+          {badge}
+          <p className="t-heading">{title}</p>
+        </div>
+        <p className="t-caption mt-1.5 break-words text-ink-muted">{body}</p>
         {detail && (
           /* Shown, not tucked behind a disclosure. It is the measurement the claim
              rests on, and a number a reviewer cannot check is one they have to take
              on trust. */
-          <p className="t-caption mt-1.5 break-words font-mono text-ink-faint">{detail}</p>
+          <p className="t-caption mt-2 break-words font-mono text-ink-faint">{detail}</p>
         )}
+        {footer}
       </div>
     </div>
   )

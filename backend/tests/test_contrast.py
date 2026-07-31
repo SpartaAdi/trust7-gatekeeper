@@ -36,7 +36,7 @@ def test_the_audit_covers_the_whole_surface_area() -> None:
     pairs = contrast_audit.pairs()
     sections = {section for section, *_ in pairs}
 
-    assert len(pairs) >= 90, f"only {len(pairs)} pairs — did the list shrink?"
+    assert len(pairs) >= 130, f"only {len(pairs)} pairs — did the list shrink?"
     assert sections >= {
         "Findings accordion",
         "Maturity tooltip",
@@ -45,6 +45,12 @@ def test_the_audit_covers_the_whole_surface_area() -> None:
         "Pastel blocks",
         "Header and nav",
         "Controls",
+        # Added by the visual pass over these three surfaces. They had never been
+        # audited, and the gap was not academic: the version chips' entire boundary
+        # was a hairline at 1.42:1 and the feedback textarea's at 1.38:1.
+        "AI detection panel",
+        "Version banner and delta",
+        "Feedback box",
         "PDF cover",
         "PDF body",
     }
@@ -55,14 +61,22 @@ def test_borderline_pairs_are_known_and_few() -> None:
 
     Pinning the list means a NEW borderline pair shows up as a test failure and gets
     a decision, rather than accumulating silently until the next drift pushes it
-    under 4.5. Both entries here need a component change, not a token change:
-    `sev-medium` on its own 8% tint, and the header's `text-white/50` tab.
+    under 4.5. Every entry here needs a component change, not a token change.
+
+    The two AI-detection tags were added by the visual pass over that panel and are
+    accepted deliberately. `sev-medium` on its own 8% tint at 4.73 is the same
+    treatment the findings accordion's "Partial" tag already ships at 5.03 — a
+    component-wide decision, not a new one. `ink-faint` at 5.04 is the quiet tag for
+    the ordinary "no AI here" case, and darkening it would make a non-finding shout.
+    Neither is colour-only: the tag's own word carries the verdict.
     """
     _, borderline = contrast_audit.audit()
 
     assert {label for label, *_ in borderline} == {
         "Findings accordion: status tag 'Partial', sev-medium on sev-medium/8",
         "Header and nav: inactive tab, white/50 on navy",
+        "AI detection panel: verdict tag 'AI likely', sev-medium on sev-medium/8 over sunken",
+        "AI detection panel: verdict tag 'No AI found', ink-faint on ink-faint/5 over sunken",
     }
 
 
