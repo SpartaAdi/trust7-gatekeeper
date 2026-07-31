@@ -491,6 +491,47 @@ def test_the_configured_ceiling_is_not_below_what_any_stage_requests() -> None:
     )
 
 
+def test_prioritize_asks_for_more_than_the_ceiling_that_killed_a_review() -> None:
+    """16000 on prioritize failed a real review; it must not drift back.
+
+    Run 3 of 3 on the AI-bearing design: prioritize blew the 120s deadline,
+    `_openrouter_complete` retried one step down at `low` effort as designed, and
+    that attempt hit 16000 before closing its JSON. `TruncatedResponse` at `low` has
+    nowhere left to step down, so it propagated and the review failed — after
+    evaluate had already been paid for twice.
+
+    Asserted as a floor rather than an equality: a future raise to evaluate's 64000
+    is a legitimate next step if it recurs, and this should not stand in the way of
+    it. What must never happen is a return to a value already observed to fail.
+
+    The measured shape of the stage is why the number was wrong. Its JSON is the
+    SMALLEST in the pipeline — ~600 tokens for 10 open findings, ~2,300 for all 45 —
+    so 16000 left roughly 13,700 for reasoning and reasoning still overran it.
+    Prioritize is the only stage producing a total order, weighing every finding
+    against every other; every other stage is per-item and independent. Highest
+    reasoning demand, lowest ceiling.
+    """
+    import re
+
+    backend = pathlib.Path(__file__).resolve().parent.parent
+    source = (backend / "agent" / "stages.py").read_text()
+
+    # The call site is identified by its label, so this cannot pass by reading some
+    # other stage's ceiling.
+    block = source[: source.index('label="prioritize"')]
+    asked = [int(n) for n in re.findall(r"max_tokens=(\d+),", block)]
+    assert asked, "no max_tokens found before the prioritize label — has it moved?"
+    prioritize_tokens = asked[-1]
+
+    assert prioritize_tokens > 16000, (
+        f"prioritize requests {prioritize_tokens}; 16000 truncated in a real run "
+        f"and failed the whole review"
+    )
+    # And it must still clear both ceilings, or the raise is silently clamped away.
+    assert prioritize_tokens <= config.OPENROUTER_MAX_COMPLETION_TOKENS
+    assert prioritize_tokens <= config.OPENROUTER_ROUTING_SAFE_COMPLETION_TOKENS
+
+
 def test_no_stage_requests_more_than_the_routing_safe_ceiling() -> None:
     """The guard the ceiling used to provide implicitly.
 

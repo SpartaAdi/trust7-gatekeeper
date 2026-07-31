@@ -683,7 +683,40 @@ def prioritize(
         ],
         schema=_PRIORITIZE_SCHEMA,
         effort="medium",
-        max_tokens=16000,
+        # Raised from 16000, which killed a real review. In run 3 of 3 on the
+        # AI-bearing design this call blew the 120s deadline, `_openrouter_complete`
+        # retried it one step down at `low` effort as designed, and that attempt hit
+        # the 16000 ceiling before closing the JSON. `TruncatedResponse` at `low`
+        # has nowhere further to step down, so it propagated and the whole review
+        # failed — after evaluate had already been paid for twice.
+        #
+        # 16000 was the wrong number for THIS stage specifically, and the reason is
+        # the shape of the work rather than the size of the answer. Measured, the
+        # JSON here is the smallest in the pipeline: ~600 output tokens for 10 open
+        # findings and ~2,300 for all 45. So the ceiling left roughly 13,700 tokens
+        # for reasoning and reasoning still overran it — because on OpenRouter
+        # reasoning is drawn from this same budget, and prioritize is the one stage
+        # whose reasoning does not scale with its output.
+        #
+        # Every other stage is per-item and independent: classify describes each
+        # component, evaluate judges each check, remediate writes a fix per finding.
+        # Prioritize has to produce a TOTAL ORDER — weighing each finding against
+        # every other on four axes (blast radius, irreversibility, compliance
+        # coupling, cost-of-delay). That is quadratic-ish reasoning for linear
+        # output, so it had the highest reasoning demand in the pipeline and the
+        # lowest ceiling to meet it from.
+        #
+        # 32000 rather than 64000, and matched to remediate deliberately: remediate
+        # runs at the same effort, emits MORE JSON than this (~45 prose entries), and
+        # did not truncate in any of the six runs. That leaves prioritize slightly
+        # more reasoning headroom than the stage which demonstrably has enough, which
+        # is the smallest raise the evidence supports. If this recurs the next step is
+        # 64000 — evaluate's figure, chosen to stay under Venice's 65,536 so 15 of 22
+        # providers stay routable.
+        #
+        # Raising a ceiling is not a spend: billing is on tokens generated, and the
+        # 120s deadline remains the real bound on a runaway call.
+        max_tokens=32000,
         label="prioritize",
     )
 
