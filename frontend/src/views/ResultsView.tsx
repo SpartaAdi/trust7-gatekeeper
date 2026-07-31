@@ -4,9 +4,11 @@ import { ApiError, createShareLink, downloadReport, getReview, shareUrl } from '
 import { AiDetectionPanel, pillarNotApplicableReason } from '../components/AiDetectionPanel'
 import { ChangeBadge } from '../components/ChangeBadge'
 import { DataFidelity } from '../components/DataFidelity'
+import { FeedbackBox } from '../components/FeedbackBox'
 import { IngestWarnings } from '../components/IngestWarnings'
 import { SeverityMark } from '../components/SeverityMark'
 import { StructuredText } from '../components/StructuredText'
+import { VersionBanner } from '../components/VersionBanner'
 import {
   MATURITY_BOUND_NOTE,
   MATURITY_SCALE,
@@ -38,7 +40,16 @@ import {
 
 interface Props {
   reviewId: string
+  /** The re-analyze flow: a fresh design, submitted through the upload step. */
   onReReview: () => void
+  /**
+   * A follow-up ROUND started from the feedback box. Distinct from `onReReview`:
+   * this one is already accepted and running, so the caller polls it rather than
+   * routing back to the upload step.
+   */
+  onFollowUpStarted: (newReviewId: string, startedAt: number) => void
+  /** Open another version of this review in place. */
+  onOpenVersion: (reviewId: string) => void
   onStartOver: () => void
   onBackToHistory: () => void
 }
@@ -46,6 +57,8 @@ interface Props {
 export function ResultsView({
   reviewId,
   onReReview,
+  onFollowUpStarted,
+  onOpenVersion,
   onStartOver,
   onBackToHistory,
 }: Props) {
@@ -150,6 +163,28 @@ export function ResultsView({
       </header>
 
       {/*
+        Which document this is, before anything about what it says. Renders nothing
+        on an original review — a "version 1 of 1" banner on every first review is
+        noise, and noise is what teaches people to stop reading banners.
+      */}
+      <VersionBanner result={result} onOpenVersion={onOpenVersion} />
+
+      {/*
+        The follow-up box, at the top of the review as asked.
+
+        Reaching ResultsView at all means the review is complete: `GET /reviews/{id}`
+        answers from the stored ReviewResult, which is written only by a run that
+        finished, so there is no state in which this renders early. The check is the
+        fetch, not a flag that could drift from it.
+
+        The three caveat panels stay directly below rather than above, and that
+        ordering is deliberate in both directions: they were put at the top in an
+        earlier round to precede every number they qualify, which they still do —
+        the executive summary and all five sections are below them.
+      */}
+      <FeedbackBox reviewId={result.review_id} onStarted={onFollowUpStarted} />
+
+      {/*
         ABOVE the executive summary and the score, deliberately. A warning says the
         review may have been scored on a fraction of the design; a reader who meets
         the 62.4 and the summary first has already formed a view by the time they
@@ -243,7 +278,7 @@ export function ResultsView({
           onClick={onReReview}
           className="t-body bg-minfy-indigo px-5 py-2.5 font-semibold text-white transition-colors duration-150 hover:bg-minfy-blue"
         >
-          Re-review a revised design
+          Score a different design against this one
         </button>
         <DownloadReportButton reviewId={result.review_id} />
         {/* Shown only when the prompt would carry something. A button that copies a

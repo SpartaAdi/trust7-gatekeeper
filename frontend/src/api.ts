@@ -12,6 +12,7 @@ import type {
   ReviewResult,
   ReviewStatus,
   ReviewSummary,
+  ReviewVersions,
   ShareLink,
   SharedReview,
   UploadTicket,
@@ -179,6 +180,57 @@ export async function submitReview(options: SubmitOptions): Promise<ReviewAccept
     body,
     headers: apiKey ? { [OPENROUTER_KEY_HEADER]: apiKey } : {},
   })
+}
+
+export interface ReReviewOptions {
+  /** Required. Free text: what the previous version got wrong, or what changed. */
+  feedback: string
+  /** Optional new SoW / solution document, already through POST /uploads. */
+  documentKey?: string
+  /** Optional new diagram or screenshot, already through POST /uploads. */
+  diagramKey?: string
+}
+
+/**
+ * Follow up on a review with feedback, optionally with a new attachment.
+ *
+ * Distinct from `submitReview({ previousReviewId })`, which posts to `/reanalyze`
+ * and produces an unrelated review carrying a delta. This appends a VERSION to an
+ * existing review's chain and can run on feedback alone.
+ *
+ * `reviewId` may be any member of the chain — the server builds the round on the
+ * latest version, which is what stops repeated follow-ups on the original id from
+ * producing competing v2s.
+ *
+ * Returns 202 with the NEW version's id; the round runs in the background and is
+ * polled through `getStatus` exactly like a first review.
+ */
+export function reReview(
+  reviewId: string,
+  options: ReReviewOptions,
+): Promise<ReviewAccepted> {
+  const apiKey = getApiKey()
+  return request<ReviewAccepted>(
+    `/reviews/${encodeURIComponent(reviewId)}/re-review`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        feedback: options.feedback,
+        document_key: options.documentKey ?? '',
+        diagram_key: options.diagramKey ?? '',
+      }),
+      // Same reasoning as submitReview: this is a call that spends model tokens,
+      // and those are the only calls the reviewer's own key rides on.
+      headers: apiKey ? { [OPENROUTER_KEY_HEADER]: apiKey } : {},
+    },
+  )
+}
+
+/** Every version of a review, oldest first. Answers from any member of the chain. */
+export function getReviewVersions(reviewId: string): Promise<ReviewVersions> {
+  return request<ReviewVersions>(
+    `/reviews/${encodeURIComponent(reviewId)}/versions`,
+  )
 }
 
 export function getStatus(reviewId: string): Promise<ReviewStatus> {

@@ -1,20 +1,27 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Finding, ReviewResult } from '../types'
 import { resultFixture } from '../test/fixtures'
 import { ResultsView } from './ResultsView'
 
-const { getReview, downloadReport } = vi.hoisted(() => ({
-  getReview: vi.fn(),
-  downloadReport: vi.fn(),
-}))
+const { getReview, downloadReport, reReview, uploadFile, getReviewVersions } =
+  vi.hoisted(() => ({
+    getReview: vi.fn(),
+    downloadReport: vi.fn(),
+    reReview: vi.fn(),
+    uploadFile: vi.fn(),
+    getReviewVersions: vi.fn(),
+  }))
 
 vi.mock('../api', () => ({
   ApiError: class ApiError extends Error {},
   getReview,
   downloadReport,
+  reReview,
+  uploadFile,
+  getReviewVersions,
 }))
 
 describe('ResultsView', () => {
@@ -23,7 +30,7 @@ describe('ResultsView', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -55,7 +62,7 @@ describe('ResultsView', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -70,7 +77,7 @@ describe('ResultsView', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -105,7 +112,7 @@ describe('ResultsView', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -127,7 +134,7 @@ describe('ResultsView', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -144,7 +151,7 @@ describe('ResultsView', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -168,7 +175,7 @@ describe('ResultsView', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -219,7 +226,7 @@ describe('ResultsView', () => {
       getReview.mockResolvedValue(result)
       return render(<ResultsView
           reviewId="rev-1"
-          onReReview={vi.fn()}
+          onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
           onStartOver={vi.fn()}
           onBackToHistory={vi.fn()}
         />)
@@ -399,7 +406,7 @@ describe('ResultsView', () => {
 
       render(<ResultsView
           reviewId="rev-1"
-          onReReview={vi.fn()}
+          onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
           onStartOver={vi.fn()}
           onBackToHistory={vi.fn()}
         />)
@@ -420,7 +427,7 @@ describe('ResultsView', () => {
 
       render(<ResultsView
           reviewId="rev-1"
-          onReReview={vi.fn()}
+          onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
           onStartOver={vi.fn()}
           onBackToHistory={vi.fn()}
         />)
@@ -448,7 +455,7 @@ describe('ResultsView', () => {
 
       render(<ResultsView
           reviewId="rev-1"
-          onReReview={vi.fn()}
+          onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
           onStartOver={vi.fn()}
           onBackToHistory={vi.fn()}
         />)
@@ -493,7 +500,7 @@ describe('ResultsView', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -509,7 +516,7 @@ describe('ResultsView', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -540,7 +547,7 @@ describe('ResultsView', () => {
 
       render(<ResultsView
           reviewId="rev-1"
-          onReReview={vi.fn()}
+          onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
           onStartOver={vi.fn()}
           onBackToHistory={vi.fn()}
         />)
@@ -565,7 +572,7 @@ describe('ResultsView', () => {
 
       render(<ResultsView
           reviewId="rev-1"
-          onReReview={vi.fn()}
+          onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
           onStartOver={vi.fn()}
           onBackToHistory={vi.fn()}
         />)
@@ -585,7 +592,7 @@ describe('ResultsView', () => {
 
       render(<ResultsView
           reviewId="rev-1"
-          onReReview={vi.fn()}
+          onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
           onStartOver={vi.fn()}
           onBackToHistory={vi.fn()}
         />)
@@ -606,7 +613,7 @@ describe('ResultsView', () => {
 
       render(<ResultsView
           reviewId="rev-1"
-          onReReview={vi.fn()}
+          onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
           onStartOver={vi.fn()}
           onBackToHistory={vi.fn()}
         />)
@@ -627,7 +634,7 @@ describe('ResultsView', () => {
 
       render(<ResultsView
           reviewId="rev-1"
-          onReReview={onReReview}
+          onReReview={onReReview} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
           onStartOver={onStartOver}
           onBackToHistory={onBackToHistory}
         />)
@@ -669,7 +676,7 @@ describe('ResultsView', () => {
 
       render(<ResultsView
           reviewId="rev-1"
-          onReReview={vi.fn()}
+          onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
           onStartOver={vi.fn()}
           onBackToHistory={vi.fn()}
         />)
@@ -691,7 +698,7 @@ describe('ResultsView', () => {
 
       render(<ResultsView
           reviewId="rev-1"
-          onReReview={vi.fn()}
+          onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
           onStartOver={vi.fn()}
           onBackToHistory={vi.fn()}
         />)
@@ -715,7 +722,7 @@ describe('ResultsView', () => {
 
       render(<ResultsView
           reviewId="rev-1"
-          onReReview={vi.fn()}
+          onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
           onStartOver={vi.fn()}
           onBackToHistory={vi.fn()}
         />)
@@ -742,7 +749,7 @@ describe('ResultsView — roadmap vs detailed findings', () => {
     getReview.mockResolvedValue(resultFixture())
     return render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -808,7 +815,7 @@ describe('ResultsView — pillar explain', () => {
     getReview.mockResolvedValue(resultFixture({ findings: pillarFindings() }))
     return render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -880,7 +887,7 @@ describe('ResultsView — pillar explain', () => {
     const user = userEvent.setup()
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -930,7 +937,7 @@ describe('ResultsView — copy fix-it prompt affordance', () => {
     getReview.mockResolvedValue(resultFixture())
     return render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -1008,7 +1015,7 @@ describe('ResultsView — structured copy', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -1028,7 +1035,7 @@ describe('ResultsView — structured copy', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -1058,7 +1065,7 @@ describe('ResultsView — structured copy', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -1078,7 +1085,7 @@ describe('ResultsView — structured copy', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -1108,7 +1115,7 @@ describe('ResultsView — priority focus callout', () => {
     getReview.mockResolvedValue(resultFixture({ findings }))
     return render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -1206,7 +1213,7 @@ describe('ResultsView — real findings from a live run', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -1235,7 +1242,7 @@ describe('ResultsView — real findings from a live run', () => {
 
     render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -1259,7 +1266,7 @@ describe('ResultsView — use-case notes', () => {
     getReview.mockResolvedValue(resultFixture(over))
     return render(<ResultsView
         reviewId="rev-1"
-        onReReview={vi.fn()}
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
@@ -1314,7 +1321,7 @@ describe('ResultsView — use-case notes', () => {
       // has already formed a view by the time they reach the caveat.
       getReview.mockResolvedValue(resultFixture({ warnings: [nearEmpty] }))
 
-      render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />)
+      render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />)
 
       const panel = await screen.findByTestId('ingest-warnings')
       const summary = screen.getByTestId('executive-summary')
@@ -1326,7 +1333,7 @@ describe('ResultsView — use-case notes', () => {
     it('still renders the full review — a warning is not a failure', async () => {
       getReview.mockResolvedValue(resultFixture({ warnings: [nearEmpty] }))
 
-      render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />)
+      render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />)
 
       expect(await screen.findByTestId('ingest-warnings')).toBeInTheDocument()
       // The score and the summary are both still there — 62.5 appears in more than
@@ -1338,7 +1345,7 @@ describe('ResultsView — use-case notes', () => {
     it('shows no panel on a clean review', async () => {
       getReview.mockResolvedValue(resultFixture())
 
-      render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />)
+      render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />)
       await screen.findByTestId('executive-summary')
 
       expect(screen.queryByTestId('ingest-warnings')).toBeNull()
@@ -1350,7 +1357,7 @@ describe('ResultsView — use-case notes', () => {
       const { warnings: _dropped, ...older } = resultFixture()
       getReview.mockResolvedValue(older)
 
-      render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />)
+      render(<ResultsView reviewId="rev-1" onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />)
 
       expect(await screen.findByTestId('executive-summary')).toBeInTheDocument()
       expect(screen.queryByTestId('ingest-warnings')).toBeNull()
@@ -1402,7 +1409,7 @@ describe('ResultsView — a not-applicable pillar explains itself', () => {
   function mount(result: unknown) {
     getReview.mockResolvedValue(result)
     return render(
-      <ResultsView reviewId="rev-1" onReReview={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />,
+      <ResultsView reviewId="rev-1" onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()} onStartOver={vi.fn()} onBackToHistory={vi.fn()} />,
     )
   }
 
@@ -1481,5 +1488,168 @@ describe('ResultsView — a not-applicable pillar explains itself', () => {
     expect(caption).toHaveTextContent('3/7 passed')
     expect(caption).not.toHaveTextContent(/Not applicable/)
     expect(caption).not.toHaveTextContent(/patterns/)
+  })
+})
+
+
+// --------------------------------------------------------------------------- #
+// Follow-up round, from the results page
+// --------------------------------------------------------------------------- #
+
+describe('ResultsView — following up on a completed review', () => {
+  function mount(result: unknown) {
+    getReview.mockResolvedValue(result)
+    const props = {
+      onReReview: vi.fn(),
+      onFollowUpStarted: vi.fn(),
+      onOpenVersion: vi.fn(),
+      onStartOver: vi.fn(),
+      onBackToHistory: vi.fn(),
+    }
+    render(<ResultsView reviewId="rev-1" {...props} />)
+    return props
+  }
+
+  beforeEach(() => {
+    reReview.mockReset()
+    uploadFile.mockReset()
+    getReviewVersions.mockReset()
+    getReviewVersions.mockResolvedValue({
+      root_review_id: 'rev-1',
+      latest_review_id: 'rev-2',
+      versions: [],
+    })
+    reReview.mockResolvedValue({
+      review_id: 'rev-2',
+      status_url: '/reviews/rev-2/status',
+      result_url: '/reviews/rev-2',
+    })
+  })
+
+  it('shows the feedback box on a completed review, near the top', async () => {
+    mount(resultFixture())
+    const box = await screen.findByTestId('feedback-box')
+
+    // Above all five content sections. Reaching this view at all means the review
+    // is complete: GET /reviews/{id} answers from the stored result, which only a
+    // finished run writes, so there is no state where this renders early.
+    for (const id of ['executive-summary', 'assessment', 'roadmap', 'detailed-findings']) {
+      expect(
+        box.compareDocumentPosition(screen.getByTestId(id)) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+    }
+  })
+
+  it('is absent while the review is still loading', () => {
+    // The one pre-complete state this view has.
+    getReview.mockReturnValue(new Promise(() => {}))
+    render(
+      <ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()}
+        onFollowUpStarted={vi.fn()}
+        onOpenVersion={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />,
+    )
+    expect(screen.queryByTestId('feedback-box')).toBeNull()
+  })
+
+  it('posts the feedback for the review being viewed and hands the new id up', async () => {
+    const user = userEvent.setup()
+    const props = mount(resultFixture())
+
+    await screen.findByTestId('feedback-box')
+    await user.type(
+      screen.getByLabelText(/What this review got wrong/i),
+      'Encryption is specified in section 4.',
+    )
+    await user.click(screen.getByRole('button', { name: /Re-review with this feedback/i }))
+
+    await waitFor(() =>
+      expect(reReview).toHaveBeenCalledWith(
+        'rev-1',
+        expect.objectContaining({ feedback: 'Encryption is specified in section 4.' }),
+      ),
+    )
+    // Already accepted and running, so the caller polls it rather than routing
+    // back to the upload step — that is what separates this from onReReview.
+    expect(props.onFollowUpStarted).toHaveBeenCalledWith('rev-2', expect.any(Number))
+    expect(props.onReReview).not.toHaveBeenCalled()
+  })
+
+  it('marks a follow-up version and links back, with the delta the API returned', async () => {
+    getReviewVersions.mockResolvedValue({
+      root_review_id: 'rev-1',
+      latest_review_id: 'rev-2',
+      versions: [
+        {
+          review_id: 'rev-1', version: 1, created_at: '2026-07-31T10:00:00Z',
+          overall_score: 62.5, open_findings: 4, feedback: '',
+          based_on_review_id: '', is_original: true,
+        },
+        {
+          review_id: 'rev-2', version: 2, created_at: '2026-07-31T10:40:00Z',
+          overall_score: 71.0, open_findings: 2,
+          feedback: 'The orders table IS encrypted.',
+          based_on_review_id: 'rev-1', is_original: false,
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    const props = mount(
+      resultFixture({
+        review_id: 'rev-2',
+        version: 2,
+        root_review_id: 'rev-1',
+        based_on_review_id: 'rev-1',
+        feedback: 'The orders table IS encrypted.',
+        overall_score: 71.0,
+        delta: {
+          previous_review_id: 'rev-1',
+          previous_overall_score: 62.5,
+          current_overall_score: 71.0,
+          change: 8.5,
+          pillars: [],
+          resolved_checks: ['sec_encryption_at_rest'],
+          new_checks: [],
+          unchanged_failures: [],
+        },
+      }),
+    )
+
+    const banner = await screen.findByTestId('version-banner')
+    expect(banner).toHaveTextContent(/version\s*2/)
+    expect(screen.getByTestId('version-feedback')).toHaveTextContent(
+      'The orders table IS encrypted.',
+    )
+
+    // The delta the API already returns, rendered by the component that always
+    // rendered it — no new score arithmetic anywhere in this round.
+    expect(screen.getByText(/Change since the previous review/i)).toBeInTheDocument()
+    expect(screen.getByText('62.5 → 71.0')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Open the previous version/i }))
+    expect(props.onOpenVersion).toHaveBeenCalledWith('rev-1')
+  })
+
+  it('shows no version banner on an original review', async () => {
+    mount(resultFixture())
+    await screen.findByTestId('feedback-box')
+    expect(screen.queryByTestId('version-banner')).toBeNull()
+  })
+
+  it('keeps the separate re-analyze action, renamed so the two do not read alike', async () => {
+    const user = userEvent.setup()
+    const props = mount(resultFixture())
+
+    await screen.findByTestId('feedback-box')
+    await user.click(
+      screen.getByRole('button', { name: /Score a different design against this one/i }),
+    )
+    expect(props.onReReview).toHaveBeenCalled()
+    expect(reReview).not.toHaveBeenCalled()
   })
 })

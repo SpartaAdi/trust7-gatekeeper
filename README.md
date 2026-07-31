@@ -515,12 +515,51 @@ the explicit aim of changing a verdict. So the evaluate prompt is told what it i
 Feedback is required (`strip_whitespace` before `min_length`, so a space is not
 feedback) and capped at `MAX_FEEDBACK_CHARS`.
 
+### The UI
+
+`FeedbackBox` sits at the top of every completed review. Reaching `ResultsView` at
+all means complete — `GET /reviews/{id}` answers from the stored `ReviewResult`,
+which only a finished run writes — so the box cannot render early. The check is the
+fetch, not a flag that could drift from it.
+
+Everything in it is reused rather than rebuilt:
+
+| Piece | Comes from |
+| --- | --- |
+| speech-to-text | `useDictation`, the Web Speech API hook the context field already uses — browser-native, no request, no dependency |
+| file staging, allowlist, document/diagram disambiguation | `DropZone` + `fileKind`, identical to the original upload |
+| upload | `POST /uploads`, so the same extension, size and content-signature gates apply — there is deliberately no second validation path |
+| panel treatment | the context field's indigo rule on a tinted block |
+
+Voice and keyboard write the same string and dictation **appends**: someone who has
+typed three sentences and then presses the mic is adding a fourth, not discarding
+three. When the browser has no `SpeechRecognition`, no mic renders at all — a button
+that cannot listen is worse than none, because the user presses it and learns
+nothing about why nothing happened.
+
+The submit button refuses whitespace, matching the server's `strip_whitespace`
+before `min_length=1`; enabling it there would post and come back 422. Whenever it
+is disabled, the reason sits beside it.
+
+`VersionBanner` marks a follow-up: version N of M, the feedback quoted back, a link
+to the version this round was built on, and the whole chain as clickable score
+chips. It renders nothing on an original — a "version 1 of 1" banner on every first
+review is noise. The chain comes from `GET /reviews/{id}/versions` and fails
+silently: it is context for a review that has already rendered, so a failed fetch
+must not put an error in front of someone reading their findings.
+
+The score delta is the one the API already returns, rendered by the component that
+already rendered it. No new score arithmetic anywhere in this work.
+
+The footer's separate action is now **"Score a different design against this one"** —
+it posts to `/reanalyze` with fresh uploads, which is a different thing from a
+follow-up round, and the old label read like the same thing.
+
 ### Not in this round
 
-No frontend — the feedback box and speech-to-text are a separate round. No RAG, no
-vector store. One consequence worth knowing before the UI work: a version is a
-review record, so `GET /reviews` lists versions alongside originals and the history
-page will show a row per version until it learns to group them by `root_review_id`.
+No RAG, no vector store. One consequence worth knowing: a version is a review
+record, so `GET /reviews` lists versions alongside originals and the history page
+shows a row per version until it learns to group them by `root_review_id`.
 
 ## Demo access gate
 

@@ -278,6 +278,23 @@ export interface ReviewResult {
    * `verdict` is `not_run`, that means the same thing and must read that way.
    */
   ai_detection?: AiDetection
+
+  // ----------------------------------------------------------------------- //
+  // Version linkage. A follow-up re-review never overwrites the version it came
+  // from — it writes a NEW record pointing back at it — so these describe where
+  // this record sits in a chain rather than what it replaced.
+  //
+  // All optional: a review stored before follow-ups existed has none, and every
+  // consumer treats a missing `version` as 1, which is what it is.
+  // ----------------------------------------------------------------------- //
+  /** 1 for an original review, incrementing once per follow-up round. */
+  version?: number
+  /** The chain's identity — the id of the original. */
+  root_review_id?: string
+  /** The version this round was built on. '' on an original. */
+  based_on_review_id?: string
+  /** The reviewer's own words that produced this version. '' on an original. */
+  feedback?: string
   delta: ScoreDelta | null
   token_usage: Record<string, number>
 }
@@ -363,6 +380,32 @@ export interface ReviewAccepted {
   review_id: string
   status_url: string
   result_url: string
+}
+
+/**
+ * One entry in a review's version chain. Mirrors `ReviewVersion` in
+ * backend/api/routes.py.
+ *
+ * Enough to render a chain without fetching every version in full — the score and
+ * the open count are here, so a version list costs one request rather than N.
+ */
+export interface ReviewVersion {
+  review_id: string
+  version: number
+  created_at: string
+  overall_score: number
+  open_findings: number
+  /** The feedback that produced this version. Empty on the original. */
+  feedback: string
+  based_on_review_id: string
+  is_original: boolean
+}
+
+export interface ReviewVersions {
+  root_review_id: string
+  latest_review_id: string
+  /** Oldest first, original at index 0. */
+  versions: ReviewVersion[]
 }
 
 /**

@@ -184,6 +184,11 @@ export default function App() {
 
         {phase.name === 'results' && (
           <ResultsView
+            /* Keyed on the id so opening another version of the same review
+               remounts the view: without it, React reuses the mounted instance and
+               the enter animation and scroll position carry over from the version
+               the reader just left. */
+            key={phase.reviewId}
             reviewId={phase.reviewId}
             onReReview={() =>
               setPhase({
@@ -192,6 +197,13 @@ export default function App() {
                 returnToReviewId: phase.reviewId,
               })
             }
+            /* A follow-up round is already accepted and running by the time this
+               fires, so it goes straight to the progress view — unlike onReReview,
+               which routes back to the upload step to collect a new design. */
+            onFollowUpStarted={(newReviewId, startedAt) =>
+              setPhase({ name: 'analyzing', reviewId: newReviewId, startedAt })
+            }
+            onOpenVersion={(reviewId) => setPhase({ name: 'results', reviewId })}
             onStartOver={() => setPhase({ name: 'upload' })}
             onBackToHistory={goHistory}
           />
