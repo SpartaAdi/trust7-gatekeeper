@@ -1,0 +1,452 @@
+[
+  {
+    "check_id": "oe_iac",
+    "framework": "WAF-6",
+    "pillar": "Operational Excellence",
+    "description": "Infrastructure and deployments are defined as code / automated, not manual console changes.",
+    "verdict": "pass",
+    "evidence": "HashiCorp Terraform acts as the definitive Infrastructure as Code (IaC) standard.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "oe_observability",
+    "framework": "WAF-6",
+    "pillar": "Operational Excellence",
+    "description": "Monitoring, logging, and alerting are defined for the workload's key operational signals.",
+    "verdict": "pass",
+    "evidence": "AWS CloudWatch and Prometheus/Grafana handle all metric collection and alerting.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "oe_incident_response",
+    "framework": "WAF-6",
+    "pillar": "Operational Excellence",
+    "description": "An incident response process or runbook is referenced for operational failures.",
+    "verdict": "pass",
+    "evidence": "Any P1/P2 system failures trigger automated PagerDuty runbooks.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "oe_change_mgmt",
+    "framework": "WAF-6",
+    "pillar": "Operational Excellence",
+    "description": "Changes can be rolled back safely; deployment approach limits blast radius of a bad change.",
+    "verdict": "fail",
+    "evidence": "application container deployments to EKS are currently executed manually via kubectl apply commands from a centralized bastion jump-box by the lead developer.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "sec_least_privilege",
+    "framework": "WAF-6",
+    "pillar": "Security",
+    "description": "IAM roles/permissions follow least privilege rather than broad/wildcard access.",
+    "verdict": "pass",
+    "evidence": "IAM roles enforce strict least privilege.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "sec_encryption_at_rest",
+    "framework": "WAF-6",
+    "pillar": "Security",
+    "description": "Sensitive or PII-bearing data stores have encryption at rest specified.",
+    "verdict": "pass",
+    "evidence": "Aurora databases are encrypted at rest with AWS KMS.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "sec_encryption_transit",
+    "framework": "WAF-6",
+    "pillar": "Security",
+    "description": "Data in transit is encrypted (TLS) between components, especially over public networks.",
+    "verdict": "pass",
+    "evidence": "Data in transit is secured via TLS 1.2 externally and mTLS internally between pods.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "sec_secrets_mgmt",
+    "framework": "WAF-6",
+    "pillar": "Security",
+    "description": "Credentials/API keys/secrets are managed via a secrets store, not hardcoded or embedded in config.",
+    "verdict": "pass",
+    "evidence": "AWS Secrets Manager securely stores and automatically rotates all database and payment gateway credentials.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "sec_network_perimeter",
+    "framework": "WAF-6",
+    "pillar": "Security",
+    "description": "Network boundaries/segmentation are defined; public-facing components are minimized and fronted appropriately.",
+    "verdict": "pass",
+    "evidence": "The network perimeter is guarded by AWS WAF and Shield Advanced. EKS nodes and databases sit in private subnets with strict Security Groups.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "sec_identity_auth",
+    "framework": "WAF-6",
+    "pillar": "Security",
+    "description": "Authentication/authorization (SSO, MFA, RBAC) is defined for user- and system-facing access.",
+    "verdict": "pass",
+    "evidence": "Identity management utilizes OAuth2 via Auth0 for customer and system-level API access.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "sec_audit_logging",
+    "framework": "WAF-6",
+    "pillar": "Security",
+    "description": "Security-relevant actions and access are logged in an auditable, tamper-resistant way.",
+    "verdict": "fail",
+    "evidence": "Dedicated, tamper-resistant security audit logging (e.g., CloudTrail log file validation or centralized SIEM forwarding) is not currently implemented.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "rel_redundancy",
+    "framework": "WAF-6",
+    "pillar": "Reliability",
+    "description": "Critical components have redundancy (multi-AZ or equivalent) rather than a single point of failure.",
+    "verdict": "pass",
+    "evidence": "EKS nodes and Aurora instances span 3 Availability Zones.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "rel_dr_plan",
+    "framework": "WAF-6",
+    "pillar": "Reliability",
+    "description": "A disaster recovery approach with defined RTO/RPO is present for critical data/workloads.",
+    "verdict": "pass",
+    "evidence": "Aurora read replicas in our secondary region guarantee an RPO of 5 minutes and an RTO of 15 minutes.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "rel_failure_isolation",
+    "framework": "WAF-6",
+    "pillar": "Reliability",
+    "description": "Dependent-service failures are isolated (retries, timeouts, circuit breakers, dead-letter queues) rather than cascading.",
+    "verdict": "pass",
+    "evidence": "We utilize Resilience4j to implement strict circuit breakers and timeouts, ensuring third-party payment gateway outages do not cascade into our core systems.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "rel_backup",
+    "framework": "WAF-6",
+    "pillar": "Reliability",
+    "description": "A backup strategy exists for stateful data with a defined restore process.",
+    "verdict": "pass",
+    "evidence": "Automated continuous backups and nightly RDS snapshots are enabled and tested monthly.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "perf_right_sizing",
+    "framework": "WAF-6",
+    "pillar": "Performance Efficiency",
+    "description": "Compute/storage choices match the actual workload pattern (e.g., serverless for spiky load) rather than over-provisioning.",
+    "verdict": "fail",
+    "evidence": "asynchronous nightly financial settlement reconciliation jobs still run on fixed, oversized legacy Amazon EC2 m5.4xlarge instances that run 24/7.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "perf_caching",
+    "framework": "WAF-6",
+    "pillar": "Performance Efficiency",
+    "description": "Caching is used where repeated reads or expensive computations would otherwise recur.",
+    "verdict": "pass",
+    "evidence": "Amazon ElastiCache for Redis stores ephemeral cart session data to prevent expensive and repeated database reads.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "perf_data_store_fit",
+    "framework": "WAF-6",
+    "pillar": "Performance Efficiency",
+    "description": "The database/storage type matches its access pattern (e.g., not using a relational store for pure key-value lookups at scale).",
+    "verdict": "pass",
+    "evidence": "Amazon Aurora PostgreSQL Global Database, perfectly aligning with the ACID compliance required for financial transactions.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "perf_global_delivery",
+    "framework": "WAF-6",
+    "pillar": "Performance Efficiency",
+    "description": "Content/data delivery accounts for geographic distribution of users where relevant (CDN or regional deployment).",
+    "verdict": "pass",
+    "evidence": "CloudFront caches static product assets globally.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "cost_visibility",
+    "framework": "WAF-6",
+    "pillar": "Cost Optimization",
+    "description": "Cost tracking/tagging/budgets are defined so spend is attributable and boundable.",
+    "verdict": "pass",
+    "evidence": "Cost Explorer tagging (Project: GlobalCheckout) is strictly mandated on all AWS resources.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "cost_elasticity",
+    "framework": "WAF-6",
+    "pillar": "Cost Optimization",
+    "description": "Resources scale down/to zero with demand rather than running at fixed capacity for variable load.",
+    "verdict": "pass",
+    "evidence": "EKS Horizontal Pod Autoscaler (HPA) manages burst traffic elastically.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "cost_storage_lifecycle",
+    "framework": "WAF-6",
+    "pillar": "Cost Optimization",
+    "description": "Storage has a lifecycle/retention policy rather than indefinite accumulation at full-cost tiers.",
+    "verdict": "pass",
+    "evidence": "Amazon S3 Lifecycle rules are rigorously configured to transition aged order receipt blobs to S3 Glacier Deep Archive",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "cost_provisioning_model",
+    "framework": "WAF-6",
+    "pillar": "Cost Optimization",
+    "description": "Provisioning model (on-demand vs reserved/provisioned) matches the workload's actual usage predictability.",
+    "verdict": "pass",
+    "evidence": "We use 3-year Reserved Instances (RIs) to cover the predictable baseline database load.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "sus_managed_services",
+    "framework": "WAF-6",
+    "pillar": "Sustainability",
+    "description": "Managed/serverless services are used where feasible to improve utilization over self-managed idle infrastructure.",
+    "verdict": "pass",
+    "evidence": "The core business logic runs on Java Spring Boot microservices inside Amazon EKS.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "sus_data_minimization",
+    "framework": "WAF-6",
+    "pillar": "Sustainability",
+    "description": "Data retention/storage footprint is minimized to what's needed rather than retained indefinitely by default.",
+    "verdict": "pass",
+    "evidence": "ultimately delete them after 7 years to minimize data footprint.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "sus_region_awareness",
+    "framework": "WAF-6",
+    "pillar": "Sustainability",
+    "description": "Region/deployment choice shows awareness of energy/carbon considerations where it doesn't conflict with other constraints.",
+    "verdict": "fail",
+    "evidence": "No mention of region selection based on energy or carbon considerations.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "tf_explainability",
+    "framework": "TRUST-7",
+    "pillar": "Trust foundations",
+    "description": "AI-driven decisions that affect people can be explained at a level appropriate to the audience.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "tf_fairness",
+    "framework": "TRUST-7",
+    "pillar": "Trust foundations",
+    "description": "AI outputs are evaluated for unjustified variation across populations/segments where the use case involves consequential decisions.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "tf_hallucination_control",
+    "framework": "TRUST-7",
+    "pillar": "Trust foundations",
+    "description": "LLM outputs are grounded (RAG, validation, citation) rather than relying on unverified generation for factual claims.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "tf_privacy",
+    "framework": "TRUST-7",
+    "pillar": "Trust foundations",
+    "description": "PII flowing through AI components is identified and protected (minimization, masking, or encryption).",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "rr_ai_threat_model",
+    "framework": "TRUST-7",
+    "pillar": "Risk and resilience",
+    "description": "AI-specific threats (prompt injection, data poisoning, model extraction) are considered, not just traditional infra security.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "rr_incident_response_ai",
+    "framework": "TRUST-7",
+    "pillar": "Risk and resilience",
+    "description": "An incident response path exists specifically for AI failures (bad output, hallucination, misuse), not just general system incidents.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "rr_validation_before_prod",
+    "framework": "TRUST-7",
+    "pillar": "Risk and resilience",
+    "description": "AI models/outputs are validated (testing, red-teaming, or human review) before being relied upon in production.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "ue_cost_per_unit",
+    "framework": "TRUST-7",
+    "pillar": "Unit economics",
+    "description": "Cost per AI call/decision is knowable or estimable, not opaque.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "ue_model_routing",
+    "framework": "TRUST-7",
+    "pillar": "Unit economics",
+    "description": "Cheaper/smaller models are used for simple tasks, reserving expensive models for tasks that need them.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "ue_caching_ai",
+    "framework": "TRUST-7",
+    "pillar": "Unit economics",
+    "description": "Repeated or semantically similar AI queries are cached rather than always re-invoking the model.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "ss_data_residency",
+    "framework": "TRUST-7",
+    "pillar": "Sovereignty and supply chain",
+    "description": "Data residency/location constraints are explicit and enforced by design, not left implicit.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "ss_provider_dependency",
+    "framework": "TRUST-7",
+    "pillar": "Sovereignty and supply chain",
+    "description": "Foundation model/vendor dependency is acknowledged with some consideration of switching cost or exit path.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "ss_abstraction",
+    "framework": "TRUST-7",
+    "pillar": "Sovereignty and supply chain",
+    "description": "AI provider calls are abstracted behind an internal interface rather than tightly coupled to one vendor's SDK throughout the codebase.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "ta_human_in_loop",
+    "framework": "TRUST-7",
+    "pillar": "Talent and adoption",
+    "description": "Consequential AI decisions retain a human review/override point rather than being fully autonomous.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "ta_user_training",
+    "framework": "TRUST-7",
+    "pillar": "Talent and adoption",
+    "description": "End users/operators have a defined path to understand and correctly use the AI system's outputs.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "sai_inference_efficiency",
+    "framework": "TRUST-7",
+    "pillar": "Sustainability (AI-specific)",
+    "description": "Design choices (model size, caching, batching) that reduce cost also incidentally reduce AI inference energy footprint.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "gov_model_inventory",
+    "framework": "TRUST-7",
+    "pillar": "AI governance",
+    "description": "Each AI model/component in the design has a clear named owner and purpose.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "gov_audit_trail",
+    "framework": "TRUST-7",
+    "pillar": "AI governance",
+    "description": "AI decisions/outputs are logged with enough context (input, model version, output) to be reconstructed later.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  },
+  {
+    "check_id": "gov_accountability",
+    "framework": "TRUST-7",
+    "pillar": "AI governance",
+    "description": "It's clear who is accountable when the AI produces an incorrect or harmful output.",
+    "verdict": "not_applicable",
+    "evidence": "It does not utilize any foundation models, neural networks, or generative capabilities.",
+    "labeler_name": "Human Tester",
+    "date": "2026-07-31"
+  }
+]
