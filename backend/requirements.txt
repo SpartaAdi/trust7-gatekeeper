@@ -3,6 +3,9 @@ uvicorn[standard]==0.38.0
 pydantic==2.12.4
 anthropic==0.75.0        # LLM_PROVIDER=anthropic path (kept for same-day revert)
 openai==2.49.0           # LLM_PROVIDER=openrouter path, OpenAI-compatible client
+httpx==0.28.1            # llm.py imports it directly for the shared transport it
+                         # hands the SDK, so pin it here rather than inheriting
+                         # whatever anthropic/openai happen to resolve it to
 jsonschema==4.26.0       # response validation — the real enforcement layer
 python-multipart==0.0.20
 python-dotenv==1.2.1
