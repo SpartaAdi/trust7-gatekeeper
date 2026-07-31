@@ -1190,7 +1190,7 @@ different question, and a separate script:
 cd backend
 python scripts/accuracy_harness.py --check-labels        # validate fixtures, no API call
 python scripts/accuracy_harness.py --repeats 3          # the real thing, real cost
-python scripts/accuracy_harness.py --repeats 1 --designs expense-portal
+python scripts/accuracy_harness.py --repeats 1 --designs design_b_checkout_payments_api
 python scripts/accuracy_harness.py --base-url https://... --demo-token ...
 ```
 
@@ -1208,10 +1208,17 @@ micro averages, and a coarse `fail|partial` vs `pass|not_applicable` "was the ga
 found at all" binary. Plus a per-pillar breakout, a confusion matrix, a per-check
 diff, and every figure repeated with the fixture's `borderline` labels excluded.
 
-The `not_applicable` row is the one worth watching. `expense-portal` is labelled
-n/a on 18 of TRUST-7's 19 checks, so an evaluator that never says n/a can post a
-respectable overall accuracy and a perfect open-gap recall while being wrong about
-an entire framework. Only the per-class row shows that.
+The `not_applicable` row is the one worth watching. The non-AI design
+(`design_b_checkout_payments_api`) is labelled n/a on all 19 TRUST-7 checks, so an
+evaluator that never says n/a can post a respectable overall accuracy and a perfect
+open-gap recall while being wrong about an entire framework. Only the per-class row
+shows that.
+
+The set is the tester's, hand-labelled, 45 checks per design. It arrived as a bare
+array and was reshaped into the wrapper the loader expects — keys renamed, every
+value verbatim; `fixtures/ground_truth/README.md` records exactly what changed. The
+synthetic stand-ins that preceded it now live in `synthetic_stub/`, which the
+harness does not glob, so no run can blend invented labels into a real figure.
 
 `--repeats` runs each design N times and reports the variance: how many checks
 returned an identical verdict every time, which ones moved and in what sequence,

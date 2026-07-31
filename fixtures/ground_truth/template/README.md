@@ -11,10 +11,11 @@ labels come from a model, comparing the pipeline's verdicts against them measure
 how consistent two model runs are, not whether either is correct. The number that
 comes out would look exactly like an accuracy figure and mean nothing.
 
-The two designs currently in the parent directory (`expense-portal.json`,
-`claims-triage-ai.json`) are **synthetic stand-ins with labels authored inside this
-repository**, put there so the harness had something to run against. They are
-placeholders. Files produced from this template are meant to replace them.
+Real hand-labelled ground truth now sits in the parent directory —
+`DESIGN A_Completed Ground Truth.json` and `DESIGN B_Completed Ground Truth.json`.
+The synthetic stand-ins that preceded it (`expense-portal`, `claims-triage-ai`) have
+moved to `../synthetic_stub/`, which the harness does not glob; see the README
+there. Files produced from this template join the real set in the parent directory.
 
 ## Where to put the filled-in file
 

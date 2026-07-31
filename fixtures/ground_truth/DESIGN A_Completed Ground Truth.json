@@ -1,452 +1,418 @@
-[
-  {
-    "check_id": "oe_iac",
-    "framework": "WAF-6",
-    "pillar": "Operational Excellence",
-    "description": "Infrastructure and deployments are defined as code / automated, not manual console changes.",
-    "verdict": "pass",
-    "evidence": "Our CI/CD pipeline uses GitHub Actions to trigger Terraform, ensuring all AWS infrastructure is defined as code.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "oe_observability",
-    "framework": "WAF-6",
-    "pillar": "Operational Excellence",
-    "description": "Monitoring, logging, and alerting are defined for the workload's key operational signals.",
-    "verdict": "pass",
-    "evidence": "Datadog and AWS X-Ray provide our distributed tracing.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "oe_incident_response",
-    "framework": "WAF-6",
-    "pillar": "Operational Excellence",
-    "description": "An incident response process or runbook is referenced for operational failures.",
-    "verdict": "fail",
-    "evidence": "Standard SOPs and runbooks for general operational outages are still being drafted.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "oe_change_mgmt",
-    "framework": "WAF-6",
-    "pillar": "Operational Excellence",
-    "description": "Changes can be rolled back safely; deployment approach limits blast radius of a bad change.",
-    "verdict": "pass",
-    "evidence": "Deployments use AWS CodeDeploy for automated Blue/Green rollouts with safe rollback thresholds.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "sec_least_privilege",
-    "framework": "WAF-6",
-    "pillar": "Security",
-    "description": "IAM roles/permissions follow least privilege rather than broad/wildcard access.",
-    "verdict": "pass",
-    "evidence": "IAM Roles for Service Accounts (IRSA) restrict container permissions.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "sec_encryption_at_rest",
-    "framework": "WAF-6",
-    "pillar": "Security",
-    "description": "Sensitive or PII-bearing data stores have encryption at rest specified.",
-    "verdict": "pass",
-    "evidence": "Data at rest (S3, DynamoDB, OpenSearch) uses KMS Customer Managed Keys.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "sec_encryption_transit",
-    "framework": "WAF-6",
-    "pillar": "Security",
-    "description": "Data in transit is encrypted (TLS) between components, especially over public networks.",
-    "verdict": "pass",
-    "evidence": "Internal services use App Mesh for mTLS 1.3.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "sec_secrets_mgmt",
-    "framework": "WAF-6",
-    "pillar": "Security",
-    "description": "Credentials/API keys/secrets are managed via a secrets store, not hardcoded or embedded in config.",
-    "verdict": "fail",
-    "evidence": "DevOps currently injects our Datadog APM and legacy CRM API keys as plaintext environment variables directly into the ECS task definitions.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "sec_network_perimeter",
-    "framework": "WAF-6",
-    "pillar": "Security",
-    "description": "Network boundaries/segmentation are defined; public-facing components are minimized and fronted appropriately.",
-    "verdict": "pass",
-    "evidence": "AWS WAF and VPC Endpoints (PrivateLink) ensure no database or Bedrock traffic traverses the public internet.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "sec_identity_auth",
-    "framework": "WAF-6",
-    "pillar": "Security",
-    "description": "Authentication/authorization (SSO, MFA, RBAC) is defined for user- and system-facing access.",
-    "verdict": "pass",
-    "evidence": "End-users access the tool via AWS Cognito (OIDC federated to corporate Active Directory with MFA).",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "sec_audit_logging",
-    "framework": "WAF-6",
-    "pillar": "Security",
-    "description": "Security-relevant actions and access are logged in an auditable, tamper-resistant way.",
-    "verdict": "pass",
-    "evidence": "CloudTrail is configured with log file validation to ensure tamper-resistant audit logs.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "rel_redundancy",
-    "framework": "WAF-6",
-    "pillar": "Reliability",
-    "description": "Critical components have redundancy (multi-AZ or equivalent) rather than a single point of failure.",
-    "verdict": "pass",
-    "evidence": "Multi-AZ is enabled across ECS, OpenSearch, and NAT Gateways.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "rel_dr_plan",
-    "framework": "WAF-6",
-    "pillar": "Reliability",
-    "description": "A disaster recovery approach with defined RTO/RPO is present for critical data/workloads.",
-    "verdict": "pass",
-    "evidence": "We are targeting a 2-hour RTO and 15-minute RPO.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "rel_failure_isolation",
-    "framework": "WAF-6",
-    "pillar": "Reliability",
-    "description": "Dependent-service failures are isolated (retries, timeouts, circuit breakers, dead-letter queues) rather than cascading.",
-    "verdict": "fail",
-    "evidence": "Synchronous calls to the downstream CRM lack circuit breakers or retry limits.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "rel_backup",
-    "framework": "WAF-6",
-    "pillar": "Reliability",
-    "description": "A backup strategy exists for stateful data with a defined restore process.",
-    "verdict": "pass",
-    "evidence": "DynamoDB uses Point-in-Time Recovery (PITR).",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "perf_right_sizing",
-    "framework": "WAF-6",
-    "pillar": "Performance Efficiency",
-    "description": "Compute/storage choices match the actual workload pattern (e.g., serverless for spiky load) rather than over-provisioning.",
-    "verdict": "pass",
-    "evidence": "Fargate auto-scales based on CPU utilization, easily accommodating our spiky intraday call volumes without over-provisioning.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "perf_caching",
-    "framework": "WAF-6",
-    "pillar": "Performance Efficiency",
-    "description": "Caching is used where repeated reads or expensive computations would otherwise recur.",
-    "verdict": "pass",
-    "evidence": "Semantic caching via Amazon ElastiCache (Redis) catches repeated queries, skipping the Bedrock invocation entirely.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "perf_data_store_fit",
-    "framework": "WAF-6",
-    "pillar": "Performance Efficiency",
-    "description": "The database/storage type matches its access pattern (e.g., not using a relational store for pure key-value lookups at scale).",
-    "verdict": "pass",
-    "evidence": "Amazon OpenSearch Serverless (chosen for its native K-NN similarity search performance).",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "perf_global_delivery",
-    "framework": "WAF-6",
-    "pillar": "Performance Efficiency",
-    "description": "Content/data delivery accounts for geographic distribution of users where relevant (CDN or regional deployment).",
-    "verdict": "pass",
-    "evidence": "The frontend is a React SPA delivered via Amazon CloudFront (S3 origin).",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "cost_visibility",
-    "framework": "WAF-6",
-    "pillar": "Cost Optimization",
-    "description": "Cost tracking/tagging/budgets are defined so spend is attributable and boundable.",
-    "verdict": "fail",
-    "evidence": "No mention of cost tracking tags or budgets in the architecture document.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "cost_elasticity",
-    "framework": "WAF-6",
-    "pillar": "Cost Optimization",
-    "description": "Resources scale down/to zero with demand rather than running at fixed capacity for variable load.",
-    "verdict": "pass",
-    "evidence": "Fargate auto-scales based on CPU utilization",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "cost_storage_lifecycle",
-    "framework": "WAF-6",
-    "pillar": "Cost Optimization",
-    "description": "Storage has a lifecycle/retention policy rather than indefinite accumulation at full-cost tiers.",
-    "verdict": "fail",
-    "evidence": "All ingested raw PDFs and session transcripts remain in the support-raw-logs S3 bucket indefinitely with no TTL or Glacier transition policy.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "cost_provisioning_model",
-    "framework": "WAF-6",
-    "pillar": "Cost Optimization",
-    "description": "Provisioning model (on-demand vs reserved/provisioned) matches the workload's actual usage predictability.",
-    "verdict": "pass",
-    "evidence": "Fargate auto-scales based on CPU utilization, easily accommodating our spiky intraday call volumes without over-provisioning.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "sus_managed_services",
-    "framework": "WAF-6",
-    "pillar": "Sustainability",
-    "description": "Managed/serverless services are used where feasible to improve utilization over self-managed idle infrastructure.",
-    "verdict": "pass",
-    "evidence": "Amazon API Gateway routes to our backend microservices, which run on AWS ECS Fargate",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "sus_data_minimization",
-    "framework": "WAF-6",
-    "pillar": "Sustainability",
-    "description": "Data retention/storage footprint is minimized to what's needed rather than retained indefinitely by default.",
-    "verdict": "fail",
-    "evidence": "All ingested raw PDFs and session transcripts remain in the support-raw-logs S3 bucket indefinitely with no TTL or Glacier transition policy.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "sus_region_awareness",
-    "framework": "WAF-6",
-    "pillar": "Sustainability",
-    "description": "Region/deployment choice shows awareness of energy/carbon considerations where it doesn't conflict with other constraints.",
-    "verdict": "pass",
-    "evidence": "We have localized this deployment strictly to the eu-north-1 region to leverage its high renewable energy mix",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "tf_explainability",
-    "framework": "TRUST-7",
-    "pillar": "Trust foundations",
-    "description": "AI-driven decisions that affect people can be explained at a level appropriate to the audience.",
-    "verdict": "pass",
-    "evidence": "every response includes a strict citation linking back to the source PDF.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "tf_fairness",
-    "framework": "TRUST-7",
-    "pillar": "Trust foundations",
-    "description": "AI outputs are evaluated for unjustified variation across populations/segments where the use case involves consequential decisions.",
-    "verdict": "fail",
-    "evidence": "No evaluations have been conducted to see if the bot's accuracy varies across different demographic segments of our user base.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "tf_hallucination_control",
-    "framework": "TRUST-7",
-    "pillar": "Trust foundations",
-    "description": "LLM outputs are grounded (RAG, validation, citation) rather than relying on unverified generation for factual claims.",
-    "verdict": "pass",
-    "evidence": "The RAG architecture heavily restricts the LLM to only use the retrieved OpenSearch context, controlling hallucinations",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "tf_privacy",
-    "framework": "TRUST-7",
-    "pillar": "Trust foundations",
-    "description": "PII flowing through AI components is identified and protected (minimization, masking, or encryption).",
-    "verdict": "pass",
-    "evidence": "A custom Python middleware and Amazon Macie scrub PII from user prompts before they reach Bedrock.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "rr_ai_threat_model",
-    "framework": "TRUST-7",
-    "pillar": "Risk and resilience",
-    "description": "AI-specific threats (prompt injection, data poisoning, model extraction) are considered, not just traditional infra security.",
-    "verdict": "pass",
-    "evidence": "Thorough red-teaming and threat modeling for prompt injection and data poisoning were completed last month.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "rr_incident_response_ai",
-    "framework": "TRUST-7",
-    "pillar": "Risk and resilience",
-    "description": "An incident response path exists specifically for AI failures (bad output, hallucination, misuse), not just general system incidents.",
-    "verdict": "fail",
-    "evidence": "there is no specialized response path for AI-specific failures (e.g., severe model drift or prompt jailbreaks).",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "rr_validation_before_prod",
-    "framework": "TRUST-7",
-    "pillar": "Risk and resilience",
-    "description": "AI models/outputs are validated (testing, red-teaming, or human review) before being relied upon in production.",
-    "verdict": "pass",
-    "evidence": "Thorough red-teaming and threat modeling for prompt injection and data poisoning were completed last month.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "ue_cost_per_unit",
-    "framework": "TRUST-7",
-    "pillar": "Unit economics",
-    "description": "Cost per AI call/decision is knowable or estimable, not opaque.",
-    "verdict": "pass",
-    "evidence": "reduces our cost per query (which is logged granularly in DynamoDB)",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "ue_model_routing",
-    "framework": "TRUST-7",
-    "pillar": "Unit economics",
-    "description": "Cheaper/smaller models are used for simple tasks, reserving expensive models for tasks that need them.",
-    "verdict": "pass",
-    "evidence": "simple intent classification goes to Claude 3 Haiku, while complex summarization routes to Claude 3.5 Sonnet.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "ue_caching_ai",
-    "framework": "TRUST-7",
-    "pillar": "Unit economics",
-    "description": "Repeated or semantically similar AI queries are cached rather than always re-invoking the model.",
-    "verdict": "pass",
-    "evidence": "Semantic caching via Amazon ElastiCache (Redis) catches repeated queries, skipping the Bedrock invocation entirely.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "ss_data_residency",
-    "framework": "TRUST-7",
-    "pillar": "Sovereignty and supply chain",
-    "description": "Data residency/location constraints are explicit and enforced by design, not left implicit.",
-    "verdict": "pass",
-    "evidence": "localized this deployment strictly to the eu-north-1 region to leverage its high renewable energy mix and enforce European data residency.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "ss_provider_dependency",
-    "framework": "TRUST-7",
-    "pillar": "Sovereignty and supply chain",
-    "description": "Foundation model/vendor dependency is acknowledged with some consideration of switching cost or exit path.",
-    "verdict": "pass",
-    "evidence": "abstracts our Bedrock calls, meaning we can easily swap our provider to an open-source Llama model on SageMaker if vendor lock-in becomes an issue.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "ss_abstraction",
-    "framework": "TRUST-7",
-    "pillar": "Sovereignty and supply chain",
-    "description": "AI provider calls are abstracted behind an internal interface rather than tightly coupled to one vendor's SDK throughout the codebase.",
-    "verdict": "pass",
-    "evidence": "the backend uses a custom FoundationModelGateway SDK. This abstracts our Bedrock calls",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "ta_human_in_loop",
-    "framework": "TRUST-7",
-    "pillar": "Talent and adoption",
-    "description": "Consequential AI decisions retain a human review/override point rather than being fully autonomous.",
-    "verdict": "fail",
-    "evidence": "The system operates autonomously, providing answers directly to the user interface without a human-in-the-loop review step for the generated text.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "ta_user_training",
-    "framework": "TRUST-7",
-    "pillar": "Talent and adoption",
-    "description": "End users/operators have a defined path to understand and correctly use the AI system's outputs.",
-    "verdict": "pass",
-    "evidence": "They must complete a mandatory Wiki training module on AI limitations before being granted IAM access.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "sai_inference_efficiency",
-    "framework": "TRUST-7",
-    "pillar": "Sustainability (AI-specific)",
-    "description": "Design choices (model size, caching, batching) that reduce cost also incidentally reduce AI inference energy footprint.",
-    "verdict": "pass",
-    "evidence": "simple intent classification goes to Claude 3 Haiku... This reduces our cost per query... and lowers our inference energy footprint.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "gov_model_inventory",
-    "framework": "TRUST-7",
-    "pillar": "AI governance",
-    "description": "Each AI model/component in the design has a clear named owner and purpose.",
-    "verdict": "pass",
-    "evidence": "Jane Doe (VP of Data Science) is the named owner of this model",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "gov_audit_trail",
-    "framework": "TRUST-7",
-    "pillar": "AI governance",
-    "description": "AI decisions/outputs are logged with enough context (input, model version, output) to be reconstructed later.",
-    "verdict": "fail",
-    "evidence": "No mention of logging AI prompts, contexts, and outputs for reconstruction.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
-  },
-  {
-    "check_id": "gov_accountability",
-    "framework": "TRUST-7",
-    "pillar": "AI governance",
-    "description": "It's clear who is accountable when the AI produces an incorrect or harmful output.",
-    "verdict": "pass",
-    "evidence": "Jane Doe (VP of Data Science) is the named owner of this model and holds ultimate accountability for its outputs.",
-    "labeler_name": "Human Tester",
-    "date": "2026-07-31"
+{
+  "id": "design_a_techassist_rag_portal",
+  "title": "TechAssist — internal RAG portal (AI-bearing)",
+  "provenance": "Hand-labelled by the tester against 'DESIGN A_AI_Bearing.md', both uploaded to this repository in commit 97d03bd. Reshaped into the wrapper schema in a later commit: keys renamed to match template/design-labeling-template.json, every label value verbatim.",
+  "labeler": "Human Tester",
+  "labeled_date": "2026-07-31",
+  "document": "DESIGN A_AI_Bearing.md",
+  "diagram": "",
+  "context": "",
+  "design_is_ai_bearing": true,
+  "labels": {
+    "oe_iac": {
+      "framework": "WAF-6",
+      "pillar": "Operational Excellence",
+      "description": "Infrastructure and deployments are defined as code / automated, not manual console changes.",
+      "status": "pass",
+      "why": "Our CI/CD pipeline uses GitHub Actions to trigger Terraform, ensuring all AWS infrastructure is defined as code.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "oe_observability": {
+      "framework": "WAF-6",
+      "pillar": "Operational Excellence",
+      "description": "Monitoring, logging, and alerting are defined for the workload's key operational signals.",
+      "status": "pass",
+      "why": "Datadog and AWS X-Ray provide our distributed tracing.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "oe_incident_response": {
+      "framework": "WAF-6",
+      "pillar": "Operational Excellence",
+      "description": "An incident response process or runbook is referenced for operational failures.",
+      "status": "fail",
+      "why": "Standard SOPs and runbooks for general operational outages are still being drafted.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "oe_change_mgmt": {
+      "framework": "WAF-6",
+      "pillar": "Operational Excellence",
+      "description": "Changes can be rolled back safely; deployment approach limits blast radius of a bad change.",
+      "status": "pass",
+      "why": "Deployments use AWS CodeDeploy for automated Blue/Green rollouts with safe rollback thresholds.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "sec_least_privilege": {
+      "framework": "WAF-6",
+      "pillar": "Security",
+      "description": "IAM roles/permissions follow least privilege rather than broad/wildcard access.",
+      "status": "pass",
+      "why": "IAM Roles for Service Accounts (IRSA) restrict container permissions.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "sec_encryption_at_rest": {
+      "framework": "WAF-6",
+      "pillar": "Security",
+      "description": "Sensitive or PII-bearing data stores have encryption at rest specified.",
+      "status": "pass",
+      "why": "Data at rest (S3, DynamoDB, OpenSearch) uses KMS Customer Managed Keys.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "sec_encryption_transit": {
+      "framework": "WAF-6",
+      "pillar": "Security",
+      "description": "Data in transit is encrypted (TLS) between components, especially over public networks.",
+      "status": "pass",
+      "why": "Internal services use App Mesh for mTLS 1.3.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "sec_secrets_mgmt": {
+      "framework": "WAF-6",
+      "pillar": "Security",
+      "description": "Credentials/API keys/secrets are managed via a secrets store, not hardcoded or embedded in config.",
+      "status": "fail",
+      "why": "DevOps currently injects our Datadog APM and legacy CRM API keys as plaintext environment variables directly into the ECS task definitions.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "sec_network_perimeter": {
+      "framework": "WAF-6",
+      "pillar": "Security",
+      "description": "Network boundaries/segmentation are defined; public-facing components are minimized and fronted appropriately.",
+      "status": "pass",
+      "why": "AWS WAF and VPC Endpoints (PrivateLink) ensure no database or Bedrock traffic traverses the public internet.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "sec_identity_auth": {
+      "framework": "WAF-6",
+      "pillar": "Security",
+      "description": "Authentication/authorization (SSO, MFA, RBAC) is defined for user- and system-facing access.",
+      "status": "pass",
+      "why": "End-users access the tool via AWS Cognito (OIDC federated to corporate Active Directory with MFA).",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "sec_audit_logging": {
+      "framework": "WAF-6",
+      "pillar": "Security",
+      "description": "Security-relevant actions and access are logged in an auditable, tamper-resistant way.",
+      "status": "pass",
+      "why": "CloudTrail is configured with log file validation to ensure tamper-resistant audit logs.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "rel_redundancy": {
+      "framework": "WAF-6",
+      "pillar": "Reliability",
+      "description": "Critical components have redundancy (multi-AZ or equivalent) rather than a single point of failure.",
+      "status": "pass",
+      "why": "Multi-AZ is enabled across ECS, OpenSearch, and NAT Gateways.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "rel_dr_plan": {
+      "framework": "WAF-6",
+      "pillar": "Reliability",
+      "description": "A disaster recovery approach with defined RTO/RPO is present for critical data/workloads.",
+      "status": "pass",
+      "why": "We are targeting a 2-hour RTO and 15-minute RPO.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "rel_failure_isolation": {
+      "framework": "WAF-6",
+      "pillar": "Reliability",
+      "description": "Dependent-service failures are isolated (retries, timeouts, circuit breakers, dead-letter queues) rather than cascading.",
+      "status": "fail",
+      "why": "Synchronous calls to the downstream CRM lack circuit breakers or retry limits.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "rel_backup": {
+      "framework": "WAF-6",
+      "pillar": "Reliability",
+      "description": "A backup strategy exists for stateful data with a defined restore process.",
+      "status": "pass",
+      "why": "DynamoDB uses Point-in-Time Recovery (PITR).",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "perf_right_sizing": {
+      "framework": "WAF-6",
+      "pillar": "Performance Efficiency",
+      "description": "Compute/storage choices match the actual workload pattern (e.g., serverless for spiky load) rather than over-provisioning.",
+      "status": "pass",
+      "why": "Fargate auto-scales based on CPU utilization, easily accommodating our spiky intraday call volumes without over-provisioning.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "perf_caching": {
+      "framework": "WAF-6",
+      "pillar": "Performance Efficiency",
+      "description": "Caching is used where repeated reads or expensive computations would otherwise recur.",
+      "status": "pass",
+      "why": "Semantic caching via Amazon ElastiCache (Redis) catches repeated queries, skipping the Bedrock invocation entirely.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "perf_data_store_fit": {
+      "framework": "WAF-6",
+      "pillar": "Performance Efficiency",
+      "description": "The database/storage type matches its access pattern (e.g., not using a relational store for pure key-value lookups at scale).",
+      "status": "pass",
+      "why": "Amazon OpenSearch Serverless (chosen for its native K-NN similarity search performance).",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "perf_global_delivery": {
+      "framework": "WAF-6",
+      "pillar": "Performance Efficiency",
+      "description": "Content/data delivery accounts for geographic distribution of users where relevant (CDN or regional deployment).",
+      "status": "pass",
+      "why": "The frontend is a React SPA delivered via Amazon CloudFront (S3 origin).",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "cost_visibility": {
+      "framework": "WAF-6",
+      "pillar": "Cost Optimization",
+      "description": "Cost tracking/tagging/budgets are defined so spend is attributable and boundable.",
+      "status": "fail",
+      "why": "No mention of cost tracking tags or budgets in the architecture document.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "cost_elasticity": {
+      "framework": "WAF-6",
+      "pillar": "Cost Optimization",
+      "description": "Resources scale down/to zero with demand rather than running at fixed capacity for variable load.",
+      "status": "pass",
+      "why": "Fargate auto-scales based on CPU utilization",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "cost_storage_lifecycle": {
+      "framework": "WAF-6",
+      "pillar": "Cost Optimization",
+      "description": "Storage has a lifecycle/retention policy rather than indefinite accumulation at full-cost tiers.",
+      "status": "fail",
+      "why": "All ingested raw PDFs and session transcripts remain in the support-raw-logs S3 bucket indefinitely with no TTL or Glacier transition policy.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "cost_provisioning_model": {
+      "framework": "WAF-6",
+      "pillar": "Cost Optimization",
+      "description": "Provisioning model (on-demand vs reserved/provisioned) matches the workload's actual usage predictability.",
+      "status": "pass",
+      "why": "Fargate auto-scales based on CPU utilization, easily accommodating our spiky intraday call volumes without over-provisioning.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "sus_managed_services": {
+      "framework": "WAF-6",
+      "pillar": "Sustainability",
+      "description": "Managed/serverless services are used where feasible to improve utilization over self-managed idle infrastructure.",
+      "status": "pass",
+      "why": "Amazon API Gateway routes to our backend microservices, which run on AWS ECS Fargate",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "sus_data_minimization": {
+      "framework": "WAF-6",
+      "pillar": "Sustainability",
+      "description": "Data retention/storage footprint is minimized to what's needed rather than retained indefinitely by default.",
+      "status": "fail",
+      "why": "All ingested raw PDFs and session transcripts remain in the support-raw-logs S3 bucket indefinitely with no TTL or Glacier transition policy.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "sus_region_awareness": {
+      "framework": "WAF-6",
+      "pillar": "Sustainability",
+      "description": "Region/deployment choice shows awareness of energy/carbon considerations where it doesn't conflict with other constraints.",
+      "status": "pass",
+      "why": "We have localized this deployment strictly to the eu-north-1 region to leverage its high renewable energy mix",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "tf_explainability": {
+      "framework": "TRUST-7",
+      "pillar": "Trust foundations",
+      "description": "AI-driven decisions that affect people can be explained at a level appropriate to the audience.",
+      "status": "pass",
+      "why": "every response includes a strict citation linking back to the source PDF.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "tf_fairness": {
+      "framework": "TRUST-7",
+      "pillar": "Trust foundations",
+      "description": "AI outputs are evaluated for unjustified variation across populations/segments where the use case involves consequential decisions.",
+      "status": "fail",
+      "why": "No evaluations have been conducted to see if the bot's accuracy varies across different demographic segments of our user base.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "tf_hallucination_control": {
+      "framework": "TRUST-7",
+      "pillar": "Trust foundations",
+      "description": "LLM outputs are grounded (RAG, validation, citation) rather than relying on unverified generation for factual claims.",
+      "status": "pass",
+      "why": "The RAG architecture heavily restricts the LLM to only use the retrieved OpenSearch context, controlling hallucinations",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "tf_privacy": {
+      "framework": "TRUST-7",
+      "pillar": "Trust foundations",
+      "description": "PII flowing through AI components is identified and protected (minimization, masking, or encryption).",
+      "status": "pass",
+      "why": "A custom Python middleware and Amazon Macie scrub PII from user prompts before they reach Bedrock.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "rr_ai_threat_model": {
+      "framework": "TRUST-7",
+      "pillar": "Risk and resilience",
+      "description": "AI-specific threats (prompt injection, data poisoning, model extraction) are considered, not just traditional infra security.",
+      "status": "pass",
+      "why": "Thorough red-teaming and threat modeling for prompt injection and data poisoning were completed last month.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "rr_incident_response_ai": {
+      "framework": "TRUST-7",
+      "pillar": "Risk and resilience",
+      "description": "An incident response path exists specifically for AI failures (bad output, hallucination, misuse), not just general system incidents.",
+      "status": "fail",
+      "why": "there is no specialized response path for AI-specific failures (e.g., severe model drift or prompt jailbreaks).",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "rr_validation_before_prod": {
+      "framework": "TRUST-7",
+      "pillar": "Risk and resilience",
+      "description": "AI models/outputs are validated (testing, red-teaming, or human review) before being relied upon in production.",
+      "status": "pass",
+      "why": "Thorough red-teaming and threat modeling for prompt injection and data poisoning were completed last month.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "ue_cost_per_unit": {
+      "framework": "TRUST-7",
+      "pillar": "Unit economics",
+      "description": "Cost per AI call/decision is knowable or estimable, not opaque.",
+      "status": "pass",
+      "why": "reduces our cost per query (which is logged granularly in DynamoDB)",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "ue_model_routing": {
+      "framework": "TRUST-7",
+      "pillar": "Unit economics",
+      "description": "Cheaper/smaller models are used for simple tasks, reserving expensive models for tasks that need them.",
+      "status": "pass",
+      "why": "simple intent classification goes to Claude 3 Haiku, while complex summarization routes to Claude 3.5 Sonnet.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "ue_caching_ai": {
+      "framework": "TRUST-7",
+      "pillar": "Unit economics",
+      "description": "Repeated or semantically similar AI queries are cached rather than always re-invoking the model.",
+      "status": "pass",
+      "why": "Semantic caching via Amazon ElastiCache (Redis) catches repeated queries, skipping the Bedrock invocation entirely.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "ss_data_residency": {
+      "framework": "TRUST-7",
+      "pillar": "Sovereignty and supply chain",
+      "description": "Data residency/location constraints are explicit and enforced by design, not left implicit.",
+      "status": "pass",
+      "why": "localized this deployment strictly to the eu-north-1 region to leverage its high renewable energy mix and enforce European data residency.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "ss_provider_dependency": {
+      "framework": "TRUST-7",
+      "pillar": "Sovereignty and supply chain",
+      "description": "Foundation model/vendor dependency is acknowledged with some consideration of switching cost or exit path.",
+      "status": "pass",
+      "why": "abstracts our Bedrock calls, meaning we can easily swap our provider to an open-source Llama model on SageMaker if vendor lock-in becomes an issue.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "ss_abstraction": {
+      "framework": "TRUST-7",
+      "pillar": "Sovereignty and supply chain",
+      "description": "AI provider calls are abstracted behind an internal interface rather than tightly coupled to one vendor's SDK throughout the codebase.",
+      "status": "pass",
+      "why": "the backend uses a custom FoundationModelGateway SDK. This abstracts our Bedrock calls",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "ta_human_in_loop": {
+      "framework": "TRUST-7",
+      "pillar": "Talent and adoption",
+      "description": "Consequential AI decisions retain a human review/override point rather than being fully autonomous.",
+      "status": "fail",
+      "why": "The system operates autonomously, providing answers directly to the user interface without a human-in-the-loop review step for the generated text.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "ta_user_training": {
+      "framework": "TRUST-7",
+      "pillar": "Talent and adoption",
+      "description": "End users/operators have a defined path to understand and correctly use the AI system's outputs.",
+      "status": "pass",
+      "why": "They must complete a mandatory Wiki training module on AI limitations before being granted IAM access.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "sai_inference_efficiency": {
+      "framework": "TRUST-7",
+      "pillar": "Sustainability (AI-specific)",
+      "description": "Design choices (model size, caching, batching) that reduce cost also incidentally reduce AI inference energy footprint.",
+      "status": "pass",
+      "why": "simple intent classification goes to Claude 3 Haiku... This reduces our cost per query... and lowers our inference energy footprint.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "gov_model_inventory": {
+      "framework": "TRUST-7",
+      "pillar": "AI governance",
+      "description": "Each AI model/component in the design has a clear named owner and purpose.",
+      "status": "pass",
+      "why": "Jane Doe (VP of Data Science) is the named owner of this model",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "gov_audit_trail": {
+      "framework": "TRUST-7",
+      "pillar": "AI governance",
+      "description": "AI decisions/outputs are logged with enough context (input, model version, output) to be reconstructed later.",
+      "status": "fail",
+      "why": "No mention of logging AI prompts, contexts, and outputs for reconstruction.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    },
+    "gov_accountability": {
+      "framework": "TRUST-7",
+      "pillar": "AI governance",
+      "description": "It's clear who is accountable when the AI produces an incorrect or harmful output.",
+      "status": "pass",
+      "why": "Jane Doe (VP of Data Science) is the named owner of this model and holds ultimate accountability for its outputs.",
+      "labeler": "Human Tester",
+      "date": "2026-07-31"
+    }
   }
-]
+}

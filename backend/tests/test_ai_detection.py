@@ -665,7 +665,13 @@ def test_the_real_ground_truth_fixtures_are_classified_correctly(
     on designs written as designs, one AI-bearing and one not."""
     import pathlib
 
-    root = pathlib.Path(__file__).resolve().parent.parent.parent / "fixtures/ground_truth"
+    # The synthetic stand-ins, moved out of the globbed directory when real
+    # ground truth arrived. Still the right fixture here: each ships a diagram
+    # AND a document, which is what makes the both-inputs assertion possible.
+    root = (
+        pathlib.Path(__file__).resolve().parent.parent.parent
+        / "fixtures/ground_truth/synthetic_stub"
+    )
     design = drawio.parse((root / f"{stem}.drawio").read_bytes())
     text = (root / f"{stem}.sow.md").read_text()
 
@@ -680,7 +686,13 @@ def test_the_ai_bearing_fixture_names_its_evidence_across_both_inputs() -> None:
     half the audit trail on a design that supplies both."""
     import pathlib
 
-    root = pathlib.Path(__file__).resolve().parent.parent.parent / "fixtures/ground_truth"
+    # The synthetic stand-ins, moved out of the globbed directory when real
+    # ground truth arrived. Still the right fixture here: each ships a diagram
+    # AND a document, which is what makes the both-inputs assertion possible.
+    root = (
+        pathlib.Path(__file__).resolve().parent.parent.parent
+        / "fixtures/ground_truth/synthetic_stub"
+    )
     detection = ai_detection.detect(
         drawio.parse((root / "claims-triage-ai.drawio").read_bytes()),
         (root / "claims-triage-ai.sow.md").read_text(),

@@ -46,6 +46,16 @@ def _load_harness() -> Any:
 
 harness = _load_harness()
 
+# The synthetic stand-ins, now out of the directory a normal harness run globs.
+#
+# They moved when real hand-labelled ground truth arrived: a run that scored
+# invented designs alongside the tester's would report a blended figure and look
+# like one number. They remain the right fixture for the PLUMBING tests below —
+# each ships a .drawio, so a review runs end to end without touching the vision
+# path — so those pass this directory explicitly, which is now the only way to
+# reach it. The tests about the SHIPPED set point at the real ground truth.
+STUB_DIR = harness.GROUND_TRUTH_DIR / "synthetic_stub"
+
 
 # --------------------------------------------------------------------------- #
 # Metric arithmetic
@@ -290,7 +300,10 @@ def test_the_shipped_fixture_set_is_valid_against_the_live_rubric() -> None:
     """
     designs = harness.load_ground_truth(harness.GROUND_TRUTH_DIR, [])
 
-    assert {d["id"] for d in designs} >= {"expense-portal", "claims-triage-ai"}
+    assert {d["id"] for d in designs} == {
+        "design_a_techassist_rag_portal",
+        "design_b_checkout_payments_api",
+    }, "the globbed directory must hold the REAL labelled designs and nothing else"
     known = set(rubric.checks_by_id())
     for design in designs:
         assert set(design["labels"]) <= known
@@ -329,12 +342,14 @@ def test_the_two_shipped_designs_sit_at_opposite_ends_of_the_n_a_axis() -> None:
             if label["status"] == "not_applicable"
         )
 
-    assert n_a_count("expense-portal") >= 15
-    assert n_a_count("claims-triage-ai") <= 2
+    assert n_a_count("design_b_checkout_payments_api") >= 15
+    assert n_a_count("design_a_techassist_rag_portal") <= 2
 
     # And the non-AI design must render at least one WHOLE pillar inapplicable —
-    # the case backend/tests/test_scoring.py pins arithmetically.
-    labels = designs["expense-portal"]["labels"]
+    # the case backend/tests/test_scoring.py pins arithmetically. The real Design B
+    # renders all seven of TRUST-7's, which is a stronger fixture than the synthetic
+    # pair it replaced.
+    labels = designs["design_b_checkout_payments_api"]["labels"]
     wholly_na = [
         pillar.pillar_id
         for framework in rubric.load()
@@ -345,6 +360,63 @@ def test_the_two_shipped_designs_sit_at_opposite_ends_of_the_n_a_axis() -> None:
         )
     ]
     assert len(wholly_na) >= 5, wholly_na
+
+
+def test_the_synthetic_stand_ins_are_not_reachable_from_a_default_run() -> None:
+    """The stand-ins must stay out of the globbed directory.
+
+    They are invented designs with labels authored in this repository. A run that
+    scored them alongside the tester's real ones would average two incomparable
+    things into one precision figure and present it as a single number — and the
+    only symptom would be a plausible-looking result.
+
+    `load_ground_truth` globs `*.json` non-recursively, so a subdirectory is
+    genuinely unreachable rather than merely conventionally ignored. This asserts
+    both halves: the stand-ins still exist as fixtures, and a default run cannot
+    see them.
+    """
+    assert STUB_DIR.is_dir(), "the stand-ins should still exist as test fixtures"
+    assert {p.name for p in STUB_DIR.glob("*.json")} == {
+        "expense-portal.json",
+        "claims-triage-ai.json",
+    }
+
+    reachable = {p.name for p in harness.GROUND_TRUTH_DIR.glob("*.json")}
+    assert "expense-portal.json" not in reachable
+    assert "claims-triage-ai.json" not in reachable
+
+    ids = {d["id"] for d in harness.load_ground_truth(harness.GROUND_TRUTH_DIR, [])}
+    assert "expense-portal" not in ids and "claims-triage-ai" not in ids
+
+
+def test_the_real_labels_carry_the_testers_own_values() -> None:
+    """The reshape renamed keys; it must not have touched what was labelled.
+
+    `load_ground_truth` reads `status`, so the tester's `verdict` had to be renamed
+    to be read at all — and a rename is exactly the kind of edit that can quietly
+    become a rewrite. The loader keeps only `status` and `confidence`, so this reads
+    the file to check the rest survived.
+    """
+    import json
+
+    for name, expect_ai in (
+        ("DESIGN A_Completed Ground Truth.json", True),
+        ("DESIGN B_Completed Ground Truth.json", False),
+    ):
+        raw = json.loads((harness.GROUND_TRUTH_DIR / name).read_text())
+        assert raw["design_is_ai_bearing"] is expect_ai
+        assert len(raw["labels"]) == 45
+        assert (harness.GROUND_TRUTH_DIR / raw["document"]).is_file()
+
+        for check_id, label in raw["labels"].items():
+            # The tester's own fields, carried through the rename.
+            assert label["status"] in harness.STATUSES, (check_id, label["status"])
+            assert label["why"].strip(), f"{check_id} lost its evidence"
+            assert label["labeler"] == "Human Tester"
+            assert label["date"] == "2026-07-31"
+            # Not invented: the tester recorded no confidence, so the loader's
+            # default applies rather than a value we made up.
+            assert "confidence" not in label
 
 
 def test_an_unknown_check_id_is_rejected_before_any_api_call(tmp_path) -> None:
@@ -438,7 +510,7 @@ def stubbed_pipeline(monkeypatch, tmp_path):
             # comparison logic runs over realistic input rather than a constant.
             designs = {
                 d["id"]: d
-                for d in harness.load_ground_truth(harness.GROUND_TRUTH_DIR, [])
+                for d in harness.load_ground_truth(STUB_DIR, [])
             }
             truth = designs["expense-portal"]["labels"]
             findings = []
@@ -476,7 +548,7 @@ def test_the_harness_drives_three_real_reviews_through_the_real_routes(
     stubbed_pipeline,
 ) -> None:
     """`--repeats 3` must mean three independent reviews, not one reused result."""
-    designs = harness.load_ground_truth(harness.GROUND_TRUTH_DIR, ["expense-portal"])
+    designs = harness.load_ground_truth(STUB_DIR, ["expense-portal"])
 
     with harness.Runner("", "harness-test-token", 0.0) as runner:
         results = [runner.review(designs[0]) for _ in range(3)]
@@ -499,7 +571,7 @@ def test_an_end_to_end_run_produces_a_report_that_renders(
     comparison logic. A harness that mismatched check ids, or compared against the
     wrong design, could not reach 1.0 here.
     """
-    designs = harness.load_ground_truth(harness.GROUND_TRUTH_DIR, ["expense-portal"])
+    designs = harness.load_ground_truth(STUB_DIR, ["expense-portal"])
     pillar_of = {
         c.check_id: f"{c.framework}.{c.pillar_id}" for c in rubric.all_checks()
     }
@@ -551,7 +623,7 @@ def test_the_harness_detects_a_verdict_that_moved_between_runs(
     The stub flips one check on the second review only, so this fails if the
     harness compares runs by anything other than per-check verdict.
     """
-    designs = harness.load_ground_truth(harness.GROUND_TRUTH_DIR, ["expense-portal"])
+    designs = harness.load_ground_truth(STUB_DIR, ["expense-portal"])
     flipped = rubric.all_checks()[0].check_id
     stubbed_pipeline["flip_on_review"] = 2
 
@@ -580,7 +652,7 @@ def test_the_harness_detects_a_verdict_that_moved_between_runs(
 
 def test_a_run_that_fails_is_reported_rather_than_scored(stubbed_pipeline, monkeypatch) -> None:
     """A failed review must not be silently averaged in as a run of zeroes."""
-    designs = harness.load_ground_truth(harness.GROUND_TRUTH_DIR, ["expense-portal"])
+    designs = harness.load_ground_truth(STUB_DIR, ["expense-portal"])
 
     def explode(**kwargs: Any):
         raise RuntimeError("provider is down")

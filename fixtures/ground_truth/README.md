@@ -8,21 +8,15 @@ python scripts/accuracy_harness.py --check-labels   # validate, no API call
 python scripts/accuracy_harness.py --repeats 3      # the real thing, real cost
 ```
 
-## Status of the two designs shipped here
+## What is here
 
-**They are synthetic and their labels were authored in this repository.** No
-tester-supplied labelled set existed when the harness was written — the repository
-and its full history contain none — so these exist to make the harness runnable
-and to fix the file format. They are stand-ins. Replace them, or add alongside
-them, with designs whose labels the reviewer actually owns; the harness reads
-every `*.json` in this directory and needs no code change to pick up more.
+**Real, hand-labelled ground truth.** Two designs, labelled by the tester, 45 checks
+each:
 
-`why_this_design` in each file records what it is for:
-
-| design | shape | why it is in the set |
-|---|---|---|
-| `expense-portal` | weak, no AI component at all | 18 of 19 TRUST-7 checks are `not_applicable` and six of its seven pillars are WHOLLY inapplicable. The N/A-denominator case, end to end. |
-| `claims-triage-ai` | mixed, AI-bearing | Every TRUST-7 check applies, and the design genuinely passes many of them, so precision and recall have something to separate. |
+| design | id | shape | why it is in the set |
+|---|---|---|---|
+| `DESIGN A_AI_Bearing.md` | `design_a_techassist_rag_portal` | AI-bearing — an internal RAG portal | Every TRUST-7 check applies (0 `not_applicable`), so precision and recall have something to separate. |
+| `DESIGN B_Traditional_No AI.md` | `design_b_checkout_payments_api` | traditional, no AI anywhere | 19 checks `not_applicable`, and **all seven** TRUST-7 pillars WHOLLY inapplicable. The N/A-denominator case, end to end. |
 
 The pair matters more than either file. A set of only weak designs lets an
 always-`fail` evaluator score well; a set with no N/A-heavy design cannot tell a
@@ -30,15 +24,50 @@ correct `not_applicable` from a lucky one.
 `backend/tests/test_accuracy_harness.py` asserts both properties hold, so the set
 cannot lose them silently.
 
+Neither design ships a diagram — the SoW is the whole input, so `diagram` is `""`
+on both and the vision path is not exercised by a harness run.
+
+### The labels were reshaped, never edited
+
+They arrived as a bare JSON array of 45 label objects, which `load_ground_truth`
+cannot read: it expects the wrapper this README documents, with `labels` keyed by
+`check_id`. The array was wrapped and three keys renamed to the names the loader
+and the template use:
+
+| as labelled | as stored |
+|---|---|
+| `verdict` | `status` |
+| `evidence` | `why` |
+| `labeler_name` | `labeler` |
+
+**Every value is verbatim.** No verdict, evidence string, labeler or date was
+altered, and nothing was added inside a label — `confidence` is absent rather than
+invented, so `load_ground_truth` applies its `"clear"` default. The wrapper's own
+fields (`id`, `title`, `provenance`, `document`, `design_is_ai_bearing`) are the
+only new content, and `context` is left empty rather than guessed, since it would
+otherwise ride into the prompt as if the tester had written it.
+
+## `synthetic_stub/` — the old stand-ins
+
+`claims-triage-ai` and `expense-portal` were synthetic designs with labels authored
+inside this repository, written before any real labelled set existed. They now live
+in `synthetic_stub/`, which the harness does **not** glob: a run that scored
+invented designs alongside the tester's would report one blended figure and look
+like a single number.
+
+They are still used as test fixtures — each ships a `.drawio`, which is what makes
+them the right input for the harness's plumbing tests and for the structural-coverage
+and AI-detection tests. Those pass the subdirectory explicitly.
+
 ## File format
 
 ```json
 {
-  "id": "expense-portal",
-  "title": "Internal expense claim portal",
+  "id": "design_b_checkout_payments_api",
+  "title": "Global checkout and payments API (traditional, no AI)",
   "provenance": "where this design and these labels came from",
-  "document": "expense-portal.sow.md",
-  "diagram": "expense-portal.drawio",
+  "document": "DESIGN B_Traditional_No AI.md",
+  "diagram": "",
   "context": "",
   "labels": {
     "sec_least_privilege": {
@@ -114,9 +143,15 @@ unmentioned.** "This system has no AI component" makes `tf_hallucination_control
 inapplicable. "This system does not discuss encryption" does not make
 `sec_encryption_at_rest` inapplicable — it makes it `fail`. Several TRUST-7 checks
 read as AI-specific but are not, and `ss_data_residency` is the one that catches
-people: it applies to any design holding regulated data, which is why
-`expense-portal` labels it `fail` while labelling its 18 neighbours
-`not_applicable`.
+people: on this reading it applies to any design holding regulated data, whether or
+not the design has AI in it.
+
+Worth flagging rather than quietly reconciling: the real Design B labels
+`ss_data_residency` `not_applicable`, which is what makes all seven of its TRUST-7
+pillars wholly inapplicable. That is the tester's call and is left exactly as
+labelled — but it disagrees with the guidance in the paragraph above, so one of the
+two should change. The synthetic `expense-portal` stub takes the other reading and
+labels it `fail`.
 
 ## Generated reports
 

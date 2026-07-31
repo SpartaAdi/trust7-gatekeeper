@@ -104,7 +104,12 @@ def test_the_shipped_drawio_fixtures_both_read_100_percent() -> None:
     on the kind of diagram it will actually meet."""
     import pathlib
 
-    ground_truth = pathlib.Path(__file__).resolve().parent.parent.parent / "fixtures" / "ground_truth"
+    # synthetic_stub, not the parent: the real labelled designs are documents
+    # with no diagram, so the .drawio fixtures live here now.
+    ground_truth = (
+        pathlib.Path(__file__).resolve().parent.parent.parent
+        / "fixtures" / "ground_truth" / "synthetic_stub"
+    )
     for name in ("expense-portal.drawio", "claims-triage-ai.drawio"):
         raw = (ground_truth / name).read_bytes()
         coverage = fidelity.structural_coverage(drawio.parse(raw), raw)

@@ -6,7 +6,7 @@ compare with the labels — per class, per pillar, and run to run.
 
     python scripts/accuracy_harness.py                       # 3 runs per design
     python scripts/accuracy_harness.py --repeats 1            # one pass, cheaper
-    python scripts/accuracy_harness.py --designs expense-portal
+    python scripts/accuracy_harness.py --designs design_b_checkout_payments_api
     python scripts/accuracy_harness.py --base-url https://... --demo-token ...
     python scripts/accuracy_harness.py --check-labels         # no API calls at all
 
@@ -28,8 +28,8 @@ Three cuts, because one number cannot carry this:
 
 * **Per-class precision / recall / F1** over the four statuses, one-vs-rest. This
   is the cut the four-way verdict actually calls for. `not_applicable` gets its
-  own row, which matters more here than it looks: `expense-portal` is labelled
-  n/a on 18 of TRUST-7's 19 checks, so an evaluator that never says n/a can still
+  own row, which matters more here than it looks: the non-AI design is labelled
+  n/a on 19 of TRUST-7's 19 checks, so an evaluator that never says n/a can still
   post a respectable overall accuracy while being wrong about the entire
   framework.
 * **Macro and micro averages.** Macro is the unweighted mean of the per-class
