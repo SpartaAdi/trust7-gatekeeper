@@ -369,13 +369,14 @@ const MAX_PROMPT_ITEMS = 10
  * failure this whole tool is built to catch.
  */
 export const FIX_IT_PREAMBLE =
-  'Here is my architecture. A review found the gaps listed below.\n\n' +
-  'For each gap, give me a numbered, step-by-step plan to close it: the specific ' +
-  'components to add, change, or connect, and the order to do it in. Number your ' +
-  'steps against the gap numbers below so I can work through them one at a time. ' +
-  'If a gap cannot be closed in the diagram alone — because it is a process or ' +
+  'Here is my architecture. A review found the following gaps.\n\n' +
+  'For each one, give me a clear, numbered, step-by-step plan for how to fix it ' +
+  'in my architecture diagram — assume I will be editing the diagram directly, ' +
+  'so be concrete about what to add, remove, or reconnect. Number your steps ' +
+  'against the gap numbers below so I can work through them one at a time. If a ' +
+  'gap cannot be closed in the diagram alone — because it is a process or ' +
   'governance control rather than a component — say so plainly for that gap ' +
-  'instead of inventing a box for it. Then show me the revised architecture.\n\n' +
+  'instead of inventing a box for it.\n\n' +
   'The gaps:'
 
 /** Appended when any item lacks guidance, so the absence travels with the prompt. */

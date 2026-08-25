@@ -341,7 +341,7 @@ describe('buildFixItPrompt', () => {
 
     expect(prompt.startsWith(FIX_IT_PREAMBLE)).toBe(true)
     expect(prompt).toContain('Here is my architecture')
-    expect(prompt).toContain('revised architecture')
+    expect(prompt).toContain('A review found the following gaps')
   })
 
   it('asks for a numbered, step-by-step plan rather than an implicit revision', () => {
@@ -352,10 +352,19 @@ describe('buildFixItPrompt', () => {
     // part of the artefact is discarded at the point of use.
     const prompt = buildFixItPrompt([finding({ remediation: 'Encrypt the store.' })])
 
-    expect(prompt).toMatch(/numbered, step-by-step plan/i)
-    expect(prompt).toMatch(/the order to do it in/i)
+    expect(prompt).toMatch(/clear, numbered, step-by-step plan/i)
     // Keyed to the gap numbers, so the reply can be checked against the review.
     expect(prompt).toMatch(/number your steps against the gap numbers/i)
+  })
+
+  it('tells the assistant the diagram is being edited by hand', () => {
+    // The difference between "revise this" and a usable plan. Without it the reply
+    // is a redrawn picture; with it, the reply is edits a person can apply to the
+    // diagram they already have open.
+    const prompt = buildFixItPrompt([finding()])
+
+    expect(prompt).toMatch(/editing the diagram directly/i)
+    expect(prompt).toMatch(/what to add, remove, or reconnect/i)
   })
 
   it('tells the assistant to refuse a gap the diagram cannot close', () => {

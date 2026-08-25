@@ -532,7 +532,7 @@ function ContextField({
           aria-live="polite"
           data-testid="upload-dictation-status"
         >
-          {listening ? 'Listening — speak, then press stop when you are done.' : ''}
+          {listening ? 'Please speak now.' : ''}
         </p>
         <p className="t-caption tnum ml-auto text-[0.75rem] text-ink-muted">
           {remaining} characters left.

@@ -775,8 +775,12 @@ describe('UploadView — context and dictation discoverability', () => {
     expect(listening.querySelector('path')).toBeNull()
     // Carrier 3 — a ring, which reads independently of hue.
     expect(listening.className).toContain('ring-2')
-    // Carrier 4 — text, for anyone who reads rather than looks.
-    expect(screen.getByTestId('upload-dictation-status')).toHaveTextContent(/listening/i)
+    // Carrier 4 — text, for anyone who reads rather than looks. It is also the
+    // only thing the live region announces, so it has to be a usable instruction
+    // on its own rather than a state name.
+    expect(screen.getByTestId('upload-dictation-status')).toHaveTextContent(
+      'Please speak now.',
+    )
   })
 
   it('names the state the same way in the tooltip, the title and the accessible name', async () => {
