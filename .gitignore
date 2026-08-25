@@ -19,3 +19,8 @@ local-data/
 # committed; the reports generated from them are run output, not fixtures.
 fixtures/ground_truth/accuracy-report-*.md
 fixtures/ground_truth/accuracy-report-*.json
+
+# Real client documents used by the embedded-diagram acceptance test. Signed
+# contracts and SoWs never belong in the repository; see fixtures/real/README.md.
+fixtures/real/*
+!fixtures/real/README.md

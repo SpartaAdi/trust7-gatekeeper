@@ -12,3 +12,8 @@ python-dotenv==1.2.1
 pypdf==6.1.1
 python-docx==1.2.0
 reportlab==5.0.0     # PDF export; pulls pillow in for diagram embedding
+# Pinned DIRECTLY rather than left to reportlab's resolver. `ingestion/embedded.py`
+# decodes embedded PDF images with it, so it is now a dependency this code has of
+# its own — and a transitive pin is one `pip install -U reportlab` away from moving
+# or disappearing under a module that needs it.
+pillow==12.3.0
