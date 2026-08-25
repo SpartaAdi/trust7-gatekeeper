@@ -36,6 +36,17 @@ export interface Finding {
   affected_components: string[]
   remediation: string
   remediation_effort: Effort
+  /**
+   * The phrase from the DESIGN SOURCE that `remediation` acts on, verified present
+   * before it was stored — document prose, a diagram label, a diagram note, or the
+   * context box. Never the model's own restatement of the design.
+   *
+   * Empty means unverified, and covers three cases the UI must not try to tell
+   * apart: no remediation, no quote returned, or a quote that was not in the source
+   * and had its entry discarded. Reviews written before this existed read back as
+   * empty, which is the correct answer for them.
+   */
+  remediation_grounded_in: string
   priority: number
   confidence: Confidence
 }

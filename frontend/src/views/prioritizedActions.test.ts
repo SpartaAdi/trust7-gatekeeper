@@ -35,6 +35,7 @@ function finding(over: Partial<Finding> = {}): Finding {
     affected_components: [],
     remediation: 'Do the thing.',
     remediation_effort: 'low',
+    remediation_grounded_in: '',
     priority: 1,
     confidence: 'high',
     ...over,
@@ -124,6 +125,7 @@ describe('prioritizedActions', () => {
         severity: 'medium',
         priority: 1,
         remediation_effort: 'medium',
+        remediation_grounded_in: '',
       }),
       finding({
         pillar_id: 'p2',
@@ -131,6 +133,7 @@ describe('prioritizedActions', () => {
         severity: 'high',
         priority: 0,
         remediation_effort: 'medium',
+        remediation_grounded_in: '',
       }),
       finding({
         pillar_id: 'p3',
@@ -138,6 +141,7 @@ describe('prioritizedActions', () => {
         severity: 'high',
         priority: 5,
         remediation_effort: 'medium',
+        remediation_grounded_in: '',
       }),
     ])
 
@@ -174,6 +178,7 @@ describe('prioritizedActions', () => {
         priority: 1,
         severity: 'medium',
         remediation_effort: 'medium',
+        remediation_grounded_in: '',
       }),
       finding({ pillar_id: 'p3', check_id: 'c', priority: 2, remediation_effort: 'high' }),
     ]
@@ -212,6 +217,7 @@ describe('buildFixItPrompt', () => {
         check_id: 'structural',
         remediation: 'Re-architect it.',
         remediation_effort: 'high',
+        remediation_grounded_in: '',
         priority: 1,
       }),
       finding({
@@ -219,6 +225,7 @@ describe('buildFixItPrompt', () => {
         check_id: 'immediate',
         remediation: 'Flip the flag.',
         remediation_effort: 'low',
+        remediation_grounded_in: '',
         priority: 9,
       }),
     ])

@@ -26,6 +26,7 @@ function finding(overrides: Partial<Finding>): Finding {
     affected_components: [],
     remediation: '',
     remediation_effort: '',
+    remediation_grounded_in: '',
     priority: 0,
     confidence: '',
     ...overrides,
@@ -95,6 +96,7 @@ describe('phaseFor — the rule stated directly', () => {
       phaseFor(
         finding({
           remediation_effort: '',
+          remediation_grounded_in: '',
           severity: 'low',
           affected_components: ['api', 'db'],
         }),

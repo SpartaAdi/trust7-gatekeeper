@@ -68,7 +68,7 @@ def test_a_grounded_note_is_kept(monkeypatch) -> None:
         }
     ]))
 
-    _, _, _, notes, _, _grounding = stages.remediate([finding()], {}, "sb", context=CONTEXT)
+    _, _, _, notes, _, _grounding, _quotes = stages.remediate([finding()], {}, "sb", context=CONTEXT)
 
     assert len(notes) == 1
     assert notes[0].component == "Claims lookup store"
@@ -87,7 +87,7 @@ def test_a_note_quoting_something_never_written_is_discarded(monkeypatch, caplog
     ]))
 
     with caplog.at_level(logging.INFO):
-        _, _, _, notes, _, _grounding = stages.remediate([finding()], {}, "sb", context=CONTEXT)
+        _, _, _, notes, _, _grounding, _quotes = stages.remediate([finding()], {}, "sb", context=CONTEXT)
 
     assert notes == []
     assert "grounding quote is not in the submitted context" in caplog.text
@@ -101,7 +101,7 @@ def test_no_context_means_no_notes_however_many_the_model_returns(monkeypatch) -
          "grounded_in": "something"}
     ]))
 
-    _, _, _, notes, _, _grounding = stages.remediate([finding()], {}, "sb", context="")
+    _, _, _, notes, _, _grounding, _quotes = stages.remediate([finding()], {}, "sb", context="")
 
     assert notes == []
 
@@ -117,7 +117,7 @@ def test_matching_survives_reformatting_of_the_quote(monkeypatch) -> None:
         }
     ]))
 
-    _, _, _, notes, _, _grounding = stages.remediate([finding()], {}, "sb", context=CONTEXT)
+    _, _, _, notes, _, _grounding, _quotes = stages.remediate([finding()], {}, "sb", context=CONTEXT)
 
     assert len(notes) == 1
 
@@ -131,7 +131,7 @@ def test_an_incomplete_note_is_dropped(monkeypatch) -> None:
         {"component": "Store", "recommendation": "Fine.", "grounded_in": ""},
     ]))
 
-    _, _, _, notes, _, _grounding = stages.remediate([finding()], {}, "sb", context=CONTEXT)
+    _, _, _, notes, _, _grounding, _quotes = stages.remediate([finding()], {}, "sb", context=CONTEXT)
 
     assert notes == []
 
@@ -140,7 +140,7 @@ def test_notes_are_absent_when_the_model_returns_none(monkeypatch) -> None:
     """An empty array is the expected answer, not a failure."""
     stub(monkeypatch, payload([]))
 
-    _, _, _, notes, _, _grounding = stages.remediate([finding()], {}, "sb", context=CONTEXT)
+    _, _, _, notes, _, _grounding, _quotes = stages.remediate([finding()], {}, "sb", context=CONTEXT)
 
     assert notes == []
 

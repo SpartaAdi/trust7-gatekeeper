@@ -483,11 +483,16 @@ def _run(
             use_case_notes,
             usage,
             grounding,
+            remediation_quotes,
         ) = stages.remediate(
             findings,
             classification,
             scoring.scoreboard(overall, framework_scores, findings),
             context=design.context,
+            # The design SOURCE, so `grounded_in` has something real to quote and
+            # something real to be checked against. Until this was passed, remediate
+            # saw only the classify stage's restatement of the design.
+            design=design,
         )
         # The third fidelity number, and the only one not measured at ingestion:
         # the grounding filter can only be counted where it runs. Left as None when
@@ -497,6 +502,8 @@ def _run(
         for finding in findings:
             finding.remediation = remediations.get(finding.check_id, "")
             finding.remediation_effort = efforts.get(finding.check_id, "")  # type: ignore[assignment]
+            # Empty unless the quote was verified present in the design source.
+            finding.remediation_grounded_in = remediation_quotes.get(finding.check_id, "")
         progress.finish("remediate", f"{len(remediations)} remediations written")
 
         # ---- delta and persist ----------------------------------------------- #
@@ -826,6 +833,7 @@ def _re_review(
             use_case_notes,
             usage,
             grounding,
+            remediation_quotes,
         ) = stages.remediate(
             findings,
             classification,
@@ -833,12 +841,19 @@ def _re_review(
             context=design.context,
             feedback=feedback,
             reference_graph=reference_graph,
+            # A follow-up round grounds against the design it actually re-evaluated:
+            # for a feedback-only round that is the stored design, and for a new
+            # attachment it is the replaced one. Either way it is `design`, which is
+            # exactly what evaluate was given this round.
+            design=design,
         )
         progress.record_usage(usage)
         design.fidelity.grounding = grounding
         for finding in findings:
             finding.remediation = remediations.get(finding.check_id, "")
             finding.remediation_effort = efforts.get(finding.check_id, "")  # type: ignore[assignment]
+            # Empty unless the quote was verified present in the design source.
+            finding.remediation_grounded_in = remediation_quotes.get(finding.check_id, "")
         progress.finish("remediate", f"{len(remediations)} remediations written")
 
         # ---- persist as a NEW version --------------------------------------- #

@@ -648,6 +648,21 @@ class Finding(BaseModel):
     affected_components: list[str] = Field(default_factory=list)
     remediation: str = ""
     remediation_effort: Literal["low", "medium", "high", ""] = ""
+
+    # The phrase from the DESIGN SOURCE that the remediation above acts on, verified
+    # present before it was stored. Empty means one of three things, and the UI must
+    # not distinguish them: there is no remediation, or the model quoted nothing, or
+    # it quoted something that is not in the source and the entry was discarded.
+    #
+    # Source means what a person wrote — the document, a diagram label, a diagram
+    # note, the context box. Explicitly NOT the classify stage's restatement of the
+    # design: checking a generated claim against another generated claim would put a
+    # tick beside something nothing verified. See `stages.design_source_text`.
+    #
+    # Empty is the honest default and stays empty on every review written before this
+    # field existed, which read back as "not grounded" rather than failing to load.
+    remediation_grounded_in: str = ""
+
     priority: int = 0
 
     # The model's confidence in its OWN observation, not a property of the design:

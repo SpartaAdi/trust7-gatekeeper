@@ -863,6 +863,16 @@ remediation.
 change), medium (a component or flow change), high (a structural change to the \
 architecture).
 
+Every remediation must carry `grounded_in`: a phrase from the "Design source" \
+block, copied verbatim, naming the part of the design this remediation acts on — \
+a sentence from the document, a component label, or a diagram note. Copy it from \
+the "Design source" block and nowhere else: the restated summary above it is our \
+own description of the design, not the design, and a quote taken from there \
+cannot be verified against anything. If you cannot copy such a phrase for a \
+finding, return the entry with `grounded_in` empty rather than inventing one — an \
+entry whose quote is not in the source is discarded, and a discarded entry is \
+shown to the reviewer as a gap with no guidance at all.
+
 ## Reviewer feedback, when a "Reviewer feedback" block appears
 
 This is a re-review and someone has said where the previous version was wrong. \
@@ -916,8 +926,16 @@ _REMEDIATE_SCHEMA: dict[str, Any] = {
                     "check_id": {"type": "string"},
                     "remediation": {"type": "string"},
                     "effort": {"type": "string", "enum": ["low", "medium", "high"]},
+                    "grounded_in": {
+                        "type": "string",
+                        "description": (
+                            "A phrase copied verbatim from the design source — the "
+                            "document, a diagram label, or a diagram note — that this "
+                            "remediation addresses."
+                        ),
+                    },
                 },
-                "required": ["check_id", "remediation", "effort"],
+                "required": ["check_id", "remediation", "effort", "grounded_in"],
                 "additionalProperties": False,
             },
         },
@@ -965,6 +983,13 @@ the two in one remediation.
 change), medium (a component or flow change), high (a structural change to the \
 architecture).
 
+Every remediation must carry `grounded_in`: a phrase from the "Design source" \
+block, copied verbatim, naming the part of the design this remediation acts on — \
+a sentence from the document, a component label, or a diagram note. Copy it from \
+the "Design source" block and nowhere else. An entry whose quote is not in the \
+source is discarded, and this is the second and final attempt for these findings: \
+a discarded entry now reaches the reviewer as a gap with no guidance at all.
+
 {guard}""".format(guard=untrusted.GUARD)
 
 # The retry needs no executive summary — the first call already wrote it, and
@@ -986,6 +1011,7 @@ def remediate(
     context: str = "",
     feedback: str = "",
     reference_graph: Any = None,
+    design: NormalizedDesign | None = None,
 ) -> tuple[
     dict[str, str],
     dict[str, str],
@@ -993,6 +1019,7 @@ def remediate(
     list[UseCaseNote],
     dict[str, int],
     GroundingFilter | None,
+    dict[str, str],
 ]:
     """Generate remediation guidance and the executive summary.
 
@@ -1005,10 +1032,12 @@ def remediate(
     if not open_findings:
         # No model call was made, so the grounding filter never ran — None rather
         # than a zeroed filter, which would claim it had looked and found nothing.
+        # No call was made, so nothing was grounded and nothing could be: an empty
+        # quotes map, matching the `None` filter beside it — both say "did not run".
         return {}, {}, (
             "Every applicable check passed. No high-severity findings block "
             "deployment."
-        ), [], {}, None
+        ), [], {}, None, {}
 
     payload, usage = llm.complete_json(
         system=[
@@ -1023,7 +1052,19 @@ def remediate(
                 "type": "text",
                 "text": (
                     f"## Design\n{untrusted.wrap(_render_classification(classification))}\n\n"
-                    f"## Scoreboard (computed — use these figures verbatim)\n"
+                    # The SOURCE, added so `grounded_in` has something real to quote.
+                    # Until this block existed, remediate saw only the block above —
+                    # the model's own restatement — so nothing it wrote could be
+                    # checked against anything a submitter actually said. Same
+                    # renderer evaluate is given, so the two stages cannot be shown
+                    # different designs.
+                    + (
+                        f"## Design source (quote `grounded_in` from HERE)\n"
+                        f"{untrusted.wrap(design.as_prompt_context())}\n\n"
+                        if design is not None
+                        else ""
+                    )
+                    + f"## Scoreboard (computed — use these figures verbatim)\n"
                     f"{scoreboard}\n\n"
                     f"## Findings needing remediation\n"
                     f"{untrusted.wrap(_render_findings(open_findings))}"
@@ -1051,6 +1092,34 @@ def remediate(
 
     wanted = {f.check_id for f in open_findings}
     text, effort, discarded = _collect_remediations(payload, wanted)
+
+    # Grounding runs BEFORE the shortfall count, which is the whole design of the
+    # fail path: an ungrounded remediation is removed from `text` here, so it lands
+    # in `missing` below and takes the same single bounded retry a genuinely absent
+    # one takes. No second retry mechanism was added for it.
+    #
+    # With no design there is no source, so the check cannot run at all. It is
+    # SKIPPED rather than run against an empty haystack: the latter would fail every
+    # entry and blank a whole review's guidance over a missing argument. Nothing is
+    # marked grounded either way, so the tick the UI draws still means "verified".
+    # Both production call sites pass a design; the warning is here so a third one
+    # that forgets cannot do it quietly.
+    quotes: dict[str, str] = {}
+    haystack = design_source_text(design) if design is not None else ""
+    if not haystack:
+        log.warning(
+            "remediate ran with no design source, so remediation grounding could "
+            "not be checked; %d remediation(s) are stored unverified.", len(text),
+        )
+        ungrounded: list[str] = []
+    else:
+        text, quotes, ungrounded = _ground_remediations(payload, text, haystack)
+    if ungrounded:
+        log.warning(
+            "remediate returned %d ungrounded remediation(s) whose quote is not in "
+            "the design source: %s. Retrying them with the missing ones.",
+            len(ungrounded), ", ".join(sorted(ungrounded)),
+        )
 
     # The same shortfall the prioritize stage already had to defend against: a real
     # run there returned 19 entries for 31 open findings. Nothing here noticed the
@@ -1094,12 +1163,29 @@ def remediate(
         retry_text, retry_effort, retry_discarded = _collect_remediations(
             retry_payload, set(missing)
         )
+        # The retry is held to the SAME grounding bar. Exempting it would make the
+        # retry a way to launder an ungrounded answer into a stored one, which is
+        # the opposite of what the retry is for — and this is the last attempt, so
+        # what fails here ends as an honest blank.
+        retry_quotes: dict[str, str] = {}
+        retry_ungrounded: list[str] = []
+        if haystack:
+            retry_text, retry_quotes, retry_ungrounded = _ground_remediations(
+                retry_payload, retry_text, haystack
+            )
+        if retry_ungrounded:
+            log.error(
+                "remediate-missing returned %d remediation(s) still not grounded in "
+                "the design source: %s. These stay blank.",
+                len(retry_ungrounded), ", ".join(sorted(retry_ungrounded)),
+            )
         if not retry_text:
             _log_shortfall(
                 "remediate-missing", retry_payload, set(missing), retry_discarded
             )
         text.update(retry_text)
         effort.update(retry_effort)
+        quotes.update(retry_quotes)
         usage = _add_usage(usage, retry_usage)
 
         still_missing = sorted(wanted - set(text))
@@ -1141,6 +1227,10 @@ def remediate(
         # Appended rather than inserted, so every existing positional meaning is
         # unchanged for the twenty call sites that unpack this.
         grounding,
+        # Likewise appended. Keyed by check_id, and only ever holds a quote that was
+        # verified present in the design source — a check_id absent from this dict
+        # has no verified grounding, which is not the same as having none.
+        quotes,
     )
 
 
@@ -1215,6 +1305,100 @@ def _use_case_notes(
         incomplete=incomplete,
         removed_for=removed_for,
     )
+
+
+def design_source_text(design: NormalizedDesign) -> str:
+    """Everything about a design that came from the SUBMITTER, and nothing else.
+
+    The haystack `_ground_remediations` verifies quotes against. What belongs in it
+    is the whole question, so the rule is one line: a string goes in here only if a
+    person wrote it — in the document, on the diagram, or in the context box.
+
+    In, therefore: the document text, component labels and services, attribute names
+    and values, connection labels and protocols, diagram notes, the title, and the
+    submitted context. All of it is either prose the submitter wrote or a label they
+    put on a shape.
+
+    Out, and this is the important half: `_render_classification`'s `design_summary`,
+    `observations` and rendered data flows. Those are the MODEL's own restatement of
+    the design. Checking a remediation's quote against them would be verifying one
+    generated claim against another generated claim — which is worse than running no
+    check at all, because it produces a green tick. Nothing in the remediate prompt
+    may be quotable except the "Design source" block, and this function is the
+    definition of that block's content.
+
+    Structural scaffolding is out too — `kind=`, `provider=`, `[id=c3]` and the
+    component ids themselves. They are our rendering, not the design, and a model
+    quoting "provider=aws" would pass a check it should not.
+    """
+    parts: list[str] = [design.title, design.document_text, design.context]
+    for component in design.graph.components:
+        parts.append(component.label)
+        parts.append(component.service)
+        for name, value in component.attributes.items():
+            parts.extend((name, value))
+    for connection in design.graph.connections:
+        parts.extend((connection.label, connection.protocol))
+    parts.extend(design.graph.notes)
+    return " ".join(" ".join(str(part).lower().split()) for part in parts if part)
+
+
+def _ground_remediations(
+    payload: dict[str, Any], text: dict[str, str], haystack: str
+) -> tuple[dict[str, str], dict[str, str], list[str]]:
+    """Drop remediations whose grounding quote is not in the design source.
+
+    A sibling of `_use_case_notes`, deliberately not a reuse of it. Same principle —
+    case-insensitive on collapsed whitespace, discard rather than repair — but a
+    different haystack, a different failure route, and a different consequence, and
+    this codebase keeps distinct signals structurally separate for exactly that
+    reason. `_use_case_notes` checks a recommendation against the submitter's typed
+    context and DROPS what fails, because a use-case note is optional and its absence
+    is a correct answer. A remediation is not optional: every open finding is
+    supposed to have one, so a failure here must not end in silence.
+
+    So this only removes the entry from `text`. That puts its check_id back into
+    `wanted - set(text)` — the existing shortfall path — where it gets the same
+    single bounded retry a genuinely missing entry already gets, and if the retry is
+    ungrounded too it ends as an honest blank rather than a fabricated fix. No second
+    retry mechanism, no repair, no fallback text.
+
+    Matching is case-insensitive on collapsed whitespace, because a model re-typing a
+    quoted phrase reliably changes spacing and capitalisation and just as reliably
+    keeps the words.
+
+    An empty haystack means the filter COULD NOT RUN, and is handled by the caller
+    rather than here: it skips this function entirely instead of passing "" and
+    watching every remediation fail. That distinction is the same one
+    `_use_case_notes` draws by returning a `None` filter rather than a zero count —
+    "could not check" is not "checked and found nothing", and conflating them would
+    blank every remediation in a review over a missing argument.
+    """
+    quotes: dict[str, str] = {}
+    removed: list[str] = []
+
+    for raw in payload.get("remediations", []) or []:
+        check_id = str(raw.get("check_id", "")).strip()
+        if check_id not in text:
+            # Already discarded by `_collect_remediations` for a different reason —
+            # not an open finding, or no text. Not this filter's business, and
+            # counting it here would double-report one rejection.
+            continue
+        quote = " ".join(str(raw.get("grounded_in", "")).lower().split())
+        if not quote or quote not in haystack:
+            log.info(
+                "Remediation for %s is not grounded in the design source "
+                "(quote=%r); dropping it back into the missing set for one retry.",
+                check_id, str(raw.get("grounded_in", ""))[:120],
+            )
+            removed.append(check_id)
+            continue
+        quotes[check_id] = str(raw.get("grounded_in", "")).strip()
+
+    for check_id in removed:
+        text.pop(check_id, None)
+
+    return text, quotes, removed
 
 
 def _collect_remediations(

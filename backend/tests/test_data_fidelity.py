@@ -425,7 +425,7 @@ def test_a_run_with_no_open_findings_reports_no_filter(monkeypatch) -> None:
         for c in rubric.all_checks()
     ]
 
-    *_, grounding = stages.remediate(passing, {}, "sb", context="anything")
+    *_, grounding, _quotes = stages.remediate(passing, {}, "sb", context="anything")
 
     assert grounding is None
 

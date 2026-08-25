@@ -352,7 +352,7 @@ def test_the_observed_run_end_to_end_through_remediate(
     open_findings = [finding(f"c{i}") for i in range(25)]
 
     with caplog.at_level(logging.WARNING, logger="agent.stages"):
-        text, effort, summary, _notes, _usage, _grounding = stages.remediate(
+        text, effort, summary, _notes, _usage, _grounding, _quotes = stages.remediate(
             open_findings, {"components": []}, scoreboard="Overall 58.2"
         )
 
@@ -438,7 +438,7 @@ def test_a_partial_shortfall_still_only_asks_for_the_missing_ones(
         ], "use_case_notes": []}, {}
 
     monkeypatch.setattr(llm, "complete_json", partial)
-    text, _effort, _s, _n, _u, _g = stages.remediate(
+    text, _effort, _s, _n, _u, _g, _q = stages.remediate(
         [finding("c0"), finding("c1")], {"components": []}
     )
 

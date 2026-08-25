@@ -116,6 +116,7 @@ export function resultFixture(overrides: Partial<ReviewResult> = {}): ReviewResu
         affected_components: ['orders-db'],
         remediation: 'Enable SSE-KMS on the table with a customer-managed key.',
         remediation_effort: 'low',
+        remediation_grounded_in: '',
         priority: 1,
         // Stated explicitly in the design, so the model is sure of its reading.
         confidence: 'high',
@@ -131,6 +132,7 @@ export function resultFixture(overrides: Partial<ReviewResult> = {}): ReviewResu
         affected_components: [],
         remediation: '',
         remediation_effort: '',
+        remediation_grounded_in: '',
         priority: 0,
         confidence: 'medium',
       },

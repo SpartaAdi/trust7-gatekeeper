@@ -172,6 +172,9 @@ def _stub_complete_json(state: dict[str, int]):
                         "check_id": check_id,
                         "remediation": f"Close the gap on {check_id}.",
                         "effort": "medium",
+                        # A diagram component label, not document prose — the retry
+                        # is held to the same grounding bar as the first call.
+                        "grounded_in": "Orders DynamoDB",
                     }
                     for check_id in asked_for
                 ]
@@ -196,6 +199,10 @@ def _stub_complete_json(state: dict[str, int]):
                         else f"Address {check_id}."
                     ),
                     "effort": "low",
+                    # A phrase that really is in the design source — the SoW's own
+                    # sentence. Without it every entry here is discarded as
+                    # ungrounded, which is the filter working, not a broken stub.
+                    "grounded_in": "Orders are stored in DynamoDB",
                 }
                 for check_id in asked_for
             ],
