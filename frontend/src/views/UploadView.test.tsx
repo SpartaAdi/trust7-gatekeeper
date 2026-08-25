@@ -750,4 +750,68 @@ describe('UploadView — context and dictation discoverability', () => {
     expect(listening.className).toContain('bg-minfy-navy')
     expect(listening.className).not.toMatch(/sev-/)
   })
+
+  it('signals listening by more than colour alone', async () => {
+    // This project's recurring contrast finding. Indigo #1420be to navy #1b263b is
+    // two dark blues: hard to separate side by side, impossible from memory, and
+    // invisible to a reader who cannot distinguish those hues at all. So the state
+    // must survive having the colour removed.
+    setSpeechSupport(true)
+    const user = await stageDiagram()
+
+    const idle = screen.getByRole('button', {
+      name: /speak out your purpose and use case/i,
+    })
+    // At rest: a mic glyph, no ring.
+    expect(idle.querySelector('rect')).toBeNull()
+    expect(idle.querySelector('path')).not.toBeNull()
+    expect(idle.className).not.toContain('ring-2')
+
+    await user.click(idle)
+
+    const listening = screen.getByRole('button', { name: /stop dictating/i })
+    // Carrier 2 — shape. The glyph becomes a stop square, and the mic path is gone.
+    expect(listening.querySelector('rect')).not.toBeNull()
+    expect(listening.querySelector('path')).toBeNull()
+    // Carrier 3 — a ring, which reads independently of hue.
+    expect(listening.className).toContain('ring-2')
+    // Carrier 4 — text, for anyone who reads rather than looks.
+    expect(screen.getByTestId('upload-dictation-status')).toHaveTextContent(/listening/i)
+  })
+
+  it('names the state the same way in the tooltip, the title and the accessible name', async () => {
+    // A static "Speak out your purpose" tip sitting over a stop square contradicts
+    // the glyph. All three carriers of the wording have to move together.
+    setSpeechSupport(true)
+    const user = await stageDiagram()
+
+    await user.click(
+      screen.getByRole('button', { name: /speak out your purpose and use case/i }),
+    )
+
+    const listening = screen.getByRole('button', { name: /stop dictating/i })
+    expect(listening).toHaveAttribute('title', 'Stop dictating')
+    expect(screen.getByTestId('mic-tooltip')).toHaveTextContent('Stop dictating')
+  })
+
+  it('keeps the character count out of the live region', async () => {
+    // The bug FeedbackBox already fixed, still present here: both statuses shared one
+    // aria-live region, so `remaining` changed inside it on every keystroke and a
+    // screen reader announced "3994 characters left" after every letter typed.
+    setSpeechSupport(true)
+    const user = await stageDiagram()
+
+    const live = screen.getByTestId('upload-dictation-status')
+    expect(live).toHaveAttribute('aria-live', 'polite')
+    expect(live).not.toHaveTextContent(/characters left/i)
+
+    await user.type(screen.getByLabelText(/add more context/i), 'read-heavy workload')
+
+    // Still nothing but the dictation state — typing must not make it speak.
+    expect(screen.getByTestId('upload-dictation-status')).not.toHaveTextContent(
+      /characters left/i,
+    )
+    // And the count is still on screen, just not announced on every keystroke.
+    expect(screen.getByText(/characters left/i)).toBeInTheDocument()
+  })
 })

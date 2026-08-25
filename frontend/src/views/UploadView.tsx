@@ -464,20 +464,43 @@ function ContextField({
                   ? 'Stop dictating'
                   : 'Speak out your purpose and use case'
               }
-              title="Speak out your purpose and use case"
-              // Navy while listening, not a severity red: "recording" is a state,
-              // not a finding, and sev-high means one specific thing everywhere
-              // else in this app.
-              className={`flex size-12 items-center justify-center transition-colors duration-150 disabled:opacity-60 ${
+              /* Follows the state, like the accessible name already did. A static
+                 "Speak out your purpose" tip over a stop square contradicts the
+                 glyph — the same fix FeedbackBox's mic already carries. */
+              title={listening ? 'Stop dictating' : 'Speak out your purpose and use case'}
+              /*
+                Navy while listening, not a severity red: "recording" is a state, not
+                a finding, and sev-high means one specific thing everywhere else in
+                this app.
+
+                But navy alone was the whole signal, and indigo #1420be to navy
+                #1b263b is two dark blues — hard to separate side by side and
+                impossible from memory. So the state now also gains a ring and, below,
+                a different glyph. Colour is one of three carriers rather than the
+                only one. This is the same finding, and the same remedy, as the mic in
+                FeedbackBox.
+              */
+              className={`relative flex size-12 items-center justify-center transition-colors duration-150 disabled:opacity-60 ${
                 listening
-                  ? 'bg-minfy-navy text-white'
+                  ? 'bg-minfy-navy text-white ring-2 ring-minfy-navy ring-offset-2 ring-offset-pastel-sky'
                   : 'bg-minfy-indigo text-white hover:bg-minfy-blue'
               }`}
             >
-              <svg viewBox="0 0 16 16" aria-hidden="true" className="size-5 fill-current">
-                <path d="M8 1.5a2 2 0 0 1 2 2v4a2 2 0 0 1-4 0v-4a2 2 0 0 1 2-2Z" />
-                <path d="M4 7a.75.75 0 0 1 1.5 0 2.5 2.5 0 0 0 5 0A.75.75 0 0 1 12 7a4 4 0 0 1-3.25 3.93v1.32h1.75a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.75v-1.32A4 4 0 0 1 4 7Z" />
-              </svg>
+              {/*
+                A stop square while listening, the mic otherwise. The glyph is the
+                second, non-colour carrier of the state, and it says what the next
+                press DOES — which is what the accessible name says, so the two agree.
+              */}
+              {listening ? (
+                <svg viewBox="0 0 16 16" aria-hidden="true" className="size-4 fill-current">
+                  <rect x="3" y="3" width="10" height="10" rx="1" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 16 16" aria-hidden="true" className="size-5 fill-current">
+                  <path d="M8 1.5a2 2 0 0 1 2 2v4a2 2 0 0 1-4 0v-4a2 2 0 0 1 2-2Z" />
+                  <path d="M4 7a.75.75 0 0 1 1.5 0 2.5 2.5 0 0 0 5 0A.75.75 0 0 1 12 7a4 4 0 0 1-3.25 3.93v1.32h1.75a.75.75 0 0 1 0 1.5h-5a.75.75 0 0 1 0-1.5h1.75v-1.32A4 4 0 0 1 4 7Z" />
+                </svg>
+              )}
             </button>
             {/* Visual only: the button's aria-label already carries this wording,
                 so announcing it again would read the same sentence twice. */}
@@ -486,20 +509,35 @@ function ContextField({
               data-testid="mic-tooltip"
               className="pointer-events-none absolute right-0 top-full z-10 mt-1.5 w-max max-w-[13rem] bg-minfy-navy px-2.5 py-1.5 text-right text-[0.75rem] leading-snug text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
             >
-              Speak out your purpose and use case
+              {listening ? 'Stop dictating' : 'Speak out your purpose and use case'}
             </span>
           </span>
         )}
       </div>
 
-      <p
-        className="t-caption mt-1.5 text-[0.75rem] text-ink-muted"
-        aria-live="polite"
-      >
-        {listening
-          ? 'Listening — speak, then press the mic again to stop.'
-          : `${remaining} characters left.`}
-      </p>
+      {/*
+        Two nodes, and the split is the point — the same correction FeedbackBox
+        already carries. These shared ONE `aria-live` region, so `remaining` changed
+        inside it on every keystroke and a screen reader announced "3994 characters
+        left" after every letter typed. The live region was firing on the one thing
+        nobody needs told, and the dictation state — the thing a blind user cannot
+        otherwise perceive — was buried in the same noise.
+
+        The dictation status keeps the live region: it changes on a deliberate press.
+        The counter is now plain text. It is visible, it is reachable, it is not news.
+      */}
+      <div className="mt-1.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <p
+          className="t-caption font-medium text-ink"
+          aria-live="polite"
+          data-testid="upload-dictation-status"
+        >
+          {listening ? 'Listening — speak, then press stop when you are done.' : ''}
+        </p>
+        <p className="t-caption tnum ml-auto text-[0.75rem] text-ink-muted">
+          {remaining} characters left.
+        </p>
+      </div>
     </div>
   )
 }

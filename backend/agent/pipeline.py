@@ -14,6 +14,7 @@ import logging
 import time
 
 import cancel
+import config
 import llm
 import rubric
 import scoring
@@ -60,6 +61,32 @@ class _Progress:
 
     def __init__(self, status: ReviewStatus) -> None:
         self._status = status
+        self._usages: list[dict[str, int]] = []
+
+    def record_usage(self, usage: dict[str, int]) -> None:
+        """Add one call's token usage and republish the running total.
+
+        The accumulator lives here rather than as a local list in each pipeline
+        function for one reason: every spend has to reach the status, and a list the
+        caller owns only reaches it if the caller remembers to publish. Owning it
+        means "recorded" and "visible to the UI" are the same act — the same argument
+        as the cancellation gate living in `start`.
+
+        Called after every model call including the ones that fail over or retry, so
+        the total reflects what was actually spent rather than what a successful run
+        would have cost. Note that an aborted call bills but reports nothing: a
+        CallDeadlineExceeded never returns a usage object, so its tokens are real
+        money this figure cannot see. It is a floor on spend and a ceiling on price.
+        """
+        self._usages.append(usage)
+        totals = _sum(self._usages)
+        self._status.token_usage = totals
+        self._status.estimated_cost_usd = estimated_cost(totals)
+        storage.put_status(self._status)
+
+    def usage_totals(self) -> dict[str, int]:
+        """The settled total, for the stored result."""
+        return _sum(self._usages)
 
     def start(self, stage: str, detail: str = "") -> None:
         # The cancellation gate, and deliberately here rather than at six call
@@ -212,7 +239,6 @@ def _run(
 ) -> ReviewResult:
     status = storage.get_status(review_id) or ReviewStatus.initial(review_id)
     progress = _Progress(status)
-    usages: list[dict[str, int]] = []
     stage = "ingest"
 
     try:
@@ -225,7 +251,7 @@ def _run(
             diagram_key=diagram_key,
             context=context,
         )
-        usages.append(ingest_usage)
+        progress.record_usage(ingest_usage)
         progress.finish(
             "ingest",
             f"{len(design.graph.components)} components from "
@@ -259,7 +285,7 @@ def _run(
         stage = "screen"
         progress.start("screen", "Checking the upload is a solution design")
         assessment, usage = relevance.screen(design)
-        usages.append(usage)
+        progress.record_usage(usage)
 
         if assessment is None:
             progress.finish("screen", "Relevance check unavailable — continuing")
@@ -294,7 +320,7 @@ def _run(
         stage = "classify"
         progress.start("classify", "Classifying components")
         classification, usage = stages.classify(design)
-        usages.append(usage)
+        progress.record_usage(usage)
         components = stages.classified_components(classification)
 
         # Nothing classified AND nothing in the graph means there is no inventory for
@@ -395,7 +421,7 @@ def _run(
                 design, classification, framework_key
             )
             findings.extend(framework_findings)
-            usages.append(usage)
+            progress.record_usage(usage)
 
         # ---- the one-way AI-applicability gate ------------------------------- #
         #
@@ -431,7 +457,7 @@ def _run(
         stage = "prioritize"
         progress.start("prioritize", "Ranking findings")
         ranking_payload, usage = stages.prioritize(findings, classification)
-        usages.append(usage)
+        progress.record_usage(usage)
         ranked, backfilled = stages.apply_ranking(
             findings, ranking_payload.get("ranking", [])
         )
@@ -467,7 +493,7 @@ def _run(
         # the grounding filter can only be counted where it runs. Left as None when
         # the stage made no call, so "not measured" stays distinct from "0 caught".
         design.fidelity.grounding = grounding
-        usages.append(usage)
+        progress.record_usage(usage)
         for finding in findings:
             finding.remediation = remediations.get(finding.check_id, "")
             finding.remediation_effort = efforts.get(finding.check_id, "")  # type: ignore[assignment]
@@ -516,7 +542,7 @@ def _run(
             # Why the AI-dependent checks were or were not applicable. Stored so the
             # answer survives the run rather than living only in a log line.
             ai_detection=detection,
-            token_usage=_sum(usages),
+            token_usage=progress.usage_totals(),
         )
 
         if previous_review_id:
@@ -564,6 +590,21 @@ def _sum(usages: list[dict[str, int]]) -> dict[str, int]:
         for key, value in usage.items():
             total[key] = total.get(key, 0) + value
     return total
+
+
+def estimated_cost(totals: dict[str, int]) -> float:
+    """An upper bound on spend for a token total, in USD at list prices.
+
+    Deliberately reads `input_tokens`/`output_tokens` rather than every key: the
+    usage dict also carries `cache_read_input_tokens`, which is a SUBSET of
+    `input_tokens` rather than an addition to it, and summing both would double-count
+    the cached half of the prompt. See the pricing block in config.py for why cached
+    input is charged at the full rate rather than its own cheaper one.
+    """
+    return (
+        totals.get("input_tokens", 0) * config.OPENROUTER_PRICE_PROMPT_USD
+        + totals.get("output_tokens", 0) * config.OPENROUTER_PRICE_COMPLETION_USD
+    )
 
 
 def _now() -> str:
@@ -672,20 +713,18 @@ def _re_review(
 
     status = storage.get_status(review_id) or ReviewStatus.initial(review_id)
     progress = _Progress(status)
-    usages: list[dict[str, int]] = []
     has_attachment = bool(document_key or diagram_key)
     stage = "ingest"
 
     try:
         if has_attachment:
-            design, reference_graph, classification, usage = _ingest_new_attachment(
+            design, reference_graph, classification = _ingest_new_attachment(
                 review_id=review_id,
                 base=base,
                 progress=progress,
                 document_key=document_key,
                 diagram_key=diagram_key,
             )
-            usages.extend(usage)
         else:
             # Nothing is read, nothing is parsed, no model call is made for any of
             # the first four stages. They are marked done with a detail that says
@@ -730,7 +769,7 @@ def _re_review(
                 reference_graph=reference_graph,
             )
             findings.extend(framework_findings)
-            usages.append(usage)
+            progress.record_usage(usage)
 
         # ---- the one-way AI-applicability gate ------------------------------- #
         #
@@ -766,7 +805,7 @@ def _re_review(
         stage = "prioritize"
         progress.start("prioritize", "Ranking findings")
         ranking_payload, usage = stages.prioritize(findings, classification)
-        usages.append(usage)
+        progress.record_usage(usage)
         ranked, backfilled = stages.apply_ranking(
             findings, ranking_payload.get("ranking", [])
         )
@@ -795,7 +834,7 @@ def _re_review(
             feedback=feedback,
             reference_graph=reference_graph,
         )
-        usages.append(usage)
+        progress.record_usage(usage)
         design.fidelity.grounding = grounding
         for finding in findings:
             finding.remediation = remediations.get(finding.check_id, "")
@@ -827,7 +866,7 @@ def _re_review(
             use_case_notes=use_case_notes,
             fidelity=design.fidelity,
             ai_detection=detection,
-            token_usage=_sum(usages),
+            token_usage=progress.usage_totals(),
             # ---- the version linkage ---------------------------------------- #
             version=base.version + 1,
             # The chain's identity. The base's root when it has one, otherwise the
@@ -871,7 +910,7 @@ def _ingest_new_attachment(
     progress: _Progress,
     document_key: str,
     diagram_key: str,
-) -> tuple[NormalizedDesign, object | None, dict, list[dict[str, int]]]:
+) -> tuple[NormalizedDesign, object | None, dict]:
     """Ingest, screen and classify the NEW attachment only.
 
     Returns the design to evaluate, the previous graph when it was replaced (as
@@ -890,7 +929,6 @@ def _ingest_new_attachment(
     the failure mode that would let a stale component from an old diagram be scored
     as though it were still in the design.
     """
-    usages: list[dict[str, int]] = []
 
     progress.start("ingest", "Reading the new attachment")
     fresh, ingest_usage = normalize.ingest(
@@ -902,7 +940,7 @@ def _ingest_new_attachment(
         # the same system, and it is fenced at every prompt exactly as before.
         context=base.context,
     )
-    usages.append(ingest_usage)
+    progress.record_usage(ingest_usage)
     progress.finish(
         "ingest",
         f"{len(fresh.graph.components)} components from {fresh.graph.source.value}",
@@ -940,7 +978,7 @@ def _ingest_new_attachment(
     # than five, and leaves every existing version untouched.
     progress.start("screen", "Checking the new attachment is a solution design")
     assessment, usage = relevance.screen(design)
-    usages.append(usage)
+    progress.record_usage(usage)
 
     if assessment is None:
         progress.finish("screen", "Relevance check unavailable — continuing")
@@ -970,11 +1008,11 @@ def _ingest_new_attachment(
     # ---- classify the new material ----------------------------------------- #
     progress.start("classify", "Classifying the revised design")
     classification, usage = stages.classify(design)
-    usages.append(usage)
+    progress.record_usage(usage)
     components = stages.classified_components(classification)
     progress.finish("classify", f"{len(components)} components classified")
 
-    return design, reference_graph, classification, usages
+    return design, reference_graph, classification
 
 
 def _classification_from(base: ReviewResult) -> dict:

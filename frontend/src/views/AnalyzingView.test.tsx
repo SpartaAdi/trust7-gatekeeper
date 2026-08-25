@@ -739,4 +739,79 @@ describe('AnalyzingView — duration expectation', () => {
       /remaining|left\b|estimat|eta/i,
     )
   })
+
+  // ------------------------------------------------------------------------- #
+  // Live token / cost counter
+  // ------------------------------------------------------------------------- #
+
+  it('shows nothing at all before the first stage reports usage', async () => {
+    // Zero is not "spent nothing", it is "nothing has finished yet". Rendering
+    // "0 tokens · ~$0.0000" would make a claim the status has not made.
+    getStatus.mockResolvedValue(statusFixture())
+
+    render(
+      <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+    )
+
+    await screen.findByText('Classifying components')
+    expect(screen.queryByTestId('token-counter')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('cost-disclosure')).not.toBeInTheDocument()
+  })
+
+  it('shows the running token total and cost once usage is reported', async () => {
+    getStatus.mockResolvedValue(
+      statusFixture({
+        token_usage: { input_tokens: 120_000, output_tokens: 30_000, cache_read_input_tokens: 90_000 },
+        estimated_cost_usd: 0.18,
+      }),
+    )
+
+    render(
+      <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+    )
+
+    const counter = await screen.findByTestId('token-counter')
+    // 120,000 + 30,000. The cached 90,000 is a SUBSET of the input, so counting it
+    // again would report 240,000 for a run that used 150,000.
+    expect(counter).toHaveTextContent('150,000 tokens')
+    expect(counter).toHaveTextContent('$0.18')
+  })
+
+  it('never presents the cost as a precise figure', async () => {
+    // The backend prices every call at the dearest of the three locked providers,
+    // so the number is a ceiling. Presenting it bare would read as a bill.
+    getStatus.mockResolvedValue(
+      statusFixture({
+        token_usage: { input_tokens: 100, output_tokens: 100 },
+        estimated_cost_usd: 0.0004,
+      }),
+    )
+
+    render(
+      <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+    )
+
+    expect(await screen.findByTestId('token-counter')).toHaveTextContent('at most')
+    expect(screen.getByTestId('cost-disclosure')).toHaveTextContent(/estimated at list pricing/i)
+  })
+
+  it('does not add a second live region beside the elapsed clock', async () => {
+    // `ElapsedClock` is already polite and ticks every second. A second live region
+    // on the same line would have a screen reader interrupt itself twice a second
+    // and neither figure would be readable.
+    getStatus.mockResolvedValue(
+      statusFixture({
+        token_usage: { input_tokens: 1000, output_tokens: 500 },
+        estimated_cost_usd: 0.01,
+      }),
+    )
+
+    render(
+      <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+    )
+
+    const counter = await screen.findByTestId('token-counter')
+    expect(counter).not.toHaveAttribute('aria-live')
+    expect(screen.getByTestId('elapsed')).toHaveAttribute('aria-live', 'polite')
+  })
 })

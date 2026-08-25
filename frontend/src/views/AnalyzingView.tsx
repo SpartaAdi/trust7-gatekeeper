@@ -172,6 +172,14 @@ export function AnalyzingView({
   // how long the run got before it broke is itself the finding.
   const elapsed = elapsedSeconds(startedAt, nowMs)
 
+  // Input + output only. `token_usage` also carries `cache_read_input_tokens`, which
+  // is a subset of the input rather than an addition to it — summing every value
+  // would double-count the cached half of every prompt. The backend's
+  // `estimated_cost` makes the same distinction for the same reason.
+  const usage = status?.token_usage ?? {}
+  const spentTokens = (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0)
+  const spentCostUsd = status?.estimated_cost_usd ?? 0
+
   return (
     <div className="mx-auto max-w-2xl px-6 py-12 lg:py-16">
       {/*
@@ -216,8 +224,22 @@ export function AnalyzingView({
               {doneCount} of {stages.length} stages
               <span aria-hidden="true"> · </span>
               <ElapsedClock seconds={elapsed} />
+              {spentTokens > 0 && <span aria-hidden="true"> · </span>}
+              <TokenCounter tokens={spentTokens} costUsd={spentCostUsd} />
             </span>
           </div>
+          {/*
+            The disclosure sits under the counter rather than inside it: the line
+            above is scanned, and a parenthetical there would be read as part of the
+            number. Same reasoning as the duration note below — say the caveat once,
+            in prose, where it cannot be mistaken for data.
+          */}
+          {spentTokens > 0 && (
+            <p className="t-caption mt-1.5 text-ink-faint" data-testid="cost-disclosure">
+              Token cost is estimated at list pricing, priced at the most expensive
+              configured provider — the real figure is at or below it.
+            </p>
+          )}
           {/*
             Static, and deliberately a range rather than a figure. Observed latency
             has spanned 14 seconds to 44 minutes on the same provider, so anything
@@ -438,6 +460,41 @@ function ElapsedClock({ seconds }: { seconds: number }) {
       data-testid="elapsed"
     >
       {formatElapsed(seconds)} elapsed
+    </span>
+  )
+}
+
+/**
+ * Running token spend, beside the elapsed clock.
+ *
+ * Answers the question the elapsed clock cannot: a run sitting at 6 minutes looks
+ * identical whether it is working or wedged, and a token total that keeps climbing
+ * is the difference. That is why this renders nothing until the first stage
+ * reports — a zero would say "spent nothing", when the truth is "nothing has
+ * finished yet", and those are different claims.
+ *
+ * The cost is an UPPER BOUND, and says so. The backend prices every call at the
+ * dearest of the three locked providers because the serving provider is not known
+ * when the total is written, so "at most" is the honest word and "estimated, list
+ * pricing" is the disclosure — the same shape as DataFidelity's "estimated proxy"
+ * line, which is this codebase's existing convention for a figure that should not
+ * be over-trusted.
+ *
+ * No `aria-live` here, deliberately. `ElapsedClock` beside it is already a polite
+ * live region ticking every second; a second one on the same line would double the
+ * interruptions for a screen-reader user and neither would be readable. The number
+ * is available on demand, and the elapsed clock carries the "still running" signal.
+ */
+function TokenCounter({ tokens, costUsd }: { tokens: number; costUsd: number }) {
+  if (tokens <= 0) return null
+
+  return (
+    <span className="tnum t-caption text-ink-muted" data-testid="token-counter">
+      {tokens.toLocaleString()} tokens
+      <span aria-hidden="true"> · </span>
+      <span title="Estimated, list pricing. Priced at the most expensive of the configured providers, so the real figure is at or below this.">
+        ~${costUsd < 0.01 ? costUsd.toFixed(4) : costUsd.toFixed(2)} at most
+      </span>
     </span>
   )
 }

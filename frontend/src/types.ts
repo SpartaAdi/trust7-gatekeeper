@@ -375,6 +375,19 @@ export interface ReviewStatus {
   rejection: string
   /** Surfaced while the review is still running, so a bad upload can be stopped. */
   warnings: IngestWarning[]
+  /**
+   * Running token total, republished after every stage that spends tokens. Empty
+   * until the first stage completes, so treat a missing key as zero rather than
+   * rendering NaN.
+   */
+  token_usage: Record<string, number>
+  /**
+   * An UPPER BOUND on what those tokens cost, in USD at list prices — not a bill.
+   * The backend charges every call at the most expensive of the three locked
+   * providers, because which one served a given call is not known when the running
+   * total is written. Render it with "at most", never as a precise figure.
+   */
+  estimated_cost_usd: number
   updated_at: string
 }
 

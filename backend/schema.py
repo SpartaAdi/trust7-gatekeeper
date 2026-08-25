@@ -940,6 +940,19 @@ class ReviewStatus(BaseModel):
     # sees "this diagram was barely legible" while the review is still running
     # rather than only at the end.
     warnings: list[IngestWarning] = Field(default_factory=list)
+
+    # The running token total, republished after every stage that spends tokens.
+    # Same shape as `ReviewResult.token_usage`, which holds the settled figure — this
+    # is that number mid-flight, so a reviewer watching a long run can see it is
+    # spending rather than stalled.
+    token_usage: dict[str, int] = Field(default_factory=dict)
+
+    # An UPPER BOUND on what the tokens above have cost, in USD, at the list prices
+    # in config.py. Not a bill and not a blend: see the pricing block there for why
+    # it is a ceiling. Rendered with an explicit "at most", never as a precise
+    # figure.
+    estimated_cost_usd: float = 0.0
+
     updated_at: str = ""
 
     @classmethod

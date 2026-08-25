@@ -105,6 +105,34 @@ OPENROUTER_PROVIDER_ORDER = [
     if name.strip()
 ]
 
+# --------------------------------------------------------------------------- #
+# List pricing for the locked providers, USD per token
+#
+# Read on 2026-08-25 from
+# https://openrouter.ai/api/v1/models/moonshotai/kimi-k2.6/endpoints — the same
+# source, and the same way, the provider slugs above were verified. Not a blended
+# headline figure from a marketing page. As read there, per million tokens:
+#
+#   tag              prompt    completion    cache read
+#   decart/fp4       0.5493        2.3128        0.0925
+#   inceptron/int4   0.5700        3.3900        0.2000
+#   coreweave/fp4    0.6500        3.4100        0.1500
+#
+# These constants are the MAXIMUM of the three, not an average, so the figure is an
+# upper bound rather than a guess. Which provider serves a given call is decided by
+# OpenRouter at request time, and the running total is written before the answer is
+# known — so a blend would be wrong in an unknown direction, while a ceiling is
+# wrong in one known direction only. A cost display that can understate is worse
+# than one that cannot, and the UI says "at most" rather than implying precision.
+#
+# Cached input is deliberately charged at the full prompt rate. It is cheaper in
+# reality (see the column above), but `usage.prompt_tokens` already includes the
+# cached tokens, so charging the difference would mean subtracting — which is the
+# one direction this figure must not move. Re-read the endpoint above if prices
+# drift; nothing here updates itself.
+OPENROUTER_PRICE_PROMPT_USD = 0.65 / 1_000_000
+OPENROUTER_PRICE_COMPLETION_USD = 3.41 / 1_000_000
+
 # With fallbacks off, a request that cannot be served by one of the providers
 # above FAILS rather than quietly routing elsewhere. That is the point: it is the
 # only way to know the allow-list is actually being honoured, and it means a

@@ -10,6 +10,11 @@ export function statusFixture(overrides: Partial<ReviewStatus> = {}): ReviewStat
     // having to opt out of it.
     rejection: '',
     warnings: [],
+    // Zero by default, matching a status polled before the first stage has reported.
+    // The counter renders nothing at zero on purpose, so a test that wants to see it
+    // sets a total explicitly rather than every other test having to zero it out.
+    token_usage: {},
+    estimated_cost_usd: 0,
     updated_at: '2026-07-27T10:00:05Z',
     stages: [
       {
