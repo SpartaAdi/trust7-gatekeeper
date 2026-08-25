@@ -340,7 +340,50 @@ describe('buildFixItPrompt', () => {
     const prompt = buildFixItPrompt([finding()])
 
     expect(prompt.startsWith(FIX_IT_PREAMBLE)).toBe(true)
-    expect(prompt).toContain('revise the diagram')
+    expect(prompt).toContain('Here is my architecture')
+    expect(prompt).toContain('revised architecture')
+  })
+
+  it('asks for a numbered, step-by-step plan rather than an implicit revision', () => {
+    // "Please revise the diagram to address each one" got an implicit answer: a
+    // redrawn diagram or a paragraph, with no way to tell which gap each change
+    // closed or what order to work in. The findings under it are numbered and
+    // specific; the instruction above them has to be too, or the most structured
+    // part of the artefact is discarded at the point of use.
+    const prompt = buildFixItPrompt([finding({ remediation: 'Encrypt the store.' })])
+
+    expect(prompt).toMatch(/numbered, step-by-step plan/i)
+    expect(prompt).toMatch(/the order to do it in/i)
+    // Keyed to the gap numbers, so the reply can be checked against the review.
+    expect(prompt).toMatch(/number your steps against the gap numbers/i)
+  })
+
+  it('tells the assistant to refuse a gap the diagram cannot close', () => {
+    // Several rubric checks are process or governance controls — an incident
+    // runbook, a model inventory, human-in-the-loop sign-off. Silently
+    // "addressing" one in a diagram draws a box claiming a control that does not
+    // exist, which is the exact failure this tool is built to catch.
+    const prompt = buildFixItPrompt([finding()])
+
+    expect(prompt).toMatch(/cannot be closed in the diagram alone/i)
+    expect(prompt).toMatch(/instead of inventing a box for it/i)
+  })
+
+  it('still introduces the findings as a list, after the instruction', () => {
+    // The numbered gaps have to read as the thing being referred to, not as the
+    // start of the assistant's own answer.
+    const prompt = buildFixItPrompt([finding({ remediation: 'Encrypt the store.' })])
+
+    expect(prompt).toContain('The gaps:\n\n1. Encrypt the store.')
+  })
+
+  it('adds no numbered lines of its own to the prompt', () => {
+    // `^\d+\. ` is how the cap and the ordering tests count items. A preamble that
+    // opened a line with a digit and a full stop would be counted as a finding and
+    // quietly break both.
+    const preambleLines = FIX_IT_PREAMBLE.match(/^\d+\. /gm)
+
+    expect(preambleLines).toBeNull()
   })
 
   it('is empty when there is nothing to act on', () => {

@@ -558,7 +558,10 @@ describe('ResultsView', () => {
 
       expect(writeText).toHaveBeenCalledTimes(1)
       const copied = String(writeText.mock.calls[0]?.[0])
-      expect(copied).toContain('please revise the diagram to address each one')
+      // The instruction, not just the findings: what reaches the clipboard has to
+      // ask for the numbered plan. `prioritizedActions.test.ts` pins the wording
+      // itself; this asserts it survives the copy path.
+      expect(copied).toContain('numbered, step-by-step plan')
       // Verbatim remediation from the fixture's one open high-severity finding.
       expect(copied).toContain('1. Enable SSE-KMS on the table with a customer-managed key.')
       // The passing finding must not appear.

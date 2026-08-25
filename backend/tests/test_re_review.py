@@ -23,6 +23,7 @@ import config
 import llm
 import rubric
 import schema
+from agent import pipeline
 
 DEMO_TOKEN = "re-review-token"
 
@@ -58,6 +59,9 @@ class Recorder:
         self.remediate_prompts: list[str] = []
         self.classify_components = 2
         self.screen_verdict = ("reviewable", "high", "an architecture diagram")
+        # Per-call token usage. Empty by default so every existing test keeps the
+        # totals it had; a test about the counter sets it explicitly.
+        self.usage: dict[str, int] = {}
 
     def __call__(
         self, *, system, content, schema, effort, max_tokens, label="", temperature=None
@@ -71,7 +75,7 @@ class Recorder:
             return {
                 "verdict": verdict, "subject": subject,
                 "reason": "stub", "confidence": confidence,
-            }, {}
+            }, dict(self.usage)
         if "design_summary" in required:
             return {
                 "design_summary": "A claims platform.",
@@ -82,7 +86,7 @@ class Recorder:
                 ],
                 "data_flows": [], "observations": [],
                 "absent": ["no encryption at rest stated"],
-            }, {}
+            }, dict(self.usage)
         if "findings" in required:
             self.evaluate_prompts.append(blob)
             return {"findings": [
@@ -91,12 +95,12 @@ class Recorder:
                  "severity": c.severity, "severity_rationale": "s",
                  "title": c.description, "evidence": "e", "affected_components": []}
                 for c in rubric.all_checks()
-            ]}, {}
+            ]}, dict(self.usage)
         if "ranking" in required:
-            return {"summary": "- stub", "ranking": []}, {}
+            return {"summary": "- stub", "ranking": []}, dict(self.usage)
         self.remediate_prompts.append(blob)
         return {"executive_summary": "stub", "remediations": [],
-                "use_case_notes": []}, {}
+                "use_case_notes": []}, dict(self.usage)
 
 
 @pytest.fixture()
@@ -738,3 +742,128 @@ def _labels(result: dict) -> list[str]:
 
 def _status_of_check(result: dict, check_id: str) -> str:
     return next(f["status"] for f in result["findings"] if f["check_id"] == check_id)
+
+
+# --------------------------------------------------------------------------- #
+# Interaction with the zero-component gate (agent/pipeline.py)
+#
+# The gate refuses a FIRST-PASS review whose inventory is empty from both classify
+# and the graph. A re-review must never be refused that way, and the two shapes fail
+# differently if it were:
+#
+#   * feedback-only reuses a stored graph that demonstrably has components, so
+#     "zero components" would be false on its face;
+#   * a new attachment is ingested fresh, so the question is live there.
+#
+# Structurally the gate lives inside `_run` only — `_re_review` and
+# `_ingest_new_attachment` do not contain it. These tests pin the OUTCOME rather
+# than that fact, so moving the gate into a shared helper later cannot quietly
+# change the behaviour without failing here.
+# --------------------------------------------------------------------------- #
+
+def test_a_feedback_only_round_is_never_refused_for_an_empty_inventory(
+    client, recorder
+) -> None:
+    """The premise the gate would be wrong about.
+
+    `classify_components = 0` makes the stub return an empty inventory, which on a
+    first-pass review is exactly the condition the gate refuses on. A feedback-only
+    round does not run classify at all and reuses the stored graph, so the refusal
+    must not happen — and the stored graph is asserted non-empty first, so this
+    cannot pass by the design genuinely being empty.
+    """
+    review_id = original(client)
+    base = client.get(f"/reviews/{review_id}").json()
+    assert _labels(base), "fixture is wrong: the base review stored no components"
+
+    recorder.classify_components = 0
+    response = re_review(client, review_id, "The RDS instance is multi-AZ now.")
+
+    assert response.status_code == 202, response.json()
+    follow_up = response.json()["review_id"]
+    status = status_of(client, follow_up)
+    assert status["state"] != "rejected", status.get("rejection")
+    assert status["rejection"] == ""
+    # And it really did reuse the stored graph rather than re-deriving one.
+    assert _labels(client.get(f"/reviews/{follow_up}").json()) == _labels(base)
+
+
+def test_a_feedback_only_round_does_not_call_classify_at_all(client, recorder) -> None:
+    """Why the gate cannot fire on this shape, pinned directly: with no classify
+    call there is no empty inventory for it to judge."""
+    review_id = original(client)
+    recorder.labels.clear()
+
+    re_review(client, review_id, "Encryption is enabled.")
+
+    assert not [label for label in recorder.labels if label.startswith("classify")], (
+        f"classify ran on a feedback-only round: {recorder.labels}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Interaction with the live token counter (agent/pipeline.py `_Progress`)
+# --------------------------------------------------------------------------- #
+
+def test_a_feedback_only_round_reports_its_own_running_total(client, recorder) -> None:
+    """The counter has to work on this path too, and count only THIS round.
+
+    A follow-up is a new versioned record with its own review_id, so its total is
+    the tokens that round spent — not the base's, and not the two added together.
+    """
+    recorder.usage = {"input_tokens": 700, "output_tokens": 70}
+    review_id = original(client)
+    base_total = status_of(client, review_id)["token_usage"]["input_tokens"]
+    assert base_total > 0
+
+    recorder.labels.clear()
+    follow_up = re_review(client, review_id, "Multi-AZ now.").json()["review_id"]
+
+    status = status_of(client, follow_up)
+    calls = len(recorder.labels)
+    assert calls > 0
+    assert status["token_usage"]["input_tokens"] == calls * 700
+    assert status["token_usage"]["output_tokens"] == calls * 70
+    # Its own round only — the base's spend is on the base's record.
+    assert status["token_usage"]["input_tokens"] < base_total + calls * 700
+    # The live figure and the stored figure agree, as on the main pipeline.
+    assert status["token_usage"] == client.get(f"/reviews/{follow_up}").json()["token_usage"]
+
+
+def test_a_new_attachment_round_counts_its_ingest_and_classify_spend(
+    client, recorder
+) -> None:
+    """`_ingest_new_attachment` records through the SAME progress object it is
+    handed, so the three call sites inside it reach the same running total. If it
+    kept its own list, this round would under-report by exactly those calls.
+    """
+    recorder.usage = {"input_tokens": 500, "output_tokens": 50}
+    review_id = original(client)
+
+    recorder.labels.clear()
+    follow_up = re_review(
+        client,
+        review_id,
+        "Here is the revised diagram.",
+        diagram_key=upload(client, "v2.drawio", DIAGRAM_V2),
+    ).json()["review_id"]
+
+    status = status_of(client, follow_up)
+    labels = list(recorder.labels)
+    # The round really did run the ingest-side stages, so their spend is in scope.
+    assert any(label.startswith("screen") for label in labels), labels
+    assert any(label.startswith("classify") for label in labels), labels
+    assert status["token_usage"]["input_tokens"] == len(labels) * 500
+
+
+def test_the_cost_estimate_is_published_on_a_re_review_too(client, recorder) -> None:
+    recorder.usage = {"input_tokens": 1_000, "output_tokens": 100}
+    review_id = original(client)
+    follow_up = re_review(client, review_id, "Revised.").json()["review_id"]
+
+    status = status_of(client, follow_up)
+
+    assert status["estimated_cost_usd"] == pytest.approx(
+        pipeline.estimated_cost(status["token_usage"])
+    )
+    assert status["estimated_cost_usd"] > 0

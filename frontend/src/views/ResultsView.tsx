@@ -350,9 +350,33 @@ export function ResultsView({
  */
 const MAX_PROMPT_ITEMS = 10
 
+/**
+ * What the copied prompt asks the receiving tool to DO.
+ *
+ * "Please revise the diagram to address each one" was an implicit ask, and it got
+ * an implicit answer: a redrawn diagram, or a paragraph of prose, with no way to
+ * tell which gap each change was meant to close or what order to work in. The
+ * findings below it are numbered and specific; the instruction above them was
+ * neither, so the most structured part of the artefact was being thrown away at the
+ * point of use.
+ *
+ * It now asks for a numbered plan keyed to the gap numbers, which makes the reply
+ * checkable against the review it came from — and asks the receiving tool to say
+ * when a gap cannot be closed in the diagram at all. Several checks in the rubric
+ * are process or governance controls (an incident-response runbook, model
+ * inventory, human-in-the-loop sign-off); silently "addressing" those in a diagram
+ * produces a box that claims a control exists when nothing does, which is the
+ * failure this whole tool is built to catch.
+ */
 export const FIX_IT_PREAMBLE =
-  'Here is my architecture. A review found the following gaps — please revise ' +
-  'the diagram to address each one:'
+  'Here is my architecture. A review found the gaps listed below.\n\n' +
+  'For each gap, give me a numbered, step-by-step plan to close it: the specific ' +
+  'components to add, change, or connect, and the order to do it in. Number your ' +
+  'steps against the gap numbers below so I can work through them one at a time. ' +
+  'If a gap cannot be closed in the diagram alone — because it is a process or ' +
+  'governance control rather than a component — say so plainly for that gap ' +
+  'instead of inventing a box for it. Then show me the revised architecture.\n\n' +
+  'The gaps:'
 
 /** Appended when any item lacks guidance, so the absence travels with the prompt. */
 export const FIX_IT_GAP_NOTE =
