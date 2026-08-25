@@ -119,6 +119,87 @@ def test_medium_confidence_with_named_illegible_regions_does_warn() -> None:
     assert "all arrow labels" in warning.detail
 
 
+# --------------------------------------------------------------------------- #
+# High confidence with a named gap — a bounded gap, not a bad transcription
+# --------------------------------------------------------------------------- #
+
+# The exact report from a real run: 22 components, the model's own confidence high,
+# and one sub-label it could not resolve. Kept verbatim rather than paraphrased,
+# because the bug it pins was only visible on a case this lopsided — one unreadable
+# detail out of a diagram that was otherwise read cleanly.
+ROUTE53_ILLEGIBLE = [
+    "the text label beneath the middle Route 53 shield icon (the shield reads "
+    "'53', but the service name text below it is not visible in the image)"
+]
+
+
+def test_high_confidence_with_one_gap_is_not_reported_as_low_confidence() -> None:
+    """The contradiction this split exists to remove.
+
+    Before it, this case returned `vision_low_confidence` with the sentence "The
+    diagram was read with low confidence" — sitting directly above a detail line
+    quoting the model's own `confidence=high`. The banner and its own evidence
+    disagreed, and the banner was the wrong one.
+    """
+    warning = quality.vision_confidence(
+        _graph(22), "high", ROUTE53_ILLEGIBLE, "architecture.png"
+    )
+
+    assert warning is not None
+    assert warning.code == "vision_minor_gaps"
+    assert warning.code != "vision_low_confidence"
+    # The message must not claim low confidence in any casing.
+    assert "low confidence" not in warning.message.lower()
+    assert "high confidence" in warning.message
+    # It names the specific gap, so the reviewer can judge it rather than take the
+    # word "unclear" on trust.
+    assert "Route 53 shield icon" in warning.message
+    # And the detail still carries the numbers behind the judgement.
+    assert "confidence=high" in warning.detail
+    assert "22 components extracted" in warning.detail
+
+
+def test_the_same_illegible_list_at_low_confidence_still_warns_as_before() -> None:
+    """The inverse, unchanged. Only the model's own confidence separates these two,
+    so the low path must not have been altered by the split."""
+    warning = quality.vision_confidence(
+        _graph(22), "low", ROUTE53_ILLEGIBLE, "architecture.png"
+    )
+
+    assert warning is not None
+    assert warning.code == "vision_low_confidence"
+    assert "read with low confidence" in warning.message
+    assert "confidence=low" in warning.detail
+
+
+def test_one_gap_reads_as_singular_and_several_as_plural() -> None:
+    """Prose a reviewer reads, and this file already holds the singular/plural line
+    elsewhere — see `test_the_singular_is_used_for_one_component`."""
+    one = quality.vision_confidence(_graph(22), "high", ROUTE53_ILLEGIBLE, "a.png")
+    several = quality.vision_confidence(
+        _graph(22), "high", ["the legend", "an arrow label", "the footer"], "a.png"
+    )
+
+    assert one is not None and several is not None
+    assert "one detail was unclear" in one.message
+    assert "3 details were unclear" in several.message
+
+
+def test_an_unreported_confidence_with_gaps_keeps_the_cautious_wording() -> None:
+    """Silence is not a high-confidence report.
+
+    `test_an_unreported_confidence_is_not_treated_as_low` already pins that an absent
+    confidence with NOTHING illegible does not warn at all. This is the other half:
+    absent confidence WITH named gaps stays on the cautious path, because only an
+    explicit `high` is evidence that the rest was read well.
+    """
+    warning = quality.vision_confidence(_graph(8), "", ROUTE53_ILLEGIBLE, "a.png")
+
+    assert warning is not None
+    assert warning.code == "vision_low_confidence"
+    assert "confidence=unreported" in warning.detail
+
+
 def test_an_unreported_confidence_is_not_treated_as_low() -> None:
     """Silence is not a low-confidence report.
 

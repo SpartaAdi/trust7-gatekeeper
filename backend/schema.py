@@ -100,6 +100,10 @@ WarningCode = Literal[
     "diagram_near_empty",
     # The vision model itself reported low confidence in what it transcribed.
     "vision_low_confidence",
+    # The vision model reported HIGH confidence but still named something it could
+    # not make out. A bounded gap, and deliberately not the code above: reporting it
+    # as low confidence contradicts the model's own report in the same warning.
+    "vision_minor_gaps",
     # draw.io XML held many shapes but few survived parsing into components.
     "drawio_mostly_unparsed",
     # A PDF produced very little text per page — partially scanned, most likely.

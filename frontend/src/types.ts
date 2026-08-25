@@ -118,6 +118,7 @@ export interface UseCaseNote {
 export type WarningCode =
   | 'diagram_near_empty'
   | 'vision_low_confidence'
+  | 'vision_minor_gaps'
   | 'drawio_mostly_unparsed'
   | 'document_sparse_text'
   | 'relevance_uncertain'

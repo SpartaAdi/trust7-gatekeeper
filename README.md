@@ -183,7 +183,8 @@ score by `components/IngestWarnings.tsx`.
 | code | fires when |
 | --- | --- |
 | `diagram_near_empty` | a ≥60 KB image yielded ≤1 component |
-| `vision_low_confidence` | the vision model reported it could not read the image |
+| `vision_low_confidence` | the vision model reported `low`/`medium` confidence, or named gaps without reporting confidence |
+| `vision_minor_gaps` | the vision model reported `high` confidence but still named something it could not read |
 | `drawio_mostly_unparsed` | <50% of a file's labelled shapes became components |
 | `document_sparse_text` | a PDF averaged <120 characters per page |
 

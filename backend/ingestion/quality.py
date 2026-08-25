@@ -103,6 +103,36 @@ def vision_confidence(
         return None
 
     listed = "; ".join(illegible[:5])
+    measured = (
+        f"{filename}: model-reported confidence={confidence or 'unreported'}, "
+        f"{len(graph.components)} components extracted"
+        + (f"; illegible: {listed}" if listed else "")
+    )
+
+    # A high-confidence read that named something it could not make out is a bounded
+    # gap, not a bad transcription, and must not be reported as one. Both cases used
+    # to return the same code and the same "read with low confidence" sentence — so a
+    # real run that reported confidence=high with 22 components and ONE unreadable
+    # sub-label told the reviewer the diagram was read with low confidence, directly
+    # above a detail line quoting the model saying the opposite.
+    #
+    # Only an explicit `high` earns this. An unreported confidence with illegible
+    # items keeps the cautious wording below: silence is not a high-confidence report
+    # any more than it is a low-confidence one.
+    if confidence == "high":
+        count = len(illegible)
+        return IngestWarning(
+            code="vision_minor_gaps",
+            message=(
+                f"The diagram was read with high confidence overall, but "
+                f"{'one detail was' if count == 1 else f'{count} details were'} "
+                f"unclear: {listed}. That is a bounded gap in an otherwise legible "
+                f"diagram, not a reason to doubt the components and connections "
+                f"below."
+            ),
+            detail=measured,
+        )
+
     return IngestWarning(
         code="vision_low_confidence",
         message=(
@@ -110,11 +140,7 @@ def vision_confidence(
             "connections below may be wrong or missing. Upload the .drawio source "
             "if you have it — that path is parsed exactly rather than interpreted."
         ),
-        detail=(
-            f"{filename}: model-reported confidence={confidence or 'unreported'}, "
-            f"{len(graph.components)} components extracted"
-            + (f"; illegible: {listed}" if listed else "")
-        ),
+        detail=measured,
     )
 
 
