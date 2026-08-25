@@ -122,12 +122,21 @@ OPENROUTER_ALLOW_FALLBACKS = os.environ.get(
 # has already cost a 94-minute hang that produced malformed JSON and no usable
 # diagnostics — a fast, loud failure would have been strictly better.
 #
-# 120s is the deliberate value. It is comfortably above every stage's observed
-# latency, and the stage most likely to legitimately approach it is evaluate, which
-# asks for 64,000 output tokens at high effort. Raise this rather than removing it
-# if a real design starts tripping it.
+# 300s is the deliberate value, raised from 120s after that ceiling stopped being
+# "comfortably above every stage's observed latency" and started being the thing
+# failing real reviews. The run that forced it: a signed 12-page SoW, classify
+# finding 20 components from prose alone, then evaluate (Well-Architected, call 1
+# of 2) hitting 120s, retrying a step down in effort, and hitting it again — the
+# whole review dead at t+302.5s having produced nothing.
+#
+# Note what that number is NOT: it is not a per-stage budget. `_openrouter_attempt`
+# retries a deadline once at a lower effort, so a stage that trips this twice costs
+# 2 x this value — 600s at 300s — before it surfaces. Both attempts are billed.
+#
+# Raise this rather than removing it if a real design starts tripping it, and read
+# the 94-minute hang above before considering the removal.
 OPENROUTER_TIMEOUT_SECONDS = float(
-    os.environ.get("OPENROUTER_TIMEOUT_SECONDS", "120")
+    os.environ.get("OPENROUTER_TIMEOUT_SECONDS", "300")
 )
 
 # Hard-fail a call whose response came from a provider outside

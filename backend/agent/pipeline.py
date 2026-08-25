@@ -91,13 +91,19 @@ class _Progress:
         self._status.warnings = list(warnings)
         storage.put_status(self._status)
 
-    def rejected(self, stage: str, message: str) -> None:
-        """Record the screen stage refusing the upload.
+    def rejected(self, stage: str, message: str, detail: str = "") -> None:
+        """Record a stage refusing the upload.
 
         Not `fail`, for the same reason `cancelled` is not: nothing malfunctioned.
         The message goes in `rejection` rather than `error` so the UI can present it
         as "we did not review this, and here is why" instead of under a "Pipeline
         error" heading that sends the submitter hunting for a fault.
+
+        `detail` overrides the stage line for a refusal that is not the screen gate's.
+        The default says "not a solution design", which is the screen gate's finding
+        and only its finding — a design that screen accepted and classify then found
+        no components in IS a solution design, and labelling it otherwise contradicts
+        the rejection message shown beside it.
         """
         self._status.state = "rejected"
         self._status.error = ""
@@ -105,7 +111,7 @@ class _Progress:
         for entry in self._status.stages:
             if entry.name == stage:
                 entry.state = "rejected"
-                entry.detail = "Not a solution design — not reviewed"
+                entry.detail = detail or "Not a solution design — not reviewed"
                 entry.finished_at = _now()
         storage.put_status(self._status)
 
@@ -267,6 +273,30 @@ def _run(
         classification, usage = stages.classify(design)
         usages.append(usage)
         components = stages.classified_components(classification)
+
+        # Nothing classified AND nothing in the graph means there is no inventory for
+        # evaluate to score. Stop here rather than spending the four remaining calls
+        # producing a review of an empty set — evaluate is the most expensive stage in
+        # the pipeline, and scoring nothing yields a number that looks like a finding.
+        #
+        # Both conditions are required. Components empty while the graph is NOT is a
+        # different situation, already handled below: the diagram gave us an inventory
+        # even though classify returned none, so the review can go on.
+        if not components and not design.graph.components:
+            message = relevance.no_components_message()
+            log.info(
+                "Review %s stopped after classify: no components from either source "
+                "(document_text=%d chars, graph components=0)",
+                review_id, len(design.document_text.strip()),
+            )
+            progress.rejected(
+                stage, message, detail="No components identified — not reviewed"
+            )
+            # Same contract as the screen gate's refusal: no result stored, and
+            # `NotReviewable` propagates so `api/routes.py` logs a refusal rather
+            # than a crash.
+            raise relevance.NotReviewable(message)
+
         # An empty inventory against a non-empty design is worth saying out loud on
         # the screen the reviewer is watching. Ingest has already reported what it
         # found, so "0 components classified" on its own reads as a contradiction the

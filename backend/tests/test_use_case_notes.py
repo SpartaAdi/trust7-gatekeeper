@@ -252,7 +252,14 @@ def test_grounded_notes_actually_reach_the_stored_review(monkeypatch, tmp_path) 
             return {"verdict": "reviewable", "subject": "d", "reason": "r",
                     "confidence": "high"}, {}
         if "design_summary" in required:
-            return {"design_summary": "x", "components": [], "data_flows": [],
+            # Non-empty on purpose — see agent/pipeline.py's zero-component gate.
+            # An empty inventory from both sources rejects the review before any
+            # use-case note is produced.
+            return {"design_summary": "x",
+                    "components": [{"id": "c0", "label": "Component 0",
+                                    "kind": "compute", "provider": "aws",
+                                    "service": "Amazon EC2", "attributes": []}],
+                    "data_flows": [],
                     "observations": [], "absent": []}, {}
         if "findings" in required:
             return {"findings": [

@@ -569,7 +569,15 @@ def _stub():
             return {"verdict": "reviewable", "subject": "a design",
                     "reason": "r", "confidence": "high"}, {}
         if "design_summary" in required:
-            return {"design_summary": "x", "components": [], "data_flows": [],
+            # Non-empty on purpose. The zero-component gate in agent/pipeline.py
+            # rejects a review whose inventory is empty from BOTH classify and the
+            # graph, so a stub returning [] would stop the pipeline before the
+            # fidelity metrics this file is about are ever measured.
+            return {"design_summary": "x",
+                    "components": [{"id": "c0", "label": "Component 0",
+                                    "kind": "compute", "provider": "aws",
+                                    "service": "Amazon EC2", "attributes": []}],
+                    "data_flows": [],
                     "observations": [], "absent": []}, {}
         if "findings" in required:
             return {"findings": [

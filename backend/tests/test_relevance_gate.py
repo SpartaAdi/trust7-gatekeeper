@@ -273,8 +273,16 @@ def _stub(verdict: str, confidence: str, calls: list[str]):
                 "confidence": confidence,
             }, {}
         if "design_summary" in required:
+            # Non-empty on purpose. This file is about the SCREEN gate; the
+            # zero-component gate that follows classify would otherwise reject every
+            # review here for a second, unrelated reason and mask what is being
+            # tested. tests/test_zero_component_gate.py covers that gate directly.
             return {
-                "design_summary": "x", "components": [], "data_flows": [],
+                "design_summary": "x",
+                "components": [{"id": "c0", "label": "Component 0",
+                                "kind": "compute", "provider": "aws",
+                                "service": "Amazon EC2", "attributes": []}],
+                "data_flows": [],
                 "observations": [], "absent": [],
             }, {}
         if "findings" in required:

@@ -256,6 +256,29 @@ def rejection_message(assessment: Assessment) -> str:
     )
 
 
+def no_components_message() -> str:
+    """What the uploader is told when classify found nothing to review.
+
+    Deliberately not `rejection_message`. The screen gate already decided this IS a
+    solution design; classify then found no components in it. So this must not say
+    the upload was the wrong kind of thing, and it must not borrow that function's
+    "nothing was charged" — screen and classify both ran and both cost tokens.
+
+    It names what is missing and what would fix it, in that order, because the two
+    causes have the same fix: a design whose architecture was described only in
+    prose, and a design whose architecture was in a diagram that never arrived.
+    """
+    return (
+        "This looks like a solution design, but no architecture components could be "
+        "identified in it, so there was nothing concrete to assess against the "
+        "rubric and no score was produced. That usually means the design states "
+        "intent and outcomes without naming the services it uses, or its "
+        "architecture lives in a diagram that was not part of the upload. "
+        "Upload an SOW that includes an architecture diagram, or upload an "
+        "architecture diagram."
+    )
+
+
 def uncertainty_warning(assessment: Assessment) -> IngestWarning:
     """The non-blocking outcome: the review runs, and says the gate was unsure.
 

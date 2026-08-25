@@ -750,10 +750,15 @@ The label identifies which of the six pipeline calls a line belongs to;
 
 ### Deadlines
 
-Every call carries a 120s client-side deadline (`OPENROUTER_TIMEOUT_SECONDS`). There
+Every call carries a 300s client-side deadline (`OPENROUTER_TIMEOUT_SECONDS`). There
 is no server-side deadline on a chat completion, so without one a hung upstream is
 indistinguishable from a slow one — a real run stalled for 5,657 seconds and returned
 malformed JSON.
+
+The bound was 120s until a real SoW review died against it: evaluate hit the ceiling,
+retried a step down in effort, and hit it again, ending the review at t+302.5s with
+nothing produced. 120s was chosen as "comfortably above every observed latency" and
+stopped being that.
 
 Two details make the bound real rather than nominal. The SDK's own `max_retries` is
 set to **0**, because it defaults to 2 and this module retries once itself: left
