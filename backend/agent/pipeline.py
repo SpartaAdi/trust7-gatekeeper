@@ -22,6 +22,7 @@ from agent import ai_detection, ai_gate, stages
 from ingestion import normalize, relevance
 from schema import (
     DesignGraph,
+    DiagramSource,
     Finding,
     IngestWarning,
     NormalizedDesign,
@@ -30,6 +31,28 @@ from schema import (
 )
 
 log = logging.getLogger(__name__)
+
+# Characters of document text below which an empty classify result is believable.
+#
+# 1,000 is about two-thirds of a page. `ingestion/quality.py` puts a real page of a
+# solution document at 1,500-3,000 characters, so a document-only upload under this
+# has not said enough for "it describes no architecture" to be surprising.
+#
+# The floor exists because an empty inventory means two different things depending
+# on where it came from, and only one of them is evidence about the design. From an
+# analyzed diagram it is a real finding: drawio parsing is deterministic and vision
+# reports what it saw, so zero components means zero components. From classify over
+# text it is ambiguous — `stages.classify` documents a real run that returned
+# `components: []` in 34 output tokens for an input that had 8, and its retry exists
+# precisely because that is a provider quality dip rather than an empty design.
+# Rejecting on a bare classify miss would discard a sound review on a bad day, which
+# is the trade that docstring explicitly refuses to make.
+#
+# Grounded against the suite's own fixtures rather than picked: the toy documents
+# sit at 32-387 characters, the smallest realistic one at 2,361, and the real
+# RMBL-Control-Tower SoW at 24,215. Nothing in the corpus falls between 387 and
+# 2,361, so this threshold lands in an empty band instead of cutting a cluster.
+MIN_DOC_CHARS_TO_TRUST_AN_EMPTY_CLASSIFY = 1000
 
 
 class _Progress:
@@ -279,23 +302,47 @@ def _run(
         # producing a review of an empty set — evaluate is the most expensive stage in
         # the pipeline, and scoring nothing yields a number that looks like a finding.
         #
-        # Both conditions are required. Components empty while the graph is NOT is a
-        # different situation, already handled below: the diagram gave us an inventory
-        # even though classify returned none, so the review can go on.
+        # Components empty while the graph is NOT is a different situation, already
+        # handled below: the diagram gave us an inventory even though classify
+        # returned none, so the review goes on.
         if not components and not design.graph.components:
-            message = relevance.no_components_message()
-            log.info(
-                "Review %s stopped after classify: no components from either source "
-                "(document_text=%d chars, graph components=0)",
-                review_id, len(design.document_text.strip()),
+            # Where the emptiness came from decides whether it is evidence. An
+            # analyzed diagram that yielded nothing is a real finding; classify
+            # returning nothing over text is ambiguous until the text is thin enough
+            # for the answer to be plausible. See the constant for the full argument.
+            diagram_analyzed = design.graph.source in (
+                DiagramSource.DRAWIO, DiagramSource.IMAGE
             )
-            progress.rejected(
-                stage, message, detail="No components identified — not reviewed"
+            characters = len(design.document_text.strip())
+            thin = characters < MIN_DOC_CHARS_TO_TRUST_AN_EMPTY_CLASSIFY
+
+            if diagram_analyzed or thin:
+                message = relevance.no_components_message()
+                log.info(
+                    "Review %s stopped after classify: no components from either "
+                    "source (source=%s, document_text=%d chars, graph components=0)",
+                    review_id, design.graph.source.value, characters,
+                )
+                progress.rejected(
+                    stage, message, detail="No components identified — not reviewed"
+                )
+                # Same contract as the screen gate's refusal: no result stored, and
+                # `NotReviewable` propagates so `api/routes.py` logs a refusal rather
+                # than a crash.
+                raise relevance.NotReviewable(message)
+
+            # Substantial text, no diagram, and classify still found nothing twice.
+            # The review continues, per `stages.classify`: evaluate reads the design
+            # text rather than this inventory, so the findings can still be sound.
+            # Logged at WARNING because it is the signature of a degraded classify
+            # call, and the only place that shows up after the fact.
+            log.warning(
+                "Review %s: classify returned no components for %d characters of "
+                "document text with no diagram. Above the %d-character floor, so the "
+                "review continues on the design text — see MIN_DOC_CHARS_TO_TRUST_AN_"
+                "EMPTY_CLASSIFY.",
+                review_id, characters, MIN_DOC_CHARS_TO_TRUST_AN_EMPTY_CLASSIFY,
             )
-            # Same contract as the screen gate's refusal: no result stored, and
-            # `NotReviewable` propagates so `api/routes.py` logs a refusal rather
-            # than a crash.
-            raise relevance.NotReviewable(message)
 
         # An empty inventory against a non-empty design is worth saying out loud on
         # the screen the reviewer is watching. Ingest has already reported what it
@@ -303,11 +350,21 @@ def _run(
         # user has to work out for themselves.
         detail = f"{len(components)} components classified"
         if not components and stages.design_has_content(design):
-            detail = (
-                f"0 components classified despite "
-                f"{len(design.graph.components)} in the diagram — the review "
-                f"continues from the design text"
-            )
+            if design.graph.components:
+                detail = (
+                    f"0 components classified despite "
+                    f"{len(design.graph.components)} in the diagram — the review "
+                    f"continues from the design text"
+                )
+            else:
+                # Reachable only above the character floor: a document-only upload
+                # with real text that classify found nothing in. The old wording said
+                # "despite 0 in the diagram", which is not a contradiction and reads
+                # as one.
+                detail = (
+                    "0 components classified from the document text — the review "
+                    "continues from the design text"
+                )
         progress.finish("classify", detail)
 
         # The AI/ML evidence record. Built here, straight after classify, because

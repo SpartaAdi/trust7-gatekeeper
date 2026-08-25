@@ -412,14 +412,7 @@ def _pipeline_stub():
                 "illegible": ["essentially all of it"],
             }, {}
         if "design_summary" in required:
-            # Non-empty on purpose — see agent/pipeline.py's zero-component gate.
-            # An empty inventory from both sources rejects the review, which would
-            # stop these extraction-warning tests before they can assert anything.
-            return {"design_summary": "x",
-                    "components": [{"id": "c0", "label": "Component 0",
-                                    "kind": "compute", "provider": "aws",
-                                    "service": "Amazon EC2", "attributes": []}],
-                    "data_flows": [],
+            return {"design_summary": "x", "components": [], "data_flows": [],
                     "observations": [], "absent": []}, {}
         if "findings" in required:
             return {"findings": [
