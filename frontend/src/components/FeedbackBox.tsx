@@ -33,8 +33,13 @@ import { DropZone, type StagedFile } from './DropZone'
  * and then presses the mic is adding a fourth, not discarding three.
  */
 
-/** Mirrors MAX_FEEDBACK_CHARS in backend/schema.py, which is enforced server-side. */
-const MAX_FEEDBACK_CHARS = 4000
+/**
+ * Mirrors MAX_FEEDBACK_CHARS in backend/schema.py, which is enforced server-side.
+ *
+ * Exported so `OpenQuestions` measures against the SAME number rather than keeping
+ * a second copy — two mirrors of one server constant is one of them going stale.
+ */
+export const MAX_FEEDBACK_CHARS = 4000
 
 export function FeedbackBox({
   reviewId,

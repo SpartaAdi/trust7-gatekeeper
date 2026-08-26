@@ -6,6 +6,7 @@ import { ChangeBadge } from '../components/ChangeBadge'
 import { DataFidelity } from '../components/DataFidelity'
 import { FeedbackBox } from '../components/FeedbackBox'
 import { IngestWarnings } from '../components/IngestWarnings'
+import { OpenQuestions } from '../components/OpenQuestions'
 import { RemediationGapPanel } from '../components/RemediationGapPanel'
 import { SeverityMark } from '../components/SeverityMark'
 import { StructuredText } from '../components/StructuredText'
@@ -62,6 +63,7 @@ export function ResultsView({
 }: Props) {
   const [result, setResult] = useState<ReviewResult | null>(null)
   const [error, setError] = useState('')
+  const [questionsOpen, setQuestionsOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -181,6 +183,36 @@ export function ResultsView({
         the executive summary and all five sections are below them.
       */}
       <FeedbackBox reviewId={result.review_id} onStarted={onFollowUpStarted} />
+
+      {/*
+        The other way into a follow-up round, beside the free-text box above.
+        That one asks "what did we get wrong"; this one turns each open finding
+        back into the question it started as, because most of them are open for
+        want of operational evidence a document cannot carry rather than because
+        the design is wrong. Rendered only when something is actually open.
+      */}
+      {open.length > 0 && (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setQuestionsOpen(true)}
+            data-testid="open-questions-launcher"
+            className="t-caption text-minfy-indigo underline underline-offset-2 hover:text-minfy-blue"
+          >
+            Answer {open.length} open {open.length === 1 ? 'question' : 'questions'}
+            {' '}this review could not
+          </button>
+        </div>
+      )}
+
+      {questionsOpen && (
+        <OpenQuestions
+          reviewId={result.review_id}
+          findings={result.findings}
+          onClose={() => setQuestionsOpen(false)}
+          onStarted={onFollowUpStarted}
+        />
+      )}
 
       {/*
         ABOVE the executive summary and the score, deliberately. A warning says the
