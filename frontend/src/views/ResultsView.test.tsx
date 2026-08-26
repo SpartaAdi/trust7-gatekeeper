@@ -43,10 +43,11 @@ describe('ResultsView', () => {
     expect(screen.getByText('Minfy TRUST-7 Framework')).toBeInTheDocument()
     expect(screen.getByText('Security')).toBeInTheDocument()
 
-    // The findings list itself, not the action-items shortlist above it — both
-    // draw on the same finding, so this query is scoped to the collapsed group.
-    const group = screen.getByRole('button', { name: /high severity/i })
-    await userEvent.click(group)
+    // The findings list itself, not the "Fix these first" callout above it —
+    // both draw on the same finding, so this query is scoped to the group.
+    // No click: open findings are expanded on arrival now, and clicking would
+    // shut the group rather than open it.
+    const group = screen.getByRole('button', { name: /^high severity/i })
     const list = group.parentElement!
     expect(list).toHaveTextContent(/customer data store has no encryption at rest/i)
 
@@ -107,7 +108,7 @@ describe('ResultsView', () => {
    * the previous order, in which a flat top-ten shortlist and a separate roadmap
    * both sat above the executive summary and listed the same work twice.
    */
-  it('runs executive summary -> assessment -> roadmap -> detailed findings', async () => {
+  it('runs executive summary -> assessment -> findings', async () => {
     getReview.mockResolvedValue(resultFixture())
 
     render(<ResultsView
@@ -118,7 +119,10 @@ describe('ResultsView', () => {
       />)
 
     await screen.findByTestId('executive-summary')
-    const order = ['executive-summary', 'assessment', 'roadmap', 'detailed-findings']
+    // Three, not four. The roadmap that used to sit between the assessment and
+    // this list is gone; the findings list is now both the record and the
+    // action list.
+    const order = ['executive-summary', 'assessment', 'detailed-findings']
       .map((id) => screen.getByTestId(id))
 
     for (let i = 0; i < order.length - 1; i += 1) {
@@ -129,7 +133,7 @@ describe('ResultsView', () => {
     }
   })
 
-  it('has no separate flat top-action list any more', async () => {
+  it('has no separate action list beside the findings any more', async () => {
     getReview.mockResolvedValue(resultFixture())
 
     render(<ResultsView
@@ -139,14 +143,17 @@ describe('ResultsView', () => {
         onBackToHistory={vi.fn()}
       />)
 
-    await screen.findByTestId('roadmap')
-    // The roadmap is the single prioritized action view; a second list of the
-    // same items under its own heading is what this restructure removed.
+    await screen.findByTestId('detailed-findings')
+    // Two lists of the same open findings under two headings is what this
+    // restructure removed — first the flat shortlist, now the effort roadmap.
+    // The severity-grouped list is the only one left.
     expect(screen.queryByTestId('top-actions')).toBeNull()
     expect(screen.queryByText(/top action items/i)).toBeNull()
+    expect(screen.queryByTestId('roadmap')).toBeNull()
+    expect(screen.queryByText(/action roadmap/i)).toBeNull()
   })
 
-  it('still surfaces the imperative remediation text, now inside the roadmap', async () => {
+  it('still surfaces the imperative remediation text, now in the findings list', async () => {
     getReview.mockResolvedValue(resultFixture())
 
     render(<ResultsView
@@ -157,16 +164,20 @@ describe('ResultsView', () => {
       />)
 
     const user = userEvent.setup()
-    await screen.findByTestId('roadmap')
-    await user.click(screen.getByRole('button', { name: /^Immediate/ }))
+    await screen.findByTestId('detailed-findings')
+    // The severity group is already open; only the finding itself still needs a
+    // click to reveal its remediation.
+    await user.click(screen.getByRole('button', { name: /sec_encryption_at_rest/i }))
 
-    expect(screen.getByTestId('roadmap')).toHaveTextContent(/enable sse-kms on the table/i)
+    expect(screen.getByTestId('detailed-findings')).toHaveTextContent(
+      /enable sse-kms on the table/i,
+    )
   })
 
-  it('omits the roadmap entirely when nothing is open', async () => {
-    // Was written against the old flat shortlist, which no longer exists — so it
-    // asserted the absence of something absent for everyone. Repointed at the
-    // roadmap, which is what now has to hide itself on a clean review.
+  it('omits the priority callout entirely when nothing is open', async () => {
+    // Has been repointed twice as sections were merged away: first from the flat
+    // shortlist, then from the roadmap. "Fix these first" is the last curated
+    // surface left, and it is what now has to hide itself on a clean review.
     getReview.mockResolvedValue(
       resultFixture({
         findings: resultFixture().findings.map((f) => ({ ...f, status: 'pass' as const })),
@@ -181,227 +192,14 @@ describe('ResultsView', () => {
       />)
 
     await screen.findByRole('heading', { name: /payments platform/i })
-    expect(screen.queryByTestId('roadmap')).not.toBeInTheDocument()
     expect(screen.queryByTestId('priority-focus')).not.toBeInTheDocument()
     // The audit trail still renders: a clean review is a result, not an absence.
     expect(screen.getByTestId('detailed-findings')).toBeInTheDocument()
   })
 
-  describe('How to Improve roadmap', () => {
-    /** Enough shape to exercise all three phases from one review. */
-    const spread = () =>
-      resultFixture({
-        findings: [
-          // low effort + high severity + one component -> Immediate
-          {
-            ...resultFixture().findings[0]!,
-            check_id: 'sec_encryption_at_rest',
-          },
-          // medium effort -> Short-term
-          {
-            ...resultFixture().findings[0]!,
-            check_id: 'ops_runbook',
-            pillar_id: 'operational_excellence',
-            severity: 'medium' as const,
-            title: 'No runbook is referenced for the payment flow',
-            remediation: 'Reference the on-call runbook in the design document.',
-            remediation_effort: 'medium' as const,
-            priority: 2,
-          },
-          // spans components -> Structural
-          {
-            ...resultFixture().findings[0]!,
-            check_id: 'rel_multi_az',
-            pillar_id: 'reliability',
-            title: 'Single-AZ deployment for the order pipeline',
-            remediation: 'Move the order pipeline to a multi-AZ deployment.',
-            remediation_effort: 'high' as const,
-            affected_components: ['orders-db', 'orders-worker', 'alb'],
-            priority: 3,
-          },
-        ],
-      })
-
-    function mount(result = spread()) {
-      getReview.mockResolvedValue(result)
-      return render(<ResultsView
-          reviewId="rev-1"
-          onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
-          onStartOver={vi.fn()}
-          onBackToHistory={vi.fn()}
-        />)
-    }
-
-    async function renderRoadmap(result = spread()) {
-      mount(result)
-      return screen.findByTestId('roadmap')
-    }
-
-    /** Open all three phases, then read the section back. */
-    async function expandAll(user: ReturnType<typeof userEvent.setup>) {
-      for (const label of [/^Immediate/, /^Short-term/, /^Structural/]) {
-        const header = screen.getByRole('button', { name: label })
-        if (!(header as HTMLButtonElement).disabled) await user.click(header)
-      }
-      return screen.getByTestId('roadmap').textContent
-    }
-
-    it('states what the section is for, in the reader\'s terms', async () => {
-      await renderRoadmap()
-
-      expect(screen.getByTestId('roadmap')).toHaveTextContent(
-        /prioritized next actions, ordered by effort\. open findings only\./i,
-      )
-    })
-
-    it('numbers the rows within each phase, restarting at 1', async () => {
-      const user = userEvent.setup()
-      await renderRoadmap()
-      await expandAll(user)
-
-      // Each phase in the fixture holds one action, so each starts its own count
-      // rather than continuing a running total across the three.
-      for (const phase of ['immediate', 'short_term', 'structural']) {
-        const rows = within(screen.getByTestId(`phase-${phase}`)).getAllByRole('listitem')
-        expect(rows[0]!.textContent).toMatch(/^1/)
-      }
-    })
-
-    it('carries the ordinal visually without announcing it twice', async () => {
-      const user = userEvent.setup()
-      await renderRoadmap()
-      await expandAll(user)
-
-      const row = within(screen.getByTestId('phase-immediate')).getAllByRole('listitem')[0]!
-      const ordinal = row.querySelector('[aria-hidden="true"].tnum')
-      // The <ol> already conveys position to a screen reader; the digit is for
-      // the eye, so it must not be read out a second time.
-      expect(ordinal).not.toBeNull()
-      expect(ordinal!.textContent).toBe('1')
-    })
-
-    it('sits below the assessment and above the detailed findings', async () => {
-      const roadmap = await renderRoadmap()
-
-      expect(
-        screen.getByTestId('assessment').compareDocumentPosition(roadmap) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy()
-      expect(
-        roadmap.compareDocumentPosition(screen.getByTestId('detailed-findings')) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy()
-    })
-
-    it('starts every phase collapsed, showing only the counts', async () => {
-      await renderRoadmap()
-
-      for (const label of [/^Immediate/, /^Short-term/, /^Structural/]) {
-        const header = screen.getByRole('button', { name: label })
-        expect(header).toHaveAttribute('aria-expanded', 'false')
-      }
-      // The count is in the header, so it is legible while shut.
-      expect(screen.getByTestId('phase-immediate')).toHaveTextContent('(1)')
-      expect(screen.getByTestId('phase-short_term')).toHaveTextContent('(1)')
-      expect(screen.getByTestId('phase-structural')).toHaveTextContent('(1)')
-
-      // And no remediation text is on the page from the roadmap yet.
-      expect(
-        screen.getByTestId('roadmap').textContent,
-      ).not.toMatch(/multi-AZ deployment/i)
-    })
-
-    it('expands one phase to the finding titles and verbatim remediation', async () => {
-      const user = userEvent.setup()
-      await renderRoadmap()
-
-      await user.click(screen.getByRole('button', { name: /^Structural/ }))
-
-      const phase = screen.getByTestId('phase-structural')
-      expect(phase).toHaveTextContent('Single-AZ deployment for the order pipeline')
-      // Verbatim — the exact string from the finding, not a rephrase.
-      expect(phase).toHaveTextContent('Move the order pipeline to a multi-AZ deployment.')
-      // Context a reviewer sequencing work needs.
-      expect(phase).toHaveTextContent(/high effort/)
-      expect(phase).toHaveTextContent(/3 components/)
-    })
-
-    it('expands independently — opening one phase does not open the others', async () => {
-      const user = userEvent.setup()
-      await renderRoadmap()
-
-      await user.click(screen.getByRole('button', { name: /^Immediate/ }))
-
-      expect(screen.getByRole('button', { name: /^Immediate/ })).toHaveAttribute(
-        'aria-expanded',
-        'true',
-      )
-      expect(screen.getByRole('button', { name: /^Structural/ })).toHaveAttribute(
-        'aria-expanded',
-        'false',
-      )
-    })
-
-    it('places each open finding in exactly one phase', async () => {
-      const user = userEvent.setup()
-      await renderRoadmap()
-      await expandAll(user)
-
-      // Three findings in, three rows out across all phases — nothing duplicated
-      // into two phases and nothing dropped.
-      const rows = screen.getByTestId('roadmap').querySelectorAll('li')
-      expect(rows).toHaveLength(3)
-    })
-
-    it('shows an empty phase rather than hiding it, and does not expand it', async () => {
-      // "Structural (0)" is a result: it says there is no architecture work. An
-      // absent heading would leave the reader unsure it was considered.
-      const user = userEvent.setup()
-      await renderRoadmap(
-        resultFixture({ findings: [resultFixture().findings[0]!] }),
-      )
-
-      const structural = screen.getByRole('button', { name: /^Structural/ })
-      expect(screen.getByTestId('phase-structural')).toHaveTextContent('(0)')
-      expect(structural).toBeDisabled()
-
-      await user.click(structural)
-      expect(structural).toHaveAttribute('aria-expanded', 'false')
-    })
-
-    it('is absent entirely when nothing is open', async () => {
-      mount(
-        resultFixture({
-          findings: resultFixture().findings.map((f) => ({ ...f, status: 'pass' as const })),
-        }),
-      )
-
-      await screen.findByRole('heading', { name: /payments platform/i })
-      expect(screen.queryByTestId('roadmap')).not.toBeInTheDocument()
-    })
-
-    it('groups the same review identically however the findings are ordered', async () => {
-      // The determinism guarantee, seen from the UI rather than the pure function:
-      // two fetches of one review may return its findings in any order, and the
-      // phases must read the same both times.
-      const user = userEvent.setup()
-      const result = spread()
-
-      const first = mount(result)
-      await screen.findByTestId('roadmap')
-      const before = await expandAll(user)
-      first.unmount()
-
-      mount({ ...result, findings: [...result.findings].reverse() })
-      await screen.findByTestId('roadmap')
-      const after = await expandAll(user)
-
-      expect(after).toBe(before)
-    })
-  })
 
   describe('findings accordion', () => {
-    it('starts every severity group collapsed', async () => {
+    it('starts open findings expanded, now that this is the only action view', async () => {
       getReview.mockResolvedValue(resultFixture())
 
       render(<ResultsView
@@ -411,14 +209,41 @@ describe('ResultsView', () => {
           onBackToHistory={vi.fn()}
         />)
 
-      const group = await screen.findByRole('button', { name: /high severity/i })
-      expect(group).toHaveAttribute('aria-expanded', 'false')
-      // The count is on the header, so it is readable while shut.
+      const group = await screen.findByRole('button', { name: /^high severity/i })
+      // Expanded, deliberately. The closed default was right while the roadmap sat
+      // above and this list was only the record; with the roadmap gone, a primary
+      // action view that opens shut asks for a click before the reader can see
+      // whether there is anything to do at all.
+      expect(group).toHaveAttribute('aria-expanded', 'true')
+      // The count stays on the header either way.
       expect(group).toHaveTextContent('(1)')
-      // No finding row exists yet, so nothing inside can be read or tabbed to.
-      expect(
-        screen.queryByRole('button', { name: /sec_encryption_at_rest/i }),
-      ).not.toBeInTheDocument()
+      // The finding row is present without a click — collapsed to its summary.
+      const row = screen.getByRole('button', { name: /sec_encryption_at_rest/i })
+      expect(row).toHaveAttribute('aria-expanded', 'false')
+    })
+
+    it('keeps the passing / not-applicable group closed behind its own toggle', async () => {
+      // The audit trail half, untouched by the merge. It is not what a reviewer is
+      // scanning for, and expanding it by default puts the passed checks between
+      // them and the gaps.
+      getReview.mockResolvedValue(resultFixture())
+      const user = userEvent.setup()
+
+      render(<ResultsView
+          reviewId="rev-1"
+          onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
+          onStartOver={vi.fn()}
+          onBackToHistory={vi.fn()}
+        />)
+
+      const toggle = await screen.findByRole('button', {
+        name: /show 1 passing \/ not-applicable/i,
+      })
+      expect(screen.queryByText(/passing and not applicable/i)).not.toBeInTheDocument()
+
+      await user.click(toggle)
+      const group = screen.getByRole('button', { name: /passing and not applicable/i })
+      expect(group).toHaveAttribute('aria-expanded', 'false')
     })
 
     it('expands a group to collapsed findings, then a finding to its detail', async () => {
@@ -432,10 +257,10 @@ describe('ResultsView', () => {
           onBackToHistory={vi.fn()}
         />)
 
-      await user.click(await screen.findByRole('button', { name: /high severity/i }))
+      await screen.findByRole('button', { name: /^high severity/i })
 
-      // Level one open: the finding is present, but only as a summary row —
-      // its title, its status, and how much it touches.
+      // Level one is open on arrival: the finding is present, but only as a
+      // summary row — its title, its status, and how much it touches.
       const row = screen.getByRole('button', { name: /sec_encryption_at_rest/i })
       expect(row).toHaveAttribute('aria-expanded', 'false')
       expect(row).toHaveTextContent('1 component')
@@ -460,16 +285,18 @@ describe('ResultsView', () => {
           onBackToHistory={vi.fn()}
         />)
 
-      const group = await screen.findByRole('button', { name: /high severity/i })
-      await user.click(group)
-      expect(
-        screen.getByRole('button', { name: /sec_encryption_at_rest/i }),
-      ).toBeInTheDocument()
-
+      const group = await screen.findByRole('button', { name: /^high severity/i })
+      // Open on arrival now, so the first click SHUTS it and the second reopens.
+      // The affordance still has to work in both directions.
       await user.click(group)
       expect(
         screen.queryByRole('button', { name: /sec_encryption_at_rest/i }),
       ).not.toBeInTheDocument()
+
+      await user.click(group)
+      expect(
+        screen.getByRole('button', { name: /sec_encryption_at_rest/i }),
+      ).toBeInTheDocument()
     })
   })
 
@@ -747,42 +574,6 @@ describe('ResultsView', () => {
  * The two sections show overlapping data on purpose. What keeps them from
  * reading as two competing to-do lists is that each says what it is.
  */
-describe('ResultsView — roadmap vs detailed findings', () => {
-  function mountFull() {
-    getReview.mockResolvedValue(resultFixture())
-    return render(<ResultsView
-        reviewId="rev-1"
-        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
-        onStartOver={vi.fn()}
-        onBackToHistory={vi.fn()}
-      />)
-  }
-
-  it('tells the reader the findings section is the record, not a second action list', async () => {
-    mountFull()
-
-    const findings = await screen.findByTestId('detailed-findings')
-    expect(findings).toHaveTextContent(
-      /complete evaluation record, including passed and not-applicable checks/i,
-    )
-    expect(findings).toHaveTextContent(/remediation is repeated here for reference/i)
-    expect(findings).toHaveTextContent(/action roadmap above is the prioritized list/i)
-  })
-
-  it('gives each section a distinct purpose line', async () => {
-    mountFull()
-
-    await screen.findByTestId('roadmap')
-    const roadmap = screen.getByTestId('roadmap').textContent ?? ''
-    const findings = screen.getByTestId('detailed-findings').textContent ?? ''
-
-    expect(roadmap).toMatch(/prioritized next actions/i)
-    expect(findings).toMatch(/complete evaluation record/i)
-    // Neither borrows the other's framing.
-    expect(roadmap).not.toMatch(/complete evaluation record/i)
-    expect(findings).not.toMatch(/prioritized next actions/i)
-  })
-})
 
 /**
  * Pillar "Explain more".
@@ -1049,7 +840,7 @@ describe('ResultsView — structured copy', () => {
     expect(assessment).toHaveTextContent(/solid shape, with encryption/i)
   })
 
-  it('renders multi-step remediation as steps in the roadmap', async () => {
+  it('renders multi-step remediation as steps in the findings list', async () => {
     const base = resultFixture().findings[0]!
     getReview.mockResolvedValue(
       resultFixture({
@@ -1073,13 +864,15 @@ describe('ResultsView — structured copy', () => {
         onBackToHistory={vi.fn()}
       />)
 
-    await screen.findByTestId('roadmap')
-    await user.click(screen.getByRole('button', { name: /^Immediate/ }))
+    await screen.findByTestId('detailed-findings')
+    // The severity group is open on arrival; the finding still needs a click to
+    // reveal its remediation.
+    await user.click(screen.getByRole('button', { name: /sec_encryption_at_rest/i }))
 
-    const roadmap = screen.getByTestId('roadmap')
-    expect(within(roadmap).getAllByRole('listitem').length).toBeGreaterThanOrEqual(3)
-    expect(roadmap.textContent).toContain('Re-encrypt existing snapshots.')
-    expect(roadmap.textContent).not.toContain('- Create a customer-managed')
+    const findings = screen.getByTestId('detailed-findings')
+    expect(within(findings).getAllByRole('listitem').length).toBeGreaterThanOrEqual(3)
+    expect(findings.textContent).toContain('Re-encrypt existing snapshots.')
+    expect(findings.textContent).not.toContain('- Create a customer-managed')
   })
 
   /** The executive summary stays prose on purpose — it is a summary, not a list. */
@@ -1171,20 +964,17 @@ describe('ResultsView — priority focus callout', () => {
 
   it('adds no numbers of its own — every item is a finding already on the page', async () => {
     mountFocus()
-    const user = userEvent.setup()
 
     const focus = await screen.findByTestId('priority-focus')
-    // The roadmap starts collapsed, so its rows are not in the DOM until opened.
-    for (const label of [/^Immediate/, /^Short-term/, /^Structural/]) {
-      const header = screen.getByRole('button', { name: label })
-      if (!(header as HTMLButtonElement).disabled) await user.click(header)
-    }
-    const roadmap = screen.getByTestId('roadmap')
-    // Whatever the callout names must also appear in the roadmap below; it is a
+    // Checked against the findings list rather than the removed roadmap. The
+    // severity groups are expanded on arrival, so every open finding's title is
+    // already in the DOM without a click.
+    const findings = screen.getByTestId('detailed-findings')
+    // Whatever the callout names must also appear in the list below; it is a
     // curated surface of the same data, not a separate judgement.
     for (const row of within(focus).getAllByRole('listitem')) {
       const title = row.querySelector('.font-medium')!.textContent!
-      expect(roadmap.textContent).toContain(title)
+      expect(findings.textContent).toContain(title)
     }
   })
 })
@@ -1220,10 +1010,12 @@ describe('ResultsView — real findings from a live run', () => {
         onStartOver={vi.fn()}
         onBackToHistory={vi.fn()}
       />)
-    await screen.findByTestId('roadmap')
-    await user.click(screen.getByRole('button', { name: /^Immediate/ }))
+    await screen.findByTestId('detailed-findings')
+    await user.click(screen.getByRole('button', { name: /sec_encryption_transit/i }))
 
-    const row = within(screen.getByTestId('roadmap')).getAllByRole('listitem')[0]!
+    const row = within(screen.getByTestId('detailed-findings')).getAllByRole(
+      'listitem',
+    )[0]!
     // One paragraph carrying the whole remediation, not a list of fragments.
     expect(row.querySelector('ul')).toBeNull()
     expect(row.querySelector('ol')).toBeNull()
@@ -1250,7 +1042,6 @@ describe('ResultsView — real findings from a live run', () => {
         onBackToHistory={vi.fn()}
       />)
     await screen.findByTestId('detailed-findings')
-    await user.click(screen.getByRole('button', { name: /high severity/i }))
     await user.click(screen.getByRole('button', { name: /sec_encryption_transit/i }))
 
     expect(screen.getByTestId('detailed-findings').textContent).toContain('ALB->API')
@@ -1533,10 +1324,10 @@ describe('ResultsView — following up on a completed review', () => {
     mount(resultFixture())
     const box = await screen.findByTestId('feedback-box')
 
-    // Above all five content sections. Reaching this view at all means the review
+    // Above every content section. Reaching this view at all means the review
     // is complete: GET /reviews/{id} answers from the stored result, which only a
     // finished run writes, so there is no state where this renders early.
-    for (const id of ['executive-summary', 'assessment', 'roadmap', 'detailed-findings']) {
+    for (const id of ['executive-summary', 'assessment', 'detailed-findings']) {
       expect(
         box.compareDocumentPosition(screen.getByTestId(id)) &
           Node.DOCUMENT_POSITION_FOLLOWING,
@@ -1680,5 +1471,186 @@ describe('ResultsView — following up on a completed review', () => {
       'title',
       expect.stringContaining('use the follow-up box at the top of the page'),
     )
+  })
+})
+
+/**
+ * The merged view: one severity-grouped list carrying what the roadmap used to
+ * group by, and the grounding quote that Segment 7 stored but nothing displayed.
+ */
+describe('ResultsView — merged findings view', () => {
+  const mount = (result: ReviewResult) => {
+    getReview.mockResolvedValue(result)
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+  }
+
+  const withFinding = (over: Partial<Finding>) => {
+    const base = resultFixture().findings[0]!
+    return resultFixture({ findings: [{ ...base, ...over }] })
+  }
+
+  it('keeps "Fix these first" above the list rather than losing it with the roadmap', async () => {
+    // The roadmap's one piece of distinct value. It never lived inside the
+    // roadmap — it renders under the assessment — so the merge must not have
+    // disturbed it, and this pins that rather than assuming it.
+    mount(resultFixture())
+
+    const focus = await screen.findByTestId('priority-focus')
+    const findings = screen.getByTestId('detailed-findings')
+
+    expect(focus).toBeInTheDocument()
+    expect(
+      focus.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('carries the effort phase on each open finding, without a click', async () => {
+    // Effort was the roadmap's grouping axis. Demoted to a per-item tag, it has
+    // to stay on the COLLAPSED row — a tag only visible after expanding would not
+    // replace what the removed section let a reader scan for.
+    mount(withFinding({ remediation_effort: 'high' }))
+
+    const tag = await screen.findByTestId('effort-sec_encryption_at_rest')
+    expect(tag).toHaveTextContent(/structural/i)
+  })
+
+  it('says "not estimated" rather than assuming an unestimated finding is cheap', async () => {
+    mount(withFinding({ remediation_effort: '' }))
+
+    const tag = await screen.findByTestId('effort-sec_encryption_at_rest')
+    expect(tag).toHaveTextContent(/not estimated/i)
+  })
+
+  it('puts no effort tag on a passed or not-applicable check', async () => {
+    // There is no work to schedule on a check that passed, so a phase on one is
+    // noise in the audit trail.
+    mount(resultFixture())
+    const user = userEvent.setup()
+
+    await user.click(
+      await screen.findByRole('button', { name: /show 1 passing \/ not-applicable/i }),
+    )
+
+    expect(screen.queryByTestId('effort-gov_audit_trail')).not.toBeInTheDocument()
+  })
+
+  // ------------------------------------------------------------------------- #
+  // The grounding quote — three states
+  // ------------------------------------------------------------------------- #
+
+  it('shows the quote and a narrow label when the remediation is grounded', async () => {
+    mount(
+      withFinding({
+        remediation: 'Enable SSE-KMS on the table with a customer-managed key.',
+        remediation_grounded_in: 'Orders are stored in DynamoDB',
+      }),
+    )
+    const user = userEvent.setup()
+
+    await user.click(
+      await screen.findByRole('button', { name: /sec_encryption_at_rest/i }),
+    )
+
+    const block = screen.getByTestId('grounding-sec_encryption_at_rest')
+    expect(block).toHaveTextContent('Orders are stored in DynamoDB')
+    expect(block).toHaveTextContent(/grounded in the source/i)
+  })
+
+  it('never claims the remediation itself was verified', async () => {
+    // What was checked: the model quoted a phrase, and the phrase is in the design
+    // source. What was NOT checked: whether the remediation is correct, adequate
+    // or complete. On the most actionable text in the review, that distinction is
+    // the whole point of the label.
+    mount(
+      withFinding({
+        remediation: 'Enable SSE-KMS on the table.',
+        remediation_grounded_in: 'Orders are stored in DynamoDB',
+      }),
+    )
+    const user = userEvent.setup()
+
+    await user.click(
+      await screen.findByRole('button', { name: /sec_encryption_at_rest/i }),
+    )
+
+    const page = screen.getByTestId('detailed-findings').textContent ?? ''
+    for (const overclaim of [/verified/i, /accurate/i, /correct\b/i, /confirmed/i, /validated/i]) {
+      expect(page).not.toMatch(overclaim)
+    }
+  })
+
+  it('renders the quote distinctly from the remediation prose', async () => {
+    // Monospace and quoted, the same treatment AiDetectionPanel gives an extracted
+    // excerpt: this is the submitted material, not our prose about it.
+    mount(
+      withFinding({
+        remediation: 'Enable SSE-KMS on the table.',
+        remediation_grounded_in: 'Orders are stored in DynamoDB',
+      }),
+    )
+    const user = userEvent.setup()
+
+    await user.click(
+      await screen.findByRole('button', { name: /sec_encryption_at_rest/i }),
+    )
+
+    const quote = screen
+      .getByTestId('grounding-sec_encryption_at_rest')
+      .querySelector('.font-mono')
+    expect(quote).not.toBeNull()
+    expect(quote!.textContent).toContain('“Orders are stored in DynamoDB”')
+  })
+
+  it('shows nothing extra when a remediation carries no quote', async () => {
+    // Per Segment 7 an ungrounded remediation is blanked entirely, so this pairing
+    // should not occur. If it ever does, silence is the honest render — neither a
+    // tick nor an accusation.
+    mount(
+      withFinding({
+        remediation: 'Enable SSE-KMS on the table.',
+        remediation_grounded_in: '',
+      }),
+    )
+    const user = userEvent.setup()
+
+    await user.click(
+      await screen.findByRole('button', { name: /sec_encryption_at_rest/i }),
+    )
+
+    expect(screen.getByTestId('detailed-findings')).toHaveTextContent(/enable sse-kms/i)
+    expect(screen.queryByTestId('grounding-sec_encryption_at_rest')).not.toBeInTheDocument()
+    expect(screen.queryByText(/grounded in the source/i)).not.toBeInTheDocument()
+  })
+
+  it('applies no grounding logic at all when the remediation is blank', async () => {
+    mount(withFinding({ remediation: '', remediation_grounded_in: '' }))
+    const user = userEvent.setup()
+
+    await user.click(
+      await screen.findByRole('button', { name: /sec_encryption_at_rest/i }),
+    )
+
+    expect(screen.queryByTestId('grounding-sec_encryption_at_rest')).not.toBeInTheDocument()
+    expect(screen.queryByText(/grounded in the source/i)).not.toBeInTheDocument()
+  })
+
+  it('puts no grounding language on a passed check or on evidence', async () => {
+    // Scoped strictly to remediation_grounded_in. A tick beside evidence would
+    // claim a check that does not exist for that field.
+    mount(resultFixture())
+    const user = userEvent.setup()
+
+    await user.click(
+      await screen.findByRole('button', { name: /show 1 passing \/ not-applicable/i }),
+    )
+    await user.click(screen.getByRole('button', { name: /passing and not applicable/i }))
+    await user.click(screen.getByRole('button', { name: /gov_audit_trail/i }))
+
+    expect(screen.queryByText(/grounded in the source/i)).not.toBeInTheDocument()
   })
 })

@@ -94,15 +94,28 @@ prior review.
 
 ### Results page
 
-Five sections, in this order. The order is the point: what it means, how it
-scored, what to do, the record, then advice.
+Four sections, in this order. The order is the point: what it means, how it
+scored, what to do about it, then advice.
 
 1. **Executive summary** — short prose, no bullets.
 2. **Assessment · pillar maturity** — bulleted assessment, a "Fix these first"
    callout, then the WAF-6 and TRUST-7 heatmaps. Each pillar card explains its
    score from evidence already stored — no extra model call.
-3. **Action roadmap** — the single prioritized action view, numbered within
-   Immediate / Short-term / Structural. Phases come from `remediation_effort`.
-4. **Detailed findings** — the full audit trail, all statuses.
-5. **For your stated use case** — rendered only when context was submitted and a
+3. **Detailed findings** — the action list AND the record, in one section.
+   Open findings grouped by severity, worst first, **expanded by default**; each
+   carries its effort phase as a per-item tag. Passed and not-applicable checks
+   stay behind their own collapsed toggle.
+4. **For your stated use case** — rendered only when context was submitted and a
    recommendation could be grounded in a phrase it actually contains.
+
+There was a fifth, an "Action roadmap" grouped by effort phase. It held the same
+open findings as section 3 under a different heading, and a reader had to
+reconcile two lists to answer one question. Effort survives as a per-finding tag
+rather than a grouping axis. **Do not reintroduce a second list of open
+findings** — that mistake has now been made twice, first as a flat top-ten
+shortlist and then as the roadmap.
+
+Grounding: where a remediation has `remediation_grounded_in`, the quote is shown
+under it, monospace and quoted, labelled "Grounded in the source". That label is
+deliberately narrow — the quote was found in the design source; nothing checked
+whether the remediation is correct. Never word it as verified or accurate.

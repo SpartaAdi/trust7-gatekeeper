@@ -29,14 +29,11 @@ import type {
 } from '../types'
 import { disagreesWithPillar } from '../types'
 import {
-  PHASE_BLURB,
   PHASE_LABEL,
-  PHASE_ORDER,
   flattenActions,
   phaseFor,
   prioritizedActions,
   priorityFocus,
-  type Phase,
 } from './roadmap'
 
 interface Props {
@@ -273,10 +270,18 @@ export function ResultsView({
         </div>
       </section>
 
-      {/* (c) Action roadmap — the single prioritized action view. */}
-      <ActionRoadmap findings={result.findings} />
+      {/*
+        (c) Findings — the record AND the action list, which are now one section.
 
-      {/* (d) Detailed findings — the audit trail. */}
+        There were two: a roadmap grouped by effort phase, and this list grouped by
+        severity. They held the same open findings under two different headings, and
+        a reader had to reconcile them to answer one question. Effort survives as a
+        per-finding tag rather than as a grouping axis — see `FindingRow` — so
+        nothing the roadmap showed is gone, it just stopped being a second list.
+
+        "Fix these first" is unaffected by the merge: it lives under the assessment
+        above and always did, not inside the roadmap that was removed.
+      */}
       <FindingsList findings={result.findings} />
 
       {/* (e) Use-case notes — only when context was given and could be used. */}
@@ -586,169 +591,6 @@ function CopyShareLinkButton({ reviewId }: { reviewId: string }) {
             : ''}
       </span>
     </span>
-  )
-}
-
-/**
- * "Action roadmap" — the single prioritized action view.
- *
- * This replaces the pair it grew out of: a flat top-ten shortlist and a separate
- * three-phase plan, which listed the same work twice under two headings and left
- * the reader to reconcile them. One section now answers "what do I do", sequenced
- * Immediate -> Short-term -> Structural.
- *
- * Selection is `prioritizedActions`: `groupByPhase` for the phase, then one entry
- * per pillar within each phase, ordered by severity. The dedupe lives in the
- * presentation layer, NOT in `groupByPhase` — that function is mirrored in
- * `backend/roadmap.py` and pinned by `fixtures/roadmap_cases.json`, and it stays a
- * pure partition so the PDF keeps printing every open finding.
- *
- * Nothing is hidden by the dedupe: Detailed Findings below is the complete record.
- *
- * Grouping is `groupByPhase`, which is pure: no request, no new field, and the same
- * findings always land in the same phases. The rule is documented in `roadmap.ts`.
- *
- * Collapsed by default, one level rather than the findings list's two: the phase
- * counts are what a reader scans for, and the roadmap sits above the full findings
- * list which already offers per-finding disclosure.
- */
-function ActionRoadmap({ findings }: { findings: Finding[] }) {
-  const grouped = prioritizedActions(findings)
-  const total = PHASE_ORDER.reduce((sum, phase) => sum + grouped[phase].length, 0)
-  if (total === 0) return null
-
-  return (
-    <section className="mt-12" data-testid="roadmap">
-      <h3 className="t-eyebrow text-ink-muted">
-        Action roadmap
-        <span className="tnum font-normal normal-case tracking-normal text-ink-faint">
-          {' '}
-          · {total} prioritized {total === 1 ? 'action' : 'actions'}
-        </span>
-      </h3>
-      {/*
-        Says what the section is for in one line, so it is not mistaken for the
-        audit trail below. "Ordered by effort" names the actual grouping signal —
-        the phases come from `remediation_effort`, not from severity.
-      */}
-      <p className="t-caption mt-1.5 text-ink-faint">
-        Prioritized next actions, ordered by effort. Open findings only. Anything the
-        review returned no effort estimate for is grouped last, unscheduled, rather
-        than assumed cheap.
-      </p>
-
-      {PHASE_ORDER.map((phase) => (
-        <PhaseGroup key={phase} phase={phase} findings={grouped[phase]} />
-      ))}
-    </section>
-  )
-}
-
-/**
- * One collapsible phase. Same disclosure shape as `SeverityGroup`: a real button
- * carrying `aria-expanded`, the count inside the accessible name, and the shared
- * `Chevron` so every accordion on the page rotates alike.
- *
- * An empty phase still renders, greyed and not expandable. "Structural (0)" is a
- * result — it says there is no architecture work — whereas an absent heading leaves
- * the reader to wonder whether the phase was omitted or never considered.
- */
-function PhaseGroup({ phase, findings }: { phase: Phase; findings: Finding[] }) {
-  const [open, setOpen] = useState(false)
-  const empty = findings.length === 0
-
-  return (
-    <div className="mt-8" data-testid={`phase-${phase}`}>
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        disabled={empty}
-        className="group flex w-full items-baseline gap-2.5 py-1 text-left disabled:cursor-default"
-      >
-        <Chevron open={open} className={empty ? 'invisible' : ''} />
-        <h4 className={`t-heading ${empty ? 'text-ink-faint' : ''}`}>
-          {PHASE_LABEL[phase]}
-        </h4>
-        <span className="tnum t-caption text-ink-muted">({findings.length})</span>
-        <span className="t-caption hidden text-ink-faint sm:block">
-          {PHASE_BLURB[phase]}
-        </span>
-        <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
-      </button>
-
-      {open && !empty && (
-        <ol className="animate-enter mt-1 divide-y divide-hairline border-y border-hairline">
-          {findings.map((finding, index) => (
-            <li
-              key={`${finding.framework}-${finding.check_id}`}
-              className="flex items-start gap-4 py-3"
-            >
-              {/*
-                A visible ordinal, restarting at 1 in each phase. The rows were
-                already an <ol>, but with `list-style: none` the sequence existed
-                only in the markup — a reader scanning for "the first thing to do"
-                had nothing to anchor on, and the severity mark alone reads as a
-                bullet. Numbering per phase rather than continuously because the
-                phases are worked in sequence: item 1 of Short-term is the first
-                thing to do in that phase, not the twelfth thing overall.
-                `aria-hidden` because the <ol> already conveys position.
-              */}
-              <span
-                aria-hidden="true"
-                className="tnum t-body mt-px w-5 shrink-0 text-right font-semibold text-minfy-indigo"
-              >
-                {index + 1}
-              </span>
-              {/*
-                Not decorative here: unlike the findings list, the phase rows do not
-                state the severity in text, so the mark is the only place it appears
-                and needs its accessible name.
-              */}
-              <span className="mt-1.5 shrink-0">
-                <SeverityMark severity={finding.severity} />
-              </span>
-              <div className="min-w-0">
-                <p className="t-body font-medium">{finding.title}</p>
-                {/*
-                  Verbatim, like everywhere else tonight: `remediation` is the model's
-                  own imperative text and is rendered unmodified. A finding with none
-                  says so rather than having something invented for it.
-                */}
-                {finding.remediation ? (
-                  <StructuredText
-                    text={finding.remediation}
-                    className="t-body mt-1 max-w-prose text-pretty text-ink-muted"
-                  />
-                ) : (
-                  <p className="t-body mt-1 max-w-prose text-pretty text-ink-muted">
-                    No remediation text was generated for this check.
-                  </p>
-                )}
-                <p className="t-caption mt-1 text-ink-faint">
-                  {finding.pillar_id.replace(/_/g, ' ')}
-                  {finding.remediation_effort && (
-                    <>
-                      <span aria-hidden="true"> · </span>
-                      {finding.remediation_effort} effort
-                    </>
-                  )}
-                  {finding.affected_components.length > 0 && (
-                    <>
-                      <span aria-hidden="true"> · </span>
-                      {finding.affected_components.length}{' '}
-                      {finding.affected_components.length === 1
-                        ? 'component'
-                        : 'components'}
-                    </>
-                  )}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
   )
 }
 
@@ -1346,16 +1188,15 @@ function FindingsList({ findings }: { findings: Finding[] }) {
       </div>
 
       {/*
-        Says what this section is for, and what it is not. Without it a reader
-        arriving from the roadmap above sees a second list of the same gaps and
-        reasonably reads it as more work to do. The roadmap is the action list;
-        this is the record, and it repeats the remediation text for reference
-        rather than as a second set of instructions.
+        This paragraph used to exist to tell a reader that the identical-looking
+        list above was the action list and this one was only the record. There is no
+        list above any more, so the disclaimer goes with it — what is left says what
+        the grouping means and where effort went.
       */}
       <p className="t-caption mt-1.5 max-w-prose text-ink-faint">
-        Complete evaluation record, including passed and not-applicable checks.
-        Remediation is repeated here for reference — the Action roadmap above is
-        the prioritized list to work from.
+        Every open finding, grouped by severity — worst first. Each one carries the
+        effort it was estimated at. Passed and not-applicable checks are the
+        complete record and stay behind the toggle above.
       </p>
 
       {open.length === 0 ? (
@@ -1377,6 +1218,7 @@ function FindingsList({ findings }: { findings: Finding[] }) {
               heading={SEVERITY_HEADING[severity]}
               severity={severity}
               findings={group}
+              initiallyOpen
             />
           )
         })
@@ -1408,13 +1250,27 @@ function SeverityGroup({
   severity,
   findings,
   muted,
+  initiallyOpen = false,
 }: {
   heading: string
   severity?: Severity
   findings: Finding[]
   muted?: boolean
+  /**
+   * Open findings default to EXPANDED now that this is the only findings view.
+   *
+   * The closed default made sense while the roadmap sat above: this list was the
+   * record, the roadmap was the thing to act on, and opening the record by default
+   * put a wall of text between the reader and the actions. With the roadmap gone
+   * this IS the action list, and a primary view that opens closed asks the reader
+   * to click before they can see whether there is anything to do.
+   *
+   * The passing / not-applicable group keeps the closed default and its own toggle
+   * — it is the audit trail, and it is the half a reviewer is not scanning for.
+   */
+  initiallyOpen?: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(initiallyOpen)
 
   return (
     <div className="mt-8">
@@ -1504,6 +1360,22 @@ function FindingRow({ finding }: { finding: Finding }) {
             <span>{finding.pillar_id.replace(/_/g, ' ')}</span>
             <span aria-hidden="true">·</span>
             <span className="font-mono text-ink-faint">{finding.check_id}</span>
+            {/*
+              The effort phase, which used to be the roadmap's grouping axis and is
+              now a per-item detail. On the COLLAPSED row rather than inside the
+              expanded body: it is what the removed section let a reader scan for,
+              and a tag only visible after a click would not replace that.
+              Suppressed on passed and not-applicable checks — there is no work to
+              schedule, so a phase on one is noise.
+            */}
+            {!muted && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span data-testid={`effort-${finding.check_id}`}>
+                  {PHASE_LABEL[phaseFor(finding)]}
+                </span>
+              </>
+            )}
             {affected > 0 && (
               <>
                 <span aria-hidden="true">·</span>
@@ -1534,6 +1406,48 @@ function FindingRow({ finding }: { finding: Finding }) {
                 )}
               </p>
               <StructuredText text={finding.remediation} className="t-body mt-1.5" />
+
+              {/*
+                What the remediation was checked against, when it was checked.
+
+                Monospace and quoted, the same treatment `AiDetectionPanel` gives an
+                extracted excerpt, and for the same reason: this is the submitted
+                material, not our prose about it, and the difference should be
+                visible. It is the one part of the block a reviewer can verify
+                against their own document.
+
+                The label is deliberately narrow. `remediation_grounded_in` means
+                the model quoted a phrase and that phrase was found in the design
+                source — nothing was checked about whether the remediation is
+                correct, appropriate, or complete. "Grounded in the source" says
+                exactly that much. Anything reading as "verified" would claim a
+                check nobody ran, on the most actionable text in the review.
+
+                Absent when empty, with no tick and no placeholder. Per Segment 7 an
+                ungrounded remediation is blanked entirely, so an empty quote beside
+                real remediation text should not occur — and if it ever does, the
+                honest render is silence rather than a tick or an accusation.
+              */}
+              {finding.remediation_grounded_in && (
+                <div
+                  className="mt-3 border-t border-hairline pt-2.5"
+                  data-testid={`grounding-${finding.check_id}`}
+                >
+                  <p className="t-caption flex items-center gap-1.5 text-ink-muted">
+                    <svg
+                      viewBox="0 0 16 16"
+                      aria-hidden="true"
+                      className="size-3.5 shrink-0 fill-verdict-pass"
+                    >
+                      <path d="M6.9 11.4 L2.8 7.3 L3.9 6.2 L6.9 9.2 L12.1 4 L13.2 5.1 Z" />
+                    </svg>
+                    Grounded in the source
+                  </p>
+                  <p className="t-caption mt-1 break-words font-mono text-ink-muted">
+                    “{finding.remediation_grounded_in}”
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
