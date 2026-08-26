@@ -562,6 +562,47 @@ def test_prioritize_asks_for_more_than_the_ceiling_that_killed_a_review() -> Non
     assert prioritize_tokens <= config.OPENROUTER_ROUTING_SAFE_COMPLETION_TOKENS
 
 
+def test_classify_asks_for_more_than_the_ceiling_that_truncated_a_real_review() -> None:
+    """16000 on classify failed a real review once it could see an embedded diagram.
+
+    On the real RMBL SoW, ingest found 29 components in the page-8 diagram plus
+    24,215 characters of document text, and classify hit 16000 before closing its
+    JSON. The pipeline stopped at t+235.3s having never reached evaluate.
+
+    The number was not wrong for the reason it looks. Measured, classify's JSON is
+    ~900 output tokens for 9 components, ~4,100 for 29 with rich attributes and
+    ~6,600 for 60 — it fits at every size, so the OUTPUT never overran. Reasoning
+    did, drawn from the same budget on OpenRouter, because Segment 3 gave this stage
+    a SECOND description of one design to reconcile against the first. That is the
+    same reasoning-heavy, output-light shape that forced prioritize's raise.
+
+    Asserted as a floor rather than an equality: 64000 is a legitimate next step if
+    it recurs. What must never happen is a return to a value already observed to
+    fail on a real file.
+    """
+    import re
+
+    backend = pathlib.Path(__file__).resolve().parent.parent
+    source = (backend / "agent" / "stages.py").read_text()
+
+    # Identified by the call site's own body, so this cannot pass by reading some
+    # other stage's ceiling. `_classify_once` takes its label as a parameter, so
+    # there is no literal label string to anchor on the way prioritize has.
+    block = source[source.index("def _classify_once("):]
+    block = block[: block.index("def design_has_content(")]
+    asked = [int(n) for n in re.findall(r"max_tokens=(\d+),", block)]
+    assert asked, "no max_tokens found inside _classify_once — has it moved?"
+    classify_tokens = asked[-1]
+
+    assert classify_tokens > 16000, (
+        f"classify requests {classify_tokens}; 16000 truncated on the real RMBL SoW "
+        f"and failed the whole review before evaluate ran"
+    )
+    # And it must still clear both ceilings, or the raise is silently clamped away.
+    assert classify_tokens <= config.OPENROUTER_MAX_COMPLETION_TOKENS
+    assert classify_tokens <= config.OPENROUTER_ROUTING_SAFE_COMPLETION_TOKENS
+
+
 def test_no_stage_requests_more_than_the_routing_safe_ceiling() -> None:
     """The guard the ceiling used to provide implicitly.
 

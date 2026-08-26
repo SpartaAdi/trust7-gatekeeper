@@ -150,7 +150,38 @@ def _classify_once(
         # (batching, quantized kernels and MoE routing all leave a served response
         # non-reproducible at temperature 0). This closes the input side of it.
         temperature=llm.GREEDY_TEMPERATURE,
-        max_tokens=16000,
+        # Raised from 16000, which killed a real review once this stage could see a
+        # diagram embedded in the document. On the real RMBL SoW, ingest found 29
+        # components in the page-8 diagram plus 24,215 characters of document text,
+        # and classify hit the 16000 ceiling before closing its JSON. The pipeline
+        # stopped at t+235.3s having never reached evaluate.
+        #
+        # 16000 was chosen when this stage saw ONE source. Its stated exposure was
+        # "thin at ~60 components, largest real design seen was 9" — an output-size
+        # argument, and Segment 3 did not break it: measured, the JSON here is ~900
+        # output tokens for 9 components, ~4,100 for 29 with rich attributes, ~6,600
+        # for 60. The answer fits with room to spare at every size. So the output is
+        # NOT what overran.
+        #
+        # Reasoning is, and it is drawn from this same budget on OpenRouter — the
+        # thing prioritize's own raise had to learn. What changed is not how much
+        # classify writes but how hard it thinks: it now receives TWO descriptions of
+        # one design and its prompt asks it to consolidate them, keeping both sides
+        # of any disagreement and recording the discrepancy. That is a reconciliation
+        # across 29 structured components and everything the prose describes —
+        # roughly the same quadratic-ish shape as prioritize's total ordering, and
+        # for the same reason it overruns a ceiling while producing small output.
+        # 16000 left ~11,900 tokens for that and it was not enough.
+        #
+        # 32000, matching prioritize and remediate, is the smallest raise the
+        # evidence supports: it leaves ~27,900 for reasoning at 29 components, 2.3x
+        # the headroom that failed. Deliberately not 64000 — that is evaluate's
+        # figure, and both stay under OPENROUTER_ROUTING_SAFE_COMPLETION_TOKENS so
+        # routing breadth is unchanged.
+        #
+        # Raising a ceiling is not a spend: billing is on tokens generated, and
+        # OPENROUTER_TIMEOUT_SECONDS remains the real bound on a runaway call.
+        max_tokens=32000,
         label=label,
     )
 
