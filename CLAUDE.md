@@ -15,6 +15,20 @@ solution documents + architecture diagrams) against two frameworks:
 The rubric must stay **GENERAL** to both frameworks' principles — never
 hard-coded to any single example design or client.
 
+### How the counts may be described
+
+45 checks: **26 WAF, 19 TRUST-7**. Read from `rubric/rubric.json`, not asserted.
+
+- The 26 map to AWS's own Well-Architected questions — the ones a design-time
+  document review can answer. The rest of AWS's 57 need observed runtime
+  behaviour (real latency, incident history, live cost data). Describe that as
+  what the 26 *are*, never as the rule they were *selected by*.
+- The 19 operationalize EGIRA's seven qualitative maturity pillars into
+  auditable design-time questions. Minfy's published TRUST-7 model defines five
+  maturity levels per pillar, **not** a discrete checklist — so there is no
+  official TRUST-7 count to match or fall short of. Never write copy implying
+  either.
+
 ## Constraints
 
 Do not deviate from these without asking.

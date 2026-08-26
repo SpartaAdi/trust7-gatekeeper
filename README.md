@@ -8,6 +8,35 @@ plus architecture diagrams — against two frameworks:
 - **Minfy TRUST-7** — Trust foundations, Risk & resilience, Unit economics,
   Sovereignty & supply chain, Talent & adoption, Sustainability, AI governance.
 
+### What the 45 checks are, and are not
+
+**AWS Well-Architected — 26 checks.** These map to AWS's own Well-Architected
+questions: the ones a design-time document review can actually answer. The
+remainder of AWS's 57 turn on observed runtime behaviour — real latency, real
+incident history, live cost data — which a solution document and an architecture
+diagram cannot supply, whatever the model is asked. That is a description of what
+the 26 turned out to be, not the rule they were selected by.
+
+**Minfy TRUST-7 — 19 checks.** These operationalize EGIRA's seven qualitative
+maturity pillars into auditable, design-time questions. Minfy's own published
+TRUST-7 model defines five maturity levels per pillar rather than a discrete
+checklist, so **there is no official TRUST-7 check count to measure against** —
+19 is this tool's rendering of the model, not a subset of anything, and not a
+shortfall against anything.
+
+The per-pillar split, read from `rubric/rubric.json`:
+
+| AWS WAF | | TRUST-7 | |
+| --- | ---: | --- | ---: |
+| Operational Excellence | 4 | Trust foundations | 4 |
+| Security | 7 | Risk & resilience | 3 |
+| Reliability | 4 | Unit economics | 3 |
+| Performance Efficiency | 4 | Sovereignty & supply chain | 3 |
+| Cost Optimization | 4 | Talent & adoption | 2 |
+| Sustainability | 3 | Sustainability (AI-specific) | 1 |
+| | | AI governance | 3 |
+| **26** | | **19** | |
+
 The rubric stays general to both frameworks' principles; it is not tuned to any
 single example design or client. Revised designs can be re-reviewed, and the
 result shows a score delta against the prior review. Past reviews are listed on

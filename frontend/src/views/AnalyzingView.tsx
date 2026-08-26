@@ -208,8 +208,17 @@ export function AnalyzingView({
             'The pipeline failed at the stage marked below. Nothing was scored.'
           ) : (
             <>
-              Reviewing against all 45 checks. This usually takes a few minutes —
-              the steps below update as each one finishes.
+              {/*
+                "all 45 rubric checks", not "all 45 checks". 45 is correct and is
+                every check this rubric holds — but without the qualifier the
+                sentence reads as every check the two frameworks hold, which is a
+                claim the tool does not make and cannot support. AWS's own
+                Well-Architected set is larger, and TRUST-7 is a maturity model
+                with no discrete check count at all. See README's "What the 45
+                checks are, and are not".
+              */}
+              Reviewing against all 45 rubric checks. This usually takes a few
+              minutes — the steps below update as each one finishes.
             </>
           )}
         </p>

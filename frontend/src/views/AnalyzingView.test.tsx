@@ -814,4 +814,19 @@ describe('AnalyzingView — duration expectation', () => {
     expect(counter).not.toHaveAttribute('aria-live')
     expect(screen.getByTestId('elapsed')).toHaveAttribute('aria-live', 'polite')
   })
+
+  it('does not claim to review every check the frameworks contain', () => {
+    // 45 is correct and is every check in THIS rubric. Unqualified, though,
+    // "all 45 checks" reads as every check the two frameworks hold — a claim the
+    // tool cannot support. AWS's Well-Architected set is larger, and TRUST-7 is a
+    // maturity model with no discrete check count at all.
+    getStatus.mockResolvedValue(statusFixture())
+
+    render(
+      <AnalyzingView reviewId="rev-1" startedAt={START} onComplete={vi.fn()} onStartOver={vi.fn()} />,
+    )
+
+    expect(screen.getByText(/45 rubric checks/)).toBeInTheDocument()
+    expect(screen.queryByText(/all 45 checks\b/)).not.toBeInTheDocument()
+  })
 })
