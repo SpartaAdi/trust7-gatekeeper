@@ -1654,3 +1654,57 @@ describe('ResultsView — merged findings view', () => {
     expect(screen.queryByText(/grounded in the source/i)).not.toBeInTheDocument()
   })
 })
+
+describe('ResultsView — open questions entry point', () => {
+  const mount = (result: ReviewResult) => {
+    getReview.mockResolvedValue(result)
+    render(<ResultsView
+        reviewId="rev-1"
+        onReReview={vi.fn()} onFollowUpStarted={vi.fn()} onOpenVersion={vi.fn()}
+        onStartOver={vi.fn()}
+        onBackToHistory={vi.fn()}
+      />)
+  }
+
+  it('is a banner with a real button, not an underlined text link', async () => {
+    // As a link it sat in the same register as every other caption on a dense
+    // page and was missed. A reviewer who never finds it cannot tell the review
+    // what it could not see, and those findings stay open through every round.
+    mount(resultFixture())
+
+    const launcher = await screen.findByTestId('open-questions-launcher')
+    expect(screen.getByTestId('open-questions-banner')).toBeInTheDocument()
+    expect(launcher.className).not.toMatch(/underline/)
+    expect(launcher.className).toMatch(/bg-minfy-indigo/)
+  })
+
+  it('says what it is for, not just what it does', async () => {
+    mount(resultFixture())
+
+    const banner = await screen.findByTestId('open-questions-banner')
+    expect(banner).toHaveTextContent(/could not see/i)
+    expect(banner).toHaveTextContent(/incident practice, cost governance/i)
+  })
+
+  it('opens the panel and can be dismissed back to the review', async () => {
+    mount(resultFixture())
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByTestId('open-questions-launcher'))
+    expect(screen.getByTestId('open-questions')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /^close$/i }))
+    expect(screen.queryByTestId('open-questions')).not.toBeInTheDocument()
+  })
+
+  it('is absent when nothing is open — there is nothing to ask about', async () => {
+    mount(
+      resultFixture({
+        findings: resultFixture().findings.map((f) => ({ ...f, status: 'pass' as const })),
+      }),
+    )
+
+    await screen.findByRole('heading', { name: /payments platform/i })
+    expect(screen.queryByTestId('open-questions-banner')).not.toBeInTheDocument()
+  })
+})

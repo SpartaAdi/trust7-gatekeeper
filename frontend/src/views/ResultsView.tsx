@@ -192,17 +192,35 @@ export function ResultsView({
         the design is wrong. Rendered only when something is actually open.
       */}
       {open.length > 0 && (
-        <div className="mt-3">
+        // A banner with a real button, not an underlined text link. As a link it
+        // sat in the same visual register as every other caption on a dense page
+        // and was reliably missed — which for this one matters more than for most,
+        // because a reviewer who never finds it has no way to tell the review the
+        // things it could not see, and the findings it would have answered stay
+        // open through every subsequent round.
+        <section
+          className="mt-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-l-2 border-minfy-indigo bg-pastel-sky px-5 py-4"
+          data-testid="open-questions-banner"
+        >
+          <div className="min-w-0">
+            <p className="t-heading">
+              {open.length} {open.length === 1 ? 'finding needs' : 'findings need'}{' '}
+              something this review could not see
+            </p>
+            <p className="t-caption mt-1 max-w-prose text-ink-muted">
+              Incident practice, cost governance, model ownership — a document and a
+              diagram cannot evidence them. Answer what you can and re-review.
+            </p>
+          </div>
           <button
             type="button"
             onClick={() => setQuestionsOpen(true)}
             data-testid="open-questions-launcher"
-            className="t-caption text-minfy-indigo underline underline-offset-2 hover:text-minfy-blue"
+            className="t-body shrink-0 bg-minfy-indigo px-4 py-2.5 text-white transition-colors hover:bg-minfy-blue"
           >
-            Answer {open.length} open {open.length === 1 ? 'question' : 'questions'}
-            {' '}this review could not
+            Answer open questions
           </button>
-        </div>
+        </section>
       )}
 
       {questionsOpen && (
