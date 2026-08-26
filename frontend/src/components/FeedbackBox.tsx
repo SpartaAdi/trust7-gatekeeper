@@ -39,7 +39,7 @@ import { DropZone, type StagedFile } from './DropZone'
  * Exported so `OpenQuestions` measures against the SAME number rather than keeping
  * a second copy — two mirrors of one server constant is one of them going stale.
  */
-export const MAX_FEEDBACK_CHARS = 4000
+export const MAX_FEEDBACK_CHARS = 16000
 
 export function FeedbackBox({
   reviewId,
@@ -259,7 +259,7 @@ export function FeedbackBox({
           aria-live="polite"
           data-testid="feedback-dictation-status"
         >
-          {listening ? 'Listening — speak, then press stop when you are done.' : ''}
+          {listening ? 'Please speak now.' : ''}
         </p>
         <p className="t-caption tnum ml-auto text-ink-muted">{remaining} characters left.</p>
       </div>

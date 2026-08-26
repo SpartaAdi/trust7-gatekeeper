@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { FeedbackBox } from './FeedbackBox'
+import { FeedbackBox, MAX_FEEDBACK_CHARS } from './FeedbackBox'
 
 /**
  * The follow-up box: two inputs and a POST.
@@ -133,9 +133,12 @@ describe('FeedbackBox — the required text', () => {
   it('counts down the remaining characters against the server cap', async () => {
     const user = userEvent.setup()
     mount()
-    expect(box()).toHaveTextContent('4000 characters left.')
+    // Derived from the constant, not written out: this counted 4000 until the
+    // Open Questions view needed the cap raised, and a hardcoded pair of numbers
+    // is two more things to remember on the next raise.
+    expect(box()).toHaveTextContent(`${MAX_FEEDBACK_CHARS} characters left.`)
     await user.type(field(), 'abcde')
-    expect(box()).toHaveTextContent('3995 characters left.')
+    expect(box()).toHaveTextContent(`${MAX_FEEDBACK_CHARS - 5} characters left.`)
   })
 })
 
@@ -204,7 +207,8 @@ describe('FeedbackBox — dictation', () => {
       'aria-pressed',
       'true',
     )
-    expect(box()).toHaveTextContent(/Listening/)
+    // Matches UploadView's mic, which has said this since 972817f.
+    expect(box()).toHaveTextContent('Please speak now.')
 
     await user.click(screen.getByRole('button', { name: /Stop dictating/i }))
     await waitFor(() =>

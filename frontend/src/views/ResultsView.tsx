@@ -1268,7 +1268,6 @@ function FindingsList({ findings }: { findings: Finding[] }) {
               heading={SEVERITY_HEADING[severity]}
               severity={severity}
               findings={group}
-              initiallyOpen
             />
           )
         })
@@ -1300,27 +1299,13 @@ function SeverityGroup({
   severity,
   findings,
   muted,
-  initiallyOpen = false,
 }: {
   heading: string
   severity?: Severity
   findings: Finding[]
   muted?: boolean
-  /**
-   * Open findings default to EXPANDED now that this is the only findings view.
-   *
-   * The closed default made sense while the roadmap sat above: this list was the
-   * record, the roadmap was the thing to act on, and opening the record by default
-   * put a wall of text between the reader and the actions. With the roadmap gone
-   * this IS the action list, and a primary view that opens closed asks the reader
-   * to click before they can see whether there is anything to do.
-   *
-   * The passing / not-applicable group keeps the closed default and its own toggle
-   * — it is the audit trail, and it is the half a reviewer is not scanning for.
-   */
-  initiallyOpen?: boolean
 }) {
-  const [open, setOpen] = useState(initiallyOpen)
+  const [open, setOpen] = useState(false)
 
   return (
     <div className="mt-8">

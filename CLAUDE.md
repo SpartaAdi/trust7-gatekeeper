@@ -51,8 +51,15 @@ Do not deviate from these without asking.
 
 ### Storage
 
-- Local filesystem: JSON and uploaded files under `./local-data/`, persisted on
-  Render's disk. No database, no object store, no cloud SDK.
+- Local filesystem: JSON and uploaded files under `./local-data/`. No database,
+  no object store, no cloud SDK.
+- **It is EPHEMERAL, not persisted.** Render's own docs: "Free web services cannot
+  attach a persistent disk", and "any changes to your web service's filesystem are
+  lost every time the service redeploys, restarts, or spins down" — which a free
+  instance does after 15 minutes without traffic. Reviews written before a
+  spin-down are gone, and a mid-run restart 404s the review being polled. Do not
+  build anything that assumes a review survives, and do not describe this storage
+  as durable.
 
 ### Architecture pattern
 
@@ -60,20 +67,31 @@ Do not deviate from these without asking.
 ingest -> normalize -> multi-stage agent pipeline -> structured JSON -> dashboard UI
 ```
 
-Agent pipeline stages:
+Agent pipeline stages, as named in `schema.STAGES`:
 
-1. classify components
-2. evaluate against rubric
-3. prioritize findings
-4. generate remediation
+1. **screen** — the relevance gate. One small call, before the expensive stages,
+   deciding whether this is a solution design at all.
+2. **classify** components
+3. **evaluate** against rubric — TWO calls, one per framework
+4. **prioritize** findings
+5. **remediate** — generates guidance AND the executive summary
+
+Six model calls on a first-pass review, plus one vision call when a diagram is
+read. Each of classify and remediate can add one bounded retry.
 
 ### Diagram input
 
-Two input paths that must converge on **ONE common schema**:
+Three input paths that must converge on **ONE common schema**:
 
 - **draw.io XML** — parsed deterministically, no LLM call.
 - **Image uploads** — parsed via the configured vision model (currently
   `moonshotai/kimi-k2.6` through OpenRouter, not Claude).
+- **A diagram embedded inside a PDF** — only when a document is given and a
+  diagram is NOT. `ingestion/embedded.py` picks at most one image by pixel area
+  plus a diagram keyword on its own page, then sends it down the SAME
+  `parse_diagram` path as an uploaded image, so it arrives as
+  `DiagramSource.IMAGE` and every consumer needs no new code. An explicit diagram
+  upload always wins; this never overrides or merges.
 
 ### Re-review loop
 
@@ -102,11 +120,15 @@ scored, what to do about it, then advice.
    callout, then the WAF-6 and TRUST-7 heatmaps. Each pillar card explains its
    score from evidence already stored — no extra model call.
 3. **Detailed findings** — the action list AND the record, in one section.
-   Open findings grouped by severity, worst first, **expanded by default**; each
-   carries its effort phase as a per-item tag. Passed and not-applicable checks
-   stay behind their own collapsed toggle.
+   Open findings grouped by severity, worst first; each carries its effort phase
+   as a per-item tag. Passed and not-applicable checks stay behind their own
+   collapsed toggle.
 4. **For your stated use case** — rendered only when context was submitted and a
    recommendation could be grounded in a phrase it actually contains.
+
+Open findings each start **collapsed** behind their severity heading, as does the
+passing / not-applicable group. A full review is 45 checks and an expanded page
+opens on a wall of text.
 
 There was a fifth, an "Action roadmap" grouped by effort phase. It held the same
 open findings as section 3 under a different heading, and a reader had to
@@ -119,3 +141,17 @@ Grounding: where a remediation has `remediation_grounded_in`, the quote is shown
 under it, monospace and quoted, labelled "Grounded in the source". That label is
 deliberately narrow — the quote was found in the design source; nothing checked
 whether the remediation is correct. Never word it as verified or accurate.
+
+### Open Questions
+
+A dismissible panel over the results page, not a route — `App.tsx`'s four phases
+feed the step tracker and this is a task performed ON a finished review, not a
+fifth step. It lists every open finding from BOTH frameworks grouped by pillar,
+takes one optional typed or dictated answer each plus a general note, collates
+them into an editable block, and submits it through the EXISTING re-review
+endpoint as ordinary feedback. Resolved findings vanish by falling out of the
+open filter — there is no answered-flag to keep in sync.
+
+`MAX_FEEDBACK_CHARS` is **16000**, raised from 4000 for this: each collated entry
+costs ~135 characters of scaffolding before the answer, and 43 answers overran
+4000 by 10,396. The view refuses to submit over the cap rather than truncating.

@@ -45,9 +45,8 @@ describe('ResultsView', () => {
 
     // The findings list itself, not the "Fix these first" callout above it —
     // both draw on the same finding, so this query is scoped to the group.
-    // No click: open findings are expanded on arrival now, and clicking would
-    // shut the group rather than open it.
     const group = screen.getByRole('button', { name: /^high severity/i })
+    await userEvent.click(group)
     const list = group.parentElement!
     expect(list).toHaveTextContent(/customer data store has no encryption at rest/i)
 
@@ -165,8 +164,7 @@ describe('ResultsView', () => {
 
     const user = userEvent.setup()
     await screen.findByTestId('detailed-findings')
-    // The severity group is already open; only the finding itself still needs a
-    // click to reveal its remediation.
+    await user.click(screen.getByRole('button', { name: /^high severity/i }))
     await user.click(screen.getByRole('button', { name: /sec_encryption_at_rest/i }))
 
     expect(screen.getByTestId('detailed-findings')).toHaveTextContent(
@@ -199,7 +197,7 @@ describe('ResultsView', () => {
 
 
   describe('findings accordion', () => {
-    it('starts open findings expanded, now that this is the only action view', async () => {
+    it('starts every severity group collapsed', async () => {
       getReview.mockResolvedValue(resultFixture())
 
       render(<ResultsView
@@ -210,16 +208,14 @@ describe('ResultsView', () => {
         />)
 
       const group = await screen.findByRole('button', { name: /^high severity/i })
-      // Expanded, deliberately. The closed default was right while the roadmap sat
-      // above and this list was only the record; with the roadmap gone, a primary
-      // action view that opens shut asks for a click before the reader can see
-      // whether there is anything to do at all.
-      expect(group).toHaveAttribute('aria-expanded', 'true')
-      // The count stays on the header either way.
+      // Closed. A full review is 45 checks: expanded, the page opens on a wall of
+      // text and the count in the header is what a reviewer actually came for.
+      expect(group).toHaveAttribute('aria-expanded', 'false')
       expect(group).toHaveTextContent('(1)')
-      // The finding row is present without a click — collapsed to its summary.
-      const row = screen.getByRole('button', { name: /sec_encryption_at_rest/i })
-      expect(row).toHaveAttribute('aria-expanded', 'false')
+      // No finding row exists yet, so nothing inside can be read or tabbed to.
+      expect(
+        screen.queryByRole('button', { name: /sec_encryption_at_rest/i }),
+      ).not.toBeInTheDocument()
     })
 
     it('keeps the passing / not-applicable group closed behind its own toggle', async () => {
@@ -257,10 +253,10 @@ describe('ResultsView', () => {
           onBackToHistory={vi.fn()}
         />)
 
-      await screen.findByRole('button', { name: /^high severity/i })
+      await user.click(await screen.findByRole('button', { name: /^high severity/i }))
 
-      // Level one is open on arrival: the finding is present, but only as a
-      // summary row — its title, its status, and how much it touches.
+      // Level one open: the finding is present, but only as a summary row —
+      // its title, its status, and how much it touches.
       const row = screen.getByRole('button', { name: /sec_encryption_at_rest/i })
       expect(row).toHaveAttribute('aria-expanded', 'false')
       expect(row).toHaveTextContent('1 component')
@@ -286,17 +282,15 @@ describe('ResultsView', () => {
         />)
 
       const group = await screen.findByRole('button', { name: /^high severity/i })
-      // Open on arrival now, so the first click SHUTS it and the second reopens.
-      // The affordance still has to work in both directions.
-      await user.click(group)
-      expect(
-        screen.queryByRole('button', { name: /sec_encryption_at_rest/i }),
-      ).not.toBeInTheDocument()
-
       await user.click(group)
       expect(
         screen.getByRole('button', { name: /sec_encryption_at_rest/i }),
       ).toBeInTheDocument()
+
+      await user.click(group)
+      expect(
+        screen.queryByRole('button', { name: /sec_encryption_at_rest/i }),
+      ).not.toBeInTheDocument()
     })
   })
 
@@ -865,8 +859,7 @@ describe('ResultsView — structured copy', () => {
       />)
 
     await screen.findByTestId('detailed-findings')
-    // The severity group is open on arrival; the finding still needs a click to
-    // reveal its remediation.
+    await user.click(screen.getByRole('button', { name: /^high severity/i }))
     await user.click(screen.getByRole('button', { name: /sec_encryption_at_rest/i }))
 
     const findings = screen.getByTestId('detailed-findings')
@@ -967,8 +960,11 @@ describe('ResultsView — priority focus callout', () => {
 
     const focus = await screen.findByTestId('priority-focus')
     // Checked against the findings list rather than the removed roadmap. The
-    // severity groups are expanded on arrival, so every open finding's title is
-    // already in the DOM without a click.
+    // groups are collapsed, so open them first.
+    const user = userEvent.setup()
+    for (const group of screen.getAllByRole('button', { name: /severity \(\d+\)/i })) {
+      await user.click(group)
+    }
     const findings = screen.getByTestId('detailed-findings')
     // Whatever the callout names must also appear in the list below; it is a
     // curated surface of the same data, not a separate judgement.
@@ -1011,6 +1007,7 @@ describe('ResultsView — real findings from a live run', () => {
         onBackToHistory={vi.fn()}
       />)
     await screen.findByTestId('detailed-findings')
+    await user.click(screen.getByRole('button', { name: /^high severity/i }))
     await user.click(screen.getByRole('button', { name: /sec_encryption_transit/i }))
 
     const row = within(screen.getByTestId('detailed-findings')).getAllByRole(
@@ -1042,6 +1039,7 @@ describe('ResultsView — real findings from a live run', () => {
         onBackToHistory={vi.fn()}
       />)
     await screen.findByTestId('detailed-findings')
+    await user.click(screen.getByRole('button', { name: /^high severity/i }))
     await user.click(screen.getByRole('button', { name: /sec_encryption_transit/i }))
 
     expect(screen.getByTestId('detailed-findings').textContent).toContain('ALB->API')
@@ -1514,15 +1512,19 @@ describe('ResultsView — merged findings view', () => {
     // to stay on the COLLAPSED row — a tag only visible after expanding would not
     // replace what the removed section let a reader scan for.
     mount(withFinding({ remediation_effort: 'high' }))
+    const user = userEvent.setup()
 
-    const tag = await screen.findByTestId('effort-sec_encryption_at_rest')
+    await user.click(await screen.findByRole('button', { name: /^high severity/i }))
+    const tag = screen.getByTestId('effort-sec_encryption_at_rest')
     expect(tag).toHaveTextContent(/structural/i)
   })
 
   it('says "not estimated" rather than assuming an unestimated finding is cheap', async () => {
     mount(withFinding({ remediation_effort: '' }))
+    const user = userEvent.setup()
 
-    const tag = await screen.findByTestId('effort-sec_encryption_at_rest')
+    await user.click(await screen.findByRole('button', { name: /^high severity/i }))
+    const tag = screen.getByTestId('effort-sec_encryption_at_rest')
     expect(tag).toHaveTextContent(/not estimated/i)
   })
 
@@ -1552,9 +1554,8 @@ describe('ResultsView — merged findings view', () => {
     )
     const user = userEvent.setup()
 
-    await user.click(
-      await screen.findByRole('button', { name: /sec_encryption_at_rest/i }),
-    )
+    await user.click(await screen.findByRole('button', { name: /^high severity/i }))
+    await user.click(screen.getByRole('button', { name: /sec_encryption_at_rest/i }))
 
     const block = screen.getByTestId('grounding-sec_encryption_at_rest')
     expect(block).toHaveTextContent('Orders are stored in DynamoDB')
@@ -1574,9 +1575,8 @@ describe('ResultsView — merged findings view', () => {
     )
     const user = userEvent.setup()
 
-    await user.click(
-      await screen.findByRole('button', { name: /sec_encryption_at_rest/i }),
-    )
+    await user.click(await screen.findByRole('button', { name: /^high severity/i }))
+    await user.click(screen.getByRole('button', { name: /sec_encryption_at_rest/i }))
 
     const page = screen.getByTestId('detailed-findings').textContent ?? ''
     for (const overclaim of [/verified/i, /accurate/i, /correct\b/i, /confirmed/i, /validated/i]) {
@@ -1595,9 +1595,8 @@ describe('ResultsView — merged findings view', () => {
     )
     const user = userEvent.setup()
 
-    await user.click(
-      await screen.findByRole('button', { name: /sec_encryption_at_rest/i }),
-    )
+    await user.click(await screen.findByRole('button', { name: /^high severity/i }))
+    await user.click(screen.getByRole('button', { name: /sec_encryption_at_rest/i }))
 
     const quote = screen
       .getByTestId('grounding-sec_encryption_at_rest')
@@ -1618,9 +1617,8 @@ describe('ResultsView — merged findings view', () => {
     )
     const user = userEvent.setup()
 
-    await user.click(
-      await screen.findByRole('button', { name: /sec_encryption_at_rest/i }),
-    )
+    await user.click(await screen.findByRole('button', { name: /^high severity/i }))
+    await user.click(screen.getByRole('button', { name: /sec_encryption_at_rest/i }))
 
     expect(screen.getByTestId('detailed-findings')).toHaveTextContent(/enable sse-kms/i)
     expect(screen.queryByTestId('grounding-sec_encryption_at_rest')).not.toBeInTheDocument()
@@ -1631,9 +1629,8 @@ describe('ResultsView — merged findings view', () => {
     mount(withFinding({ remediation: '', remediation_grounded_in: '' }))
     const user = userEvent.setup()
 
-    await user.click(
-      await screen.findByRole('button', { name: /sec_encryption_at_rest/i }),
-    )
+    await user.click(await screen.findByRole('button', { name: /^high severity/i }))
+    await user.click(screen.getByRole('button', { name: /sec_encryption_at_rest/i }))
 
     expect(screen.queryByTestId('grounding-sec_encryption_at_rest')).not.toBeInTheDocument()
     expect(screen.queryByText(/grounded in the source/i)).not.toBeInTheDocument()

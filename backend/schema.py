@@ -69,11 +69,29 @@ MAX_CONTEXT_CHARS = 1000
 # correcting a review writes prose about several checks, quotes the design back,
 # and explains what was misread. 4000 characters is a page of that.
 #
+# Raised from 4000 when the Open Questions view made a re-review something a
+# reviewer ASSEMBLES rather than types. That view collates one entry per answered
+# finding, and each entry costs about 135 characters of scaffolding — the check's
+# own description plus its id — before the answer. Measured against the real
+# rubric: 10 answered findings fit in 4000 with room, 20 overran it by 2,548, and
+# 43 (a real diagram-only review's open count) overran by 10,396 at two sentences
+# an answer. The feature was unusable above about ten questions.
+#
+# 16000 clears the realistic worst case and not much more: 43 answers at ~200
+# characters each is 14,396, and 45 is 15,054. At 300 characters an answer, 43
+# overruns again. That is the honest bound — this is room for a couple of
+# sentences per finding, not for an essay on each.
+#
 # Still capped, and for the same two reasons the context field is: it rides in the
 # prompt of every evaluate call (twice — once per framework) plus remediate, so
 # cost scales with it; and it is submitter-typed text, which makes it the most
 # direct injection surface in the system. See `agent/untrusted.py`.
-MAX_FEEDBACK_CHARS = 4000
+#
+# The cost of the raise is small and one-directional: 12,000 more characters is
+# roughly 3,000 tokens across three prompts, about $0.006 a round at the list
+# ceiling in config.py. The injection surface does not change in KIND — it was
+# already fenced, and more fenced text is not a new class of risk.
+MAX_FEEDBACK_CHARS = 16000
 
 
 # --------------------------------------------------------------------------- #

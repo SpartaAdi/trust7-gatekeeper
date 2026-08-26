@@ -566,6 +566,37 @@ def _confidence_of(raw: dict[str, Any]) -> str:
     return value if value in _CONFIDENCE_VALUES else ""
 
 
+def normalized_check_id(raw: Any) -> str:
+    """A model-returned check_id, with a wrapping bracket pair stripped.
+
+    Both prompt renderers present a check as `- [sec_encryption_at_rest] ...` — the
+    rubric block for evaluate and `_render_findings` for prioritize and remediate.
+    The brackets are punctuation in a list, but a model copying an id back out of
+    that line reasonably copies what it sees, and every consumer here tests
+    membership by exact string.
+
+    That cost a real review. On a diagram-only run the remediate RETRY returned
+    bracketed ids for all 34 findings it was asked about; `_collect_remediations`
+    matched none of them, filed all 34 as "not an open finding we asked about", and
+    the reviewer was shown "No remediation text was generated for this check" for
+    every one. The answers existed and were thrown away one line before grounding
+    was ever consulted.
+
+    Applied at all three read sites rather than only the one observed to fail. The
+    risk is the model's inconsistency about a format WE chose to print, and nothing
+    makes evaluate or prioritize immune to what remediate demonstrably did.
+
+    Only a MATCHING pair is stripped, and only the outermost one. A genuinely
+    invented id is not rescued by this — `sec_encryption_at_res` stays wrong,
+    `[[nonsense]]` stays nonsense once — because the fix must not widen into
+    accepting ids the rubric does not hold.
+    """
+    text = str(raw).strip()
+    if len(text) >= 2 and text.startswith("[") and text.endswith("]"):
+        text = text[1:-1].strip()
+    return text
+
+
 def _to_findings(raw_findings: list[dict[str, Any]], framework_key: str) -> list[Finding]:
     """Map raw verdicts onto the rubric, dropping anything unrecognized."""
     by_id = rubric.checks_by_id()
@@ -573,7 +604,7 @@ def _to_findings(raw_findings: list[dict[str, Any]], framework_key: str) -> list
     findings: list[Finding] = []
 
     for raw in raw_findings:
-        check_id = raw.get("check_id", "")
+        check_id = normalized_check_id(raw.get("check_id", ""))
         check = by_id.get(check_id)
         if check is None or check.framework != framework_key or check_id in seen:
             # A hallucinated or duplicated check_id would corrupt the score;
@@ -832,7 +863,7 @@ def apply_ranking(
     accepted: list[tuple[int, str]] = []
     seen: set[str] = set()
     for item in ranking:
-        check_id = item.get("check_id", "")
+        check_id = normalized_check_id(item.get("check_id", ""))
         if check_id not in by_id or check_id in seen:
             continue
         seen.add(check_id)
@@ -1409,7 +1440,11 @@ def _ground_remediations(
     removed: list[str] = []
 
     for raw in payload.get("remediations", []) or []:
-        check_id = str(raw.get("check_id", "")).strip()
+        # Normalized for the same reason the collector is, and it MUST match the
+        # collector: `text` is keyed on normalized ids, so a bracketed id read raw
+        # here would miss every key, be taken for an entry someone else discarded,
+        # and leave a collected remediation with no quote recorded against it.
+        check_id = normalized_check_id(raw.get("check_id", ""))
         if check_id not in text:
             # Already discarded by `_collect_remediations` for a different reason —
             # not an open finding, or no text. Not this filter's business, and
@@ -1466,7 +1501,7 @@ def _collect_remediations(
     effort: dict[str, str] = {}
     discarded: list[str] = []
     for item in payload.get("remediations", []):
-        check_id = item.get("check_id", "")
+        check_id = normalized_check_id(item.get("check_id", ""))
         remediation = (item.get("remediation") or "").strip()
         if check_id in wanted and remediation:
             text[check_id] = remediation

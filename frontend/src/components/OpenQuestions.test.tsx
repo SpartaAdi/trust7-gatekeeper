@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Finding } from '../types'
+import { MAX_FEEDBACK_CHARS } from './FeedbackBox'
 import { OpenQuestions, buildSummary } from './OpenQuestions'
 
 const { reReview } = vi.hoisted(() => ({ reReview: vi.fn() }))
@@ -284,11 +285,11 @@ describe('OpenQuestions', () => {
   })
 
   // ------------------------------------------------------------------------- #
-  // The server's 4000-character cap
+  // The server's character cap
   // ------------------------------------------------------------------------- #
 
   it('refuses to submit an over-length block rather than truncating it', async () => {
-    // Silently cutting a governance submission at 4000 characters would send
+    // Silently cutting a governance submission at the cap would send
     // something the reviewer never wrote and never saw. The block is refused with
     // the overage named instead.
     const user = userEvent.setup()
@@ -304,9 +305,11 @@ describe('OpenQuestions', () => {
     await user.clear(draft)
     // Paste rather than type: 4,100 keystrokes is not a test, it is a timeout.
     await user.click(draft)
-    await user.paste('y'.repeat(4100))
+    await user.paste('y'.repeat(MAX_FEEDBACK_CHARS + 100))
 
-    expect(screen.getByTestId('budget')).toHaveTextContent(/over the 4000 limit/i)
+    expect(screen.getByTestId('budget')).toHaveTextContent(
+      new RegExp(`over the ${MAX_FEEDBACK_CHARS} limit`, 'i'),
+    )
     expect(screen.getByTestId('submit-re-review')).toBeDisabled()
     expect(reReview).not.toHaveBeenCalled()
   })
@@ -333,9 +336,11 @@ describe('OpenQuestions', () => {
       'An incident response process is defined for the workload.',
     )
     await user.click(field)
-    await user.paste('z'.repeat(4100))
+    await user.paste('z'.repeat(MAX_FEEDBACK_CHARS + 100))
 
-    expect(screen.getByTestId('pre-budget')).toHaveTextContent(/over the 4000/i)
+    expect(screen.getByTestId('pre-budget')).toHaveTextContent(
+      new RegExp(`over the ${MAX_FEEDBACK_CHARS}`, 'i'),
+    )
   })
 
   it('says so when the endpoint refuses, instead of failing silently', async () => {

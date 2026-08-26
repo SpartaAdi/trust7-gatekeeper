@@ -75,14 +75,24 @@ def test_a_usable_entry_is_kept_and_nothing_is_reported_discarded() -> None:
 
 
 def test_an_entry_for_a_check_we_did_not_ask_about_is_reported() -> None:
-    """The leading hypothesis for a TOTAL failure, and the thing that was invisible.
+    """This test named the hypothesis, and the hypothesis turned out to be right.
 
-    If the model answers well but names the checks in a form this does not accept —
-    `[sec_encryption_at_rest]` carrying the brackets `_render_findings` prints them
-    inside, say — then every entry is dropped, the count reads 0, and the retry
-    cannot help because there was nothing wrong with the answer.
+    It was written to say: if the model answers well but names the checks in a form
+    this does not accept — `[sec_encryption_at_rest]`, carrying the brackets
+    `_render_findings` prints them inside — then every entry is dropped, the count
+    reads 0, and the retry cannot help because there was nothing wrong with the
+    answer.
+
+    That is exactly what a real diagram-only run then did: the remediate retry came
+    back with bracketed ids for all 34 findings it was asked about and every one was
+    discarded. `stages.normalized_check_id` now strips a wrapping pair at all four
+    read sites, so the bracketed entry is COLLECTED and only the invented one is
+    discarded. See `tests/test_check_id_echo.py`.
+
+    Kept pointed at both cases rather than deleted: the discard path still has to
+    work, and the id that must still fail is the one that is genuinely wrong.
     """
-    _text, _effort, discarded = stages._collect_remediations(
+    text, _effort, discarded = stages._collect_remediations(
         {"remediations": [
             {"check_id": "[sec_encryption_at_rest]", "remediation": "Do it.",
              "effort": "low"},
@@ -90,8 +100,9 @@ def test_an_entry_for_a_check_we_did_not_ask_about_is_reported() -> None:
         ]},
         {"sec_encryption_at_rest"},
     )
-    assert len(discarded) == 2
-    assert "'[sec_encryption_at_rest]'" in discarded[0]
+    assert text == {"sec_encryption_at_rest": "Do it."}
+    assert len(discarded) == 1
+    assert "'sec_invented'" in discarded[0]
     assert "not an open finding" in discarded[0]
 
 
